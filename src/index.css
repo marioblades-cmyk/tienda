@@ -1,0 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #ffffff;
+    color: #1a1a1a;
+    @apply antialiased min-h-screen text-[16px];
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  :root {
+    --primary: #f5a800;
+    --primary-hover: #e09500;
+    --primary-text: #1a1a1a;
+    --secondary: #5bc8f5;
+    --secondary-hover: #29b6f0;
+    --text: #1a1a1a;
+    --muted: #888580;
+    --muted-2: #555250;
+    --border: #e2e0da;
+    --surface: #ffffff;
+    --danger: #eb5757;
+    --success: #27ae60;
+  }
+
+  h1 {
+    color: #1a1a1a;
+    font-family: 'Anton', sans-serif;
+    @apply tracking-wider uppercase;
+  }
+
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: #1a1a1a;
+    font-family: 'DM Sans', sans-serif;
+    @apply font-bold tracking-tight;
+  }
+}
+
+@layer components {
+  .card {
+    background-color: #ffffff;
+    border: 1px solid #e2e0da;
+    @apply rounded-lg shadow-sm overflow-hidden transition-all;
+  }
+
+  .font-display {
+    font-family: 'Anton', sans-serif !important;
+  }
+
+  .btn-primary {
+    background-color: #f5a800;
+    color: #1a1a1a;
+    @apply font-bold py-2 px-6 rounded transition-all active:scale-95 disabled:opacity-50 uppercase tracking-wide;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: #e09500;
+  }
+
+  .btn-secondary {
+    background-color: #5bc8f5;
+    color: #1a1a1a;
+    @apply font-bold py-2 px-6 rounded transition-all active:scale-95 disabled:opacity-50 uppercase tracking-wide;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background-color: #29b6f0;
+  }
+
+  .input-field {
+    width: 100%;
+    background-color: #ffffff;
+    border: 1px solid #e2e0da;
+    @apply p-3 rounded font-medium text-sm outline-none transition-all;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .input-field:focus {
+    border-color: #f5a800;
+    box-shadow: 0 0 0 1px #f5a800;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: #f2f1ee;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #e2e0da;
+  @apply rounded transition-colors;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #f5a800;
+}
+
+.glass {
+  background-color: #ffffff;
+  border: 1px solid #e2e0da;
+  @apply shadow-sm;
+}
