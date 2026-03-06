@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { readExcelRaw } from '../services/excelProcessor';
-import { Download, Upload, CheckCircle, Clock, AlertCircle, FileText } from 'lucide-react';
+import { Download, Upload, CheckCircle, Clock, AlertCircle, FileText, Trash2 } from 'lucide-react';
 import { translateError } from '../services/errorTranslations';
 import AdminConsolidatedView from './AdminConsolidatedView';
 
@@ -121,6 +121,24 @@ export default function SellerDashboard() {
         }
     };
 
+    const handleDeletePedido = async (pedidoId, tipo) => {
+        if (!window.confirm(`¿Estás seguro de que deseas eliminar tu pedido de tipo ${tipo.toUpperCase()}? Esta acción no se puede deshacer.`)) {
+            return;
+        }
+        setLoading(true);
+        try {
+            const { error } = await supabase.from('pedidos').delete().eq('id', pedidoId);
+            if (error) throw error;
+            alert(`Pedido de tipo ${tipo.toUpperCase()} eliminado correctamente.`);
+            fetchSemanaYPedidos();
+        } catch (err) {
+            console.error(err);
+            alert('Error al eliminar: ' + translateError(err));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const onDragOver = (e, tipo) => {
         e.preventDefault();
         setIsDragging(prev => ({ ...prev, [tipo]: true }));
@@ -184,7 +202,22 @@ export default function SellerDashboard() {
                                                     <span className="text-xs font-mono text-muted uppercase tracking-tighter block mb-1">TIPO: {tipo}</span>
                                                     <span className="text-xs font-bold">{pedido ? 'ENVIADO' : 'PENDIENTE'}</span>
                                                 </div>
-                                                {pedido ? <CheckCircle size={20} className="text-success" /> : <Clock size={20} className="text-muted" />}
+                                                <div className="flex items-center gap-3">
+                                                    {pedido ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleDeletePedido(pedido.id, tipo)}
+                                                                className="p-1.5 text-error/70 hover:text-error hover:bg-error/10 rounded-lg transition-colors"
+                                                                title={`Eliminar pedido ${tipo}`}
+                                                            >
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                            <CheckCircle size={20} className="text-success" />
+                                                        </>
+                                                    ) : (
+                                                        <Clock size={20} className="text-muted" />
+                                                    )}
+                                                </div>
                                             </div>
                                         );
                                     })}

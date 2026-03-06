@@ -75,14 +75,15 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     };
 
     // Process data for tables
-    const { summaryData, detailData, vendors, fileCards } = useMemo(() => {
+    const { summaryData, detailData, vendors, tiendaVendors, fileCards } = useMemo(() => {
         const vendorsSet = new Set();
+        const tiendaVendorsSet = new Set();
         const editorialSummary = {};
         const editorialDetails = {};
 
         // Initialize summary
         EDITORIALES.forEach(ed => {
-            editorialSummary[ed] = { vendors: {}, subtotal: 0, tienda: 0, dto: EDITORIAL_DTOS[ed] || 35, total: 0 };
+            editorialSummary[ed] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[ed] || 35, total: 0 };
         });
 
         items.forEach(item => {
@@ -91,13 +92,14 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             const editorial = item.editorial || 'Otras';
             const amount = (item.precio || 0) * (item.cantidad || 0);
 
-            if (!isTienda) vendorsSet.add(vName);
+            if (isTienda) tiendaVendorsSet.add(vName);
+            else vendorsSet.add(vName);
 
             // Aggregating for Summary Table
-            if (!editorialSummary[editorial]) editorialSummary[editorial] = { vendors: {}, subtotal: 0, tienda: 0, dto: 35, total: 0 };
+            if (!editorialSummary[editorial]) editorialSummary[editorial] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: 35, total: 0 };
 
             if (isTienda) {
-                editorialSummary[editorial].tienda += amount;
+                editorialSummary[editorial].tiendaVendors[vName] = (editorialSummary[editorial].tiendaVendors[vName] || 0) + amount;
             } else {
                 editorialSummary[editorial].vendors[vName] = (editorialSummary[editorial].vendors[vName] || 0) + amount;
             }
@@ -112,14 +114,14 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     ean: item.isbn_raw,
                     precio: item.precio,
                     vendorQty: {},
-                    tiendaQty: 0,
+                    tiendaQty: {},
                     totalQty: 0,
                     subtotal: 0
                 };
             }
 
             if (isTienda) {
-                editorialDetails[editorial][detailKey].tiendaQty += item.cantidad;
+                editorialDetails[editorial][detailKey].tiendaQty[vName] = (editorialDetails[editorial][detailKey].tiendaQty[vName] || 0) + item.cantidad;
             } else {
                 editorialDetails[editorial][detailKey].vendorQty[vName] = (editorialDetails[editorial][detailKey].vendorQty[vName] || 0) + item.cantidad;
             }
@@ -135,34 +137,43 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
         // Calculate figures for cards
         const fileCards = [];
-        // Extract vendors and their totals for cards
+        // Extract personal vendors for cards
         vendorsSet.forEach(v => {
             let vTotal = 0;
             let vItems = 0;
             items.forEach(item => {
                 if (item.pedido.vendedor_nombre === v && item.pedido.tipo !== 'tienda') {
-                    vTotal += (item.precio || 0) * (item.cantidad || 0);
+                    const amount = (item.precio || 0) * (item.cantidad || 0);
+                    const editorial = item.editorial || 'Otras';
+                    const dto = EDITORIAL_DTOS[editorial] || 35;
+                    vTotal += amount * (1 - (dto / 100));
                     vItems += item.cantidad || 0;
                 }
             });
-            fileCards.push({ name: v, total: vTotal, items: vItems, type: 'vendedor' });
+            fileCards.push({ name: v, total: Math.round(vTotal), items: vItems, type: 'vendedor' });
         });
 
-        // Add Tienda card
-        let tiendaTotal = 0;
-        let tiendaItems = 0;
-        items.forEach(item => {
-            if (item.pedido.tipo === 'tienda') {
-                tiendaTotal += (item.precio || 0) * (item.cantidad || 0);
-                tiendaItems += item.cantidad || 0;
-            }
+        // Extract tienda vendors for cards
+        tiendaVendorsSet.forEach(v => {
+            let tiendaTotal = 0;
+            let tiendaItems = 0;
+            items.forEach(item => {
+                if (item.pedido.vendedor_nombre === v && item.pedido.tipo === 'tienda') {
+                    const amount = (item.precio || 0) * (item.cantidad || 0);
+                    const editorial = item.editorial || 'Otras';
+                    const dto = EDITORIAL_DTOS[editorial] || 35;
+                    tiendaTotal += amount * (1 - (dto / 100));
+                    tiendaItems += item.cantidad || 0;
+                }
+            });
+            fileCards.push({ name: `TIENDA - ${v}`, total: Math.round(tiendaTotal), items: tiendaItems, type: 'tienda' });
         });
-        if (tiendaTotal > 0) fileCards.push({ name: 'PEDIDO TIENDA', total: tiendaTotal, items: tiendaItems, type: 'tienda' });
 
         return {
             summaryData: editorialSummary,
             detailData: editorialDetails,
             vendors: Array.from(vendorsSet).sort(),
+            tiendaVendors: Array.from(tiendaVendorsSet).sort(),
             fileCards
         };
     }, [items]);
@@ -171,29 +182,46 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         const wb = XLSX.utils.book_new();
 
         // Summary Sheet
-        const summaryRows = [['Editorial', ...vendors, 'TIENDA', 'Subtotal', 'Dto %', 'Total']];
+        const summaryRows = [['Editorial', ...vendors, ...tiendaVendors.map(v => `T. ${v}`), 'Subtotal', 'Dto %', 'Total']];
         EDITORIALES.forEach(ed => {
             const s = summaryData[ed];
             summaryRows.push([
                 ed,
                 ...vendors.map(v => s.vendors[v] || 0),
-                s.tienda,
+                ...tiendaVendors.map(v => s.tiendaVendors[v] || 0),
                 s.subtotal,
                 s.dto,
                 s.total
             ]);
         });
+
+        summaryRows.push([]); // Espacio antes del total
+
+        const totalFooterRow = ['TOTAL (C/ DTO)'];
+        vendors.forEach(v => {
+            totalFooterRow.push(EDITORIALES.reduce((sum, ed) => sum + ((summaryData[ed].vendors[v] || 0) * (1 - summaryData[ed].dto / 100)), 0));
+        });
+        tiendaVendors.forEach(v => {
+            totalFooterRow.push(EDITORIALES.reduce((sum, ed) => sum + ((summaryData[ed].tiendaVendors[v] || 0) * (1 - summaryData[ed].dto / 100)), 0));
+        });
+        totalFooterRow.push(EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].subtotal, 0));
+        totalFooterRow.push('');
+        totalFooterRow.push(EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].total, 0));
+
+        summaryRows.push(totalFooterRow);
+
         const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
         XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen Editorial');
 
         // Detail Sheet
-        const detailRows = [['Editorial', 'Título', 'EAN', 'Precio', ...vendors, 'TIENDA', 'Total Unidades', 'Subtotal $']];
+        const detailRows = [['Editorial', 'Título', 'EAN', 'Precio', ...vendors, ...tiendaVendors.map(v => `T. ${v}`), 'Total Unidades', 'Subtotal $']];
         Object.entries(detailData).forEach(([ed, products]) => {
             Object.values(products).forEach(p => {
                 detailRows.push([
                     ed, p.titulo, p.ean, p.precio,
                     ...vendors.map(v => p.vendorQty[v] || 0),
-                    p.tiendaQty, p.totalQty, p.subtotal
+                    ...tiendaVendors.map(v => p.tiendaQty[v] || 0),
+                    p.totalQty, p.subtotal
                 ]);
             });
         });
@@ -337,7 +365,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             <tr className="border-b border-border/40">
                                 <th className="p-4 font-bold text-muted w-1/4">EDITORIAL</th>
                                 {vendors.map(v => <th key={v} className="p-4 font-bold text-center">{v}</th>)}
-                                <th className="p-4 font-bold text-center text-secondary">TIENDA</th>
+                                {tiendaVendors.map(v => <th key={`t-${v}`} className="p-4 font-bold text-center text-secondary">T. {v}</th>)}
                                 <th className="p-4 font-bold text-center">SUBTOTAL</th>
                                 <th className="p-4 font-bold text-center text-muted/40">DTO %</th>
                                 <th className="p-4 font-bold text-center text-primary">TOTAL</th>
@@ -355,7 +383,11 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                                 {s.vendors[v] ? `$${s.vendors[v].toLocaleString()}` : '—'}
                                             </td>
                                         ))}
-                                        <td className="p-4 text-center text-secondary font-bold bg-secondary/5">${s.tienda.toLocaleString()}</td>
+                                        {tiendaVendors.map(v => (
+                                            <td key={`t-${v}`} className="p-4 text-center text-secondary font-bold bg-secondary/5">
+                                                {s.tiendaVendors[v] ? `$${s.tiendaVendors[v].toLocaleString()}` : '—'}
+                                            </td>
+                                        ))}
                                         <td className="p-4 text-center text-text font-semibold">${s.subtotal.toLocaleString()}</td>
                                         <td className="p-4 text-center text-muted/60">{s.dto}%</td>
                                         <td className="p-4 text-center font-bold text-primary bg-primary/5 border-l border-primary/10">${s.total.toLocaleString()}</td>
@@ -365,15 +397,24 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         </tbody>
                         <tfoot className="bg-text text-white">
                             <tr className="font-bold text-[13px]">
-                                <td className="p-6">TOTAL GENERAL</td>
+                                <td className="p-6">TOTAL (C/DTO) <span className="text-[10px] text-primary block mt-1">Neto a pagar</span></td>
                                 {vendors.map(v => {
-                                    const totalV = EDITORIALES.reduce((sum, ed) => sum + (summaryData[ed].vendors[v] || 0), 0);
-                                    return <td key={v} className="p-6 text-center">${totalV.toLocaleString()}</td>;
+                                    const totalV = EDITORIALES.reduce((sum, ed) => {
+                                        const gross = summaryData[ed].vendors[v] || 0;
+                                        const dto = summaryData[ed].dto / 100;
+                                        return sum + (gross * (1 - dto));
+                                    }, 0);
+                                    return <td key={v} className="p-6 text-center text-primary-content">${Math.round(totalV).toLocaleString()}</td>;
                                 })}
-                                <td className="p-6 text-center text-secondary">
-                                    ${EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].tienda, 0).toLocaleString()}
-                                </td>
-                                <td className="p-6 text-center">
+                                {tiendaVendors.map(v => {
+                                    const totalTV = EDITORIALES.reduce((sum, ed) => {
+                                        const gross = summaryData[ed].tiendaVendors[v] || 0;
+                                        const dto = summaryData[ed].dto / 100;
+                                        return sum + (gross * (1 - dto));
+                                    }, 0);
+                                    return <td key={`t-${v}`} className="p-6 text-center text-secondary bg-white/5 border-l border-secondary/10">${Math.round(totalTV).toLocaleString()}</td>;
+                                })}
+                                <td className="p-6 text-center border-l border-white/10">
                                     ${EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].subtotal, 0).toLocaleString()}
                                 </td>
                                 <td></td>
@@ -430,7 +471,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                                     <th className="p-3">EAN</th>
                                                     <th className="p-3 text-center">PRECIO</th>
                                                     {vendors.map(v => <th key={v} className="p-3 text-center uppercase tracking-tighter">{v}</th>)}
-                                                    <th className="p-3 text-center text-secondary">TIENDA</th>
+                                                    {tiendaVendors.map(v => <th key={`t-${v}`} className="p-3 text-center text-secondary uppercase tracking-tighter">T. {v}</th>)}
                                                     <th className="p-3 text-center">TOTAL</th>
                                                     <th className="p-3 text-right text-primary">SUBTOTAL</th>
                                                 </tr>
@@ -446,10 +487,12 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                                                 {p.vendorQty[v] || '—'}
                                                             </td>
                                                         ))}
-                                                        <td className={`p-3 text-center ${p.tiendaQty ? 'text-secondary font-bold' : 'text-muted/20'}`}>
-                                                            {p.tiendaQty || '—'}
-                                                        </td>
-                                                        <td className="p-3 text-center font-bold bg-background/30">{p.totalQty}</td>
+                                                        {tiendaVendors.map(v => (
+                                                            <td key={`t-${v}`} className={`p-3 text-center border-l border-secondary/10 ${p.tiendaQty[v] ? 'text-secondary font-bold bg-secondary/5' : 'text-muted/20'}`}>
+                                                                {p.tiendaQty[v] || '—'}
+                                                            </td>
+                                                        ))}
+                                                        <td className="p-3 text-center font-bold bg-background/30 border-l border-border">{p.totalQty}</td>
                                                         <td className="p-3 text-right font-bold text-primary">${p.subtotal.toLocaleString()}</td>
                                                     </tr>
                                                 ))}
