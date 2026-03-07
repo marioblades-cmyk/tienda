@@ -60,9 +60,9 @@ export default function SellerDashboard() {
 
             const nombreVendedor = (profile?.nombre || user?.user_metadata?.nombre || 'Vendedor').split(' ')[0];
             let fecha = semanaActual.nombre || 'Semana';
-            fecha = fecha.replace(/ENTELEQUIA DISTRIBUCIÓN/i, '').trim().replace(/\//g, '-');
+            fecha = fecha.replace(/MANGAS COMICS BOLIVIA STORE/i, '').trim().replace(/\//g, '-');
 
-            a.download = `Entelequia_Distribución_${fecha}_${nombreVendedor}.xlsx`;
+            a.download = `MANGAS_COMICS_BOLIVIA_STORE_${fecha}_${nombreVendedor}.xlsx`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

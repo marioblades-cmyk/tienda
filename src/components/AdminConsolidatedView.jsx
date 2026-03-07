@@ -251,7 +251,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             <span>GESTIÓN DE PEDIDOS</span>
                         </div>
                         <h3 className="text-3xl font-display uppercase tracking-tight">
-                            ENTELEQUIA <span className="text-primary">—</span> CONSOLIDACIÓN
+                            MANGAS COMICS <span className="text-primary">—</span> GESTIÓN INTEGRAL
                         </h3>
                         <p className="text-white/40 text-xs mt-1 font-mono uppercase tracking-widest">
                             {vendors.length} Vendedores • {items.reduce((sum, i) => sum + i.cantidad, 0)} Items Cargados
