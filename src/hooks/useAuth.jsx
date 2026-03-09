@@ -45,9 +45,10 @@ export const AuthProvider = ({ children }) => {
     };
 
     const isAdmin = profile?.email === 'admin@gmail.com' || profile?.is_admin === true;
+    const isSocio = profile?.is_socio === true;
 
     return (
-        <AuthContext.Provider value={{ user, profile, loading, isAdmin }}>
+        <AuthContext.Provider value={{ user, profile, loading, isAdmin, isSocio }}>
             {children}
         </AuthContext.Provider>
     );

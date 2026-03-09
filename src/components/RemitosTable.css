@@ -1,0 +1,91 @@
+.remitos-container {
+    --navy: hsl(215, 55%, 22%);
+    --navy-dark: hsl(215, 55%, 16%);
+    --accent: hsl(28, 90%, 52%);
+    --warn: hsl(28, 90%, 52%);
+    --ok: hsl(145, 50%, 38%);
+    --bg: hsl(220, 20%, 97%);
+    --fg: hsl(220, 30%, 12%);
+    --border: hsl(215, 25%, 85%);
+
+    background-color: var(--bg);
+    color: var(--fg);
+    padding: 1.5rem;
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+}
+
+.summary-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--navy);
+    color: white;
+    padding: 0.8rem 1.2rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    color: var(--border);
+    letter-spacing: 0.05em;
+}
+
+.summary-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.table-wrapper {
+    overflow-x: auto;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+#tbl {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#tbl th,
+#tbl td {
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.5rem;
+}
+
+#tbl thead {
+    background-color: var(--navy);
+    color: white;
+}
+
+#tbl th {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+#tbl .group th {
+    text-align: center;
+    background-color: var(--navy-dark);
+    font-size: 0.75rem;
+}
+
+#tbl .cols th {
+    font-size: 0.65rem;
+    background-color: var(--navy);
+    color: var(--border);
+}
+
+#tbody td {
+    font-size: 0.8rem;
+}

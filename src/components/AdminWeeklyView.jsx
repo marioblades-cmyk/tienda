@@ -8,6 +8,8 @@ export default function AdminWeeklyView() {
     const [isCreating, setIsCreating] = useState(false);
     const [newSemanaName, setNewSemanaName] = useState('');
     const [draggingId, setDraggingId] = useState(null);
+    const [editingDateId, setEditingDateId] = useState(null);
+    const [tempDate, setTempDate] = useState('');
 
     useEffect(() => {
         fetchSemanas();
@@ -55,6 +57,20 @@ export default function AdminWeeklyView() {
 
         if (error) alert(error.message);
         else fetchSemanas();
+    };
+
+    const handleDateUpdate = async (id) => {
+        if (!tempDate) return;
+        const { error } = await supabase
+            .from('semanas')
+            .update({ created_at: new Date(tempDate).toISOString() })
+            .eq('id', id);
+
+        if (error) alert(error.message);
+        else {
+            setEditingDateId(null);
+            fetchSemanas();
+        }
     };
 
     const handleFileUpload = async (id, file) => {
@@ -187,7 +203,30 @@ export default function AdminWeeklyView() {
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-4 text-[11px] font-mono font-medium text-muted-2">
-                                    <span className="flex items-center gap-1.5"><Calendar size={12} className="text-secondary" /> {new Date(s.created_at).toLocaleDateString()}</span>
+                                    {editingDateId === s.id ? (
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="datetime-local"
+                                                value={tempDate}
+                                                onChange={(e) => setTempDate(e.target.value)}
+                                                className="bg-background border border-border px-2 py-1 rounded"
+                                            />
+                                            <button onClick={() => handleDateUpdate(s.id)} className="text-accent font-bold">Guardar</button>
+                                            <button onClick={() => setEditingDateId(null)} className="text-muted">Cancelar</button>
+                                        </div>
+                                    ) : (
+                                        <span
+                                            className="flex items-center gap-1.5 cursor-pointer hover:text-accent transition-colors"
+                                            onClick={() => {
+                                                setEditingDateId(s.id);
+                                                // Format for datetime-local: YYYY-MM-DDThh:mm
+                                                setTempDate(new Date(s.created_at).toISOString().slice(0, 16));
+                                            }}
+                                            title="Click para editar fecha"
+                                        >
+                                            <Calendar size={12} className="text-secondary" /> {new Date(s.created_at).toLocaleDateString()}
+                                        </span>
+                                    )}
                                     {s.archivo_nombre ? (
                                         <span className="flex items-center gap-1.5 text-primary bg-primary/5 px-2 py-0.5 rounded">
                                             <FileUp size={12} /> {s.archivo_nombre}

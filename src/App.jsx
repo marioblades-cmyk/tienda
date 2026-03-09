@@ -6,11 +6,13 @@ import AdminWeeklyView from './components/AdminWeeklyView';
 import AdminConsolidatedView from './components/AdminConsolidatedView';
 import AdminUserManagement from './components/AdminUserManagement';
 import SellerDashboard from './components/SellerDashboard';
-import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import RemitosManagement from './components/RemitosManagement';
+import AdminMasterView from './components/AdminMasterView';
+import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2 } from 'lucide-react';
 import { supabase } from './services/supabase';
 
 function Main() {
-    const { user, profile, loading, isAdmin } = useAuth();
+    const { user, profile, loading, isAdmin, isSocio } = useAuth();
     const [showRegister, setShowRegister] = useState(false);
     const [activeTab, setActiveTab] = useState('pedidos');
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -82,13 +84,6 @@ function Main() {
                     {isAdmin ? (
                         <>
                             <button
-                                onClick={() => setActiveTab('mis-pedidos')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'mis-pedidos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
-                            >
-                                <LayoutDashboard size={20} />
-                                {sidebarOpen && <span>Mis Pedidos</span>}
-                            </button>
-                            <button
                                 onClick={() => setActiveTab('semanas')}
                                 className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'semanas' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
                             >
@@ -96,11 +91,32 @@ function Main() {
                                 {sidebarOpen && <span>Semanas</span>}
                             </button>
                             <button
+                                onClick={() => setActiveTab('mis-pedidos')}
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'mis-pedidos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                            >
+                                <LayoutDashboard size={20} />
+                                {sidebarOpen && <span>Mis Pedidos</span>}
+                            </button>
+                            <button
                                 onClick={() => setActiveTab('consolidado')}
                                 className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'consolidado' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
                             >
                                 <LayoutDashboard size={20} />
                                 {sidebarOpen && <span>Consolidado</span>}
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('confirmaciones')}
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'confirmaciones' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                            >
+                                <CheckCircle2 size={20} />
+                                {sidebarOpen && <span>Confirmaciones</span>}
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('remitos')}
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'remitos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                            >
+                                <Database size={20} />
+                                {sidebarOpen && <span>Gestión Integral</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('usuarios')}
@@ -111,13 +127,24 @@ function Main() {
                             </button>
                         </>
                     ) : (
-                        <button
-                            onClick={() => setActiveTab('pedidos')}
-                            className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
-                        >
-                            <LayoutDashboard size={20} />
-                            {sidebarOpen && <span>Mis Pedidos</span>}
-                        </button>
+                        <>
+                            <button
+                                onClick={() => setActiveTab('pedidos')}
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                            >
+                                <LayoutDashboard size={20} />
+                                {sidebarOpen && <span>Mis Pedidos</span>}
+                            </button>
+                            {isSocio && (
+                                <button
+                                    onClick={() => setActiveTab('remitos')}
+                                    className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'remitos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                >
+                                    <Database size={20} />
+                                    {sidebarOpen && <span>Gestión Integral</span>}
+                                </button>
+                            )}
+                        </>
                     )}
                 </nav>
 
@@ -157,11 +184,16 @@ function Main() {
                     <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-[0.2em] mb-4">
                         <span className="text-primary font-mono opacity-80">PLATAFORMA</span>
                         <span className="opacity-30">/</span>
-                        <span className="text-text">{isAdmin ? 'ADMINISTRADOR' : 'VENDEDOR'}</span>
+                        <span className="text-text">{isAdmin ? 'ADMINISTRADOR' : (isSocio ? 'SOCIO' : 'VENDEDOR')}</span>
                     </div>
                     <h2 className="text-3xl font-bold tracking-tight text-text">
                         {isAdmin
-                            ? (activeTab === 'semanas' ? 'Gestión de Semanas' : activeTab === 'consolidado' ? 'Consolidado General' : activeTab === 'mis-pedidos' ? 'Mis Pedidos como Vendedor' : 'Gestión de Vendedores')
+                            ? (activeTab === 'semanas' ? 'Gestión de Semanas' :
+                                activeTab === 'consolidado' ? 'Consolidado General' :
+                                    activeTab === 'remitos' ? 'Remitos y Finanzas' :
+                                        activeTab === 'confirmaciones' ? 'Base Master' :
+                                            activeTab === 'mis-pedidos' ? 'Mis Pedidos como Vendedor' :
+                                                'Gestión de Vendedores')
                             : 'Mis Pedidos Semanales'
                         }
                     </h2>
@@ -172,21 +204,24 @@ function Main() {
                     {isAdmin ? (
                         activeTab === 'semanas' ? <AdminWeeklyView /> :
                             activeTab === 'consolidado' ? <AdminConsolidatedView /> :
-                                activeTab === 'mis-pedidos' ? <SellerDashboard /> :
-                                    <AdminUserManagement />
+                                activeTab === 'remitos' ? <RemitosManagement /> :
+                                    activeTab === 'confirmaciones' ? <AdminMasterView /> :
+                                        activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
+                                            <AdminUserManagement />
                     ) : (
-                        <SellerDashboard />
+                        activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
+                            <SellerDashboard isAdmin={isAdmin} />
                     )}
                 </main>
 
-                <footer className="p-10 pt-0 text-[11px] font-mono text-muted/20 uppercase tracking-[0.2em] flex flex-col md:flex-row justify-between items-center gap-4">
+                <footer className="p-10 pt-0 text-[11px] font-mono text-slate-800 uppercase tracking-[0.2em] flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-                        <span>&copy; 2024 MANGAS COMICS BOLIVIA STORE</span>
+                        <span className="font-bold">&copy; 2024 MANGAS COMICS BOLIVIA STORE</span>
                     </div>
                     <div className="flex gap-6">
-                        <span className="hover:text-accent transition-colors cursor-help">SOPORTE TÉCNICO</span>
-                        <span className="hover:text-accent2 transition-colors cursor-help">ESTADO DEL SERVIDOR: ONLINE</span>
+                        <span className="hover:text-accent font-bold transition-colors cursor-help">SOPORTE TÉCNICO</span>
+                        <span className="hover:text-accent2 font-bold transition-colors cursor-help">ESTADO DEL SERVIDOR: ONLINE</span>
                     </div>
                 </footer>
             </div>

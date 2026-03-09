@@ -26,6 +26,10 @@ export default {
                 border: '#e2e0da',
                 text: '#1a1a1a',
                 muted: '#888580',
+                navy: '#1a3a5f',
+                accent: '#f37021',
+                sky: '#89b3d9',
+                error: '#eb5757',
             },
             boxShadow: {
                 'sm': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',

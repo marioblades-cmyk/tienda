@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
-import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export default function AdminConsolidatedView({ sellerIdFilter = null }) {
@@ -11,6 +11,10 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [expandedEditoriales, setExpandedEditoriales] = useState({});
     const [showOnlyWithOrders, setShowOnlyWithOrders] = useState(true);
     const [editorialFilter, setEditorialFilter] = useState('');
+    const [masterConf, setMasterConf] = useState(null);
+    const [masterData, setMasterData] = useState(null);
+    const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
+
 
     const EDITORIAL_DTOS = {
         'Ivrea': 35,
@@ -67,10 +71,35 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             query = query.eq('pedido.vendedor_id', sellerIdFilter);
         }
 
-        const { data: rawItems, error: itemsError } = await query;
+        const [itemsResult, masterResult] = await Promise.all([
+            query,
+            supabase.from('master_confirmaciones').select('*').eq('semana_id', selectedSemana).single()
+        ]);
 
-        if (itemsError) console.error(itemsError);
-        else setItems(rawItems || []);
+        if (itemsResult.error) console.error(itemsResult.error);
+        else setItems(itemsResult.data || []);
+
+        // Master Confirmaciones puede ser null sin ser necesariamente un error grave para el flujo
+        if (masterResult.data) {
+            setMasterData(masterResult.data);
+            // Indexamos los confirmados por título para búsqueda O(1)
+            const mapConf = {};
+            (masterResult.data.datos_json || []).forEach(it => {
+                const safeTitle = String(it.titulo || '').toLowerCase().trim();
+                if (safeTitle) {
+                    mapConf[safeTitle] = {
+                        cantidad: it.cantidad,
+                        precio: it.precio_unitario,
+                        originalTitle: it.titulo
+                    };
+                }
+            });
+            setMasterConf(mapConf);
+        } else {
+            setMasterConf(null);
+            setMasterData(null);
+        }
+
         setLoading(false);
     };
 
@@ -109,6 +138,9 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             const detailKey = `${item.editorial}|${item.titulo}|${item.isbn_raw}`;
             if (!editorialDetails[editorial]) editorialDetails[editorial] = {};
             if (!editorialDetails[editorial][detailKey]) {
+                const searchItemTitle = String(item.titulo || '').toLowerCase().trim();
+                const confItem = masterConf ? masterConf[searchItemTitle] : null;
+
                 editorialDetails[editorial][detailKey] = {
                     titulo: item.titulo,
                     ean: item.isbn_raw,
@@ -116,7 +148,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     vendorQty: {},
                     tiendaQty: {},
                     totalQty: 0,
-                    subtotal: 0
+                    subtotal: 0,
+                    confirmado: confItem ? confItem.cantidad : (masterConf ? 0 : null) // null = no hay master, 0 = no está en el master
                 };
             }
 
@@ -129,10 +162,52 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             editorialDetails[editorial][detailKey].subtotal += amount;
         });
 
+        // NUEVO: Procesar ítems que están en Master Conf pero no en los Pedidos (Pedidos Especiales/Extra)
+        // Solo para Admin (cuando no hay sellerIdFilter de vendedor específico)
+        if (masterConf && !sellerIdFilter) {
+            Object.keys(masterConf).forEach(titleKey => {
+                const confItem = masterConf[titleKey];
+
+                // Buscar si este título ya fue procesado en detailData
+                let found = false;
+                for (const ed in editorialDetails) {
+                    for (const key in editorialDetails[ed]) {
+                        const existingTitle = String(editorialDetails[ed][key].titulo || '').toLowerCase().trim();
+                        if (existingTitle === titleKey) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+
+                if (!found) {
+                    const defaultEd = 'Otras'; // Ponemos en Otras a priori, al no tener editorial
+                    if (!editorialDetails[defaultEd]) editorialDetails[defaultEd] = {};
+
+                    const newKey = `Otras|${confItem.originalTitle}|SPECIAL`;
+                    editorialDetails[defaultEd][newKey] = {
+                        titulo: confItem.originalTitle || titleKey.toUpperCase(),
+                        ean: 'ESPECIAL',
+                        precio: confItem.precio,
+                        vendorQty: {},
+                        tiendaQty: {},
+                        totalQty: 0,
+                        subtotal: 0,
+                        confirmado: confItem.cantidad,
+                        isSpecial: true
+                    };
+
+                    // Asegurarnos que la editorial exista en summary
+                    if (!editorialSummary[defaultEd]) editorialSummary[defaultEd] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[defaultEd] || 35, total: 0 };
+                }
+            });
+        }
+
         // Calculate totals for summary
         Object.keys(editorialSummary).forEach(ed => {
             const s = editorialSummary[ed];
-            s.total = s.subtotal * (1 - (s.dto / 100));
+            s.total = Math.round(s.subtotal * (1 - (s.dto / 100)));
         });
 
         // Calculate figures for cards
@@ -206,7 +281,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         });
         totalFooterRow.push(EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].subtotal, 0));
         totalFooterRow.push('');
-        totalFooterRow.push(EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].total, 0));
+        totalFooterRow.push(Math.round(EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].total, 0)));
 
         summaryRows.push(totalFooterRow);
 
@@ -214,15 +289,23 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen Editorial');
 
         // Detail Sheet
-        const detailRows = [['Editorial', 'Título', 'EAN', 'Precio', ...vendors, ...tiendaVendors.map(v => `T. ${v}`), 'Total Unidades', 'Subtotal $']];
+        const detailRows = [];
+        const headerRow = ['Editorial', 'Título', 'EAN', 'Precio', ...vendors, ...tiendaVendors.map(v => `T. ${v}`), 'Total Pedido'];
+        if (masterConf) headerRow.push('Total Confirmado');
+        headerRow.push('Subtotal $');
+        detailRows.push(headerRow);
+
         Object.entries(detailData).forEach(([ed, products]) => {
             Object.values(products).forEach(p => {
-                detailRows.push([
+                const row = [
                     ed, p.titulo, p.ean, p.precio,
                     ...vendors.map(v => p.vendorQty[v] || 0),
                     ...tiendaVendors.map(v => p.tiendaQty[v] || 0),
-                    p.totalQty, p.subtotal
-                ]);
+                    p.totalQty
+                ];
+                if (masterConf) row.push(p.confirmado !== null ? p.confirmado : '');
+                row.push(p.subtotal);
+                detailRows.push(row);
             });
         });
         const wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
@@ -258,13 +341,59 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         </p>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1">
-                        <div className="text-xs text-white/40 font-bold uppercase tracking-widest">Total Consolidado (c/dto)</div>
-                        <div className="text-5xl font-display text-primary leading-none">
-                            ${grandTotal.toLocaleString()}
+                    <div className="flex flex-col lg:flex-row items-end lg:items-center gap-6">
+                        {/* Comparación Master Confirmaciones */}
+                        {!sellerIdFilter && masterData && (
+                            <div className="bg-black/20 p-4 rounded-xl border border-white/10 flex items-center justify-between gap-6 w-full lg:w-auto">
+                                <div className="flex flex-col">
+                                    <div className="text-[10px] text-white/50 font-bold uppercase tracking-widest mb-1 flex items-center gap-1">
+                                        <Database size={10} /> TOTAL PRODUCTOS (CONFIRMADO)
+                                    </div>
+                                    <div className="text-2xl font-display text-white">
+                                        ${Math.round(masterData.total_productos).toLocaleString()}
+                                    </div>
+                                    {/* Comparación de Stock vs Pedido Neto (con Dto) */}
+                                    <div className="text-xs font-mono font-bold mt-1 max-w-[150px]">
+                                        {(() => {
+                                            const diff = masterData.total_productos - grandTotal;
+                                            if (Math.abs(diff) < 1) return <span className="text-green-400">Cuadra exacto con el pedido neto.</span>;
+                                            if (diff > 0) return <span className="text-red-400">Aumentó +${Math.round(diff).toLocaleString()} vs Pedido.</span>;
+                                            return <span className="text-green-400">Disminuyó ${Math.round(Math.abs(diff)).toLocaleString()} vs Pedido.</span>;
+                                        })()}
+                                    </div>
+                                </div>
+                                <div className="w-px h-12 bg-white/10 hidden md:block"></div>
+                                <div className="flex flex-col items-end">
+                                    <div className="text-[10px] text-primary/80 font-bold uppercase tracking-widest flex items-center gap-1">
+                                        ENVÍO ({masterData.cajas_qty || 0} CAJAS)
+                                    </div>
+                                    <div className="text-lg font-black text-primary font-mono-numbers mt-1">
+                                        + ${Math.round(masterData.costo_envio || 0).toLocaleString()}
+                                    </div>
+                                    <div className="text-[10px] text-accent mt-2 font-black uppercase tracking-widest bg-accent/20 px-2 py-0.5 rounded-full border border-accent/30">
+                                        DEUDA A DISTRIBUIDOR
+                                    </div>
+                                    <div className="text-2xl font-display text-accent">
+                                        ${Math.round(masterData.total_ars || 0).toLocaleString()}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Total Mío (Con Descuento) */}
+                        <div className="flex flex-col items-end gap-1 shrink-0 ml-auto">
+                            <div className="text-xs text-white/40 font-bold uppercase tracking-widest">PEDIDO CONSOLIDADO</div>
+                            <div className="text-5xl font-display text-primary leading-none">
+                                ${Math.round(grandTotal).toLocaleString()}
+                            </div>
                         </div>
                     </div>
                 </div>
+                {!sellerIdFilter && masterData && (
+                    <div className="absolute top-0 right-0 bg-accent text-white px-4 py-1 rounded-bl-xl font-bold text-xs uppercase tracking-widest flex items-center gap-1 shadow-lg">
+                        <CheckCircle2 size={12} /> BASE MASTER ACTIVA
+                    </div>
+                )}
             </div>
 
             {/* ACTION BAR & STATUS CARDS */}
@@ -420,7 +549,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                 <td></td>
                                 <td className="p-6 text-center text-3xl text-primary font-display tracking-tighter bg-white/5 border-l border-white/10">
                                     <span className="text-xs align-top mr-1 opacity-50">$</span>
-                                    {EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].total, 0).toLocaleString()}
+                                    {Math.round(EDITORIALES.reduce((sum, ed) => sum + summaryData[ed].total, 0)).toLocaleString()}
                                 </td>
                             </tr>
                         </tfoot>
@@ -430,14 +559,35 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
             {/* SECTION 2: DETALLE POR TITULO */}
             <section>
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="w-8 h-1 bg-primary rounded-full"></div>
-                    <h4 className="text-xs font-bold text-muted uppercase tracking-[0.3em] opacity-60">Detalle por Título</h4>
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-1 bg-primary rounded-full"></div>
+                        <h4 className="text-xs font-bold text-muted uppercase tracking-[0.3em] opacity-60">Detalle por Título</h4>
+                    </div>
+
+                    {!sellerIdFilter && (
+                        <button
+                            onClick={() => setShowOnlyDiscrepancies(!showOnlyDiscrepancies)}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all shadow-md flex items-center gap-2 border-2 ${showOnlyDiscrepancies ? 'bg-error text-white border-error shadow-error/40' : 'bg-white border-navy/20 text-navy hover:border-error hover:text-error'}`}
+                        >
+                            <AlertCircle size={14} className={showOnlyDiscrepancies ? 'text-white' : 'text-error'} />
+                            {showOnlyDiscrepancies ? 'MOSTRANDO SOLO DIFERENCIAS' : 'VER DIFERENCIAS / ROJOS'}
+                        </button>
+                    )}
                 </div>
                 <div className="space-y-4">
                     {EDITORIALES.filter(ed => !editorialFilter || ed === editorialFilter).map(ed => {
                         const products = Object.values(detailData[ed] || {});
-                        const filteredProducts = showOnlyWithOrders ? products.filter(p => p.totalQty > 0) : products;
+                        let filteredProducts = showOnlyWithOrders ? products.filter(p => p.totalQty > 0 || p.isSpecial) : products;
+
+                        // Aplicar filtro de discrepancias
+                        if (showOnlyDiscrepancies) {
+                            filteredProducts = filteredProducts.filter(p =>
+                                p.isSpecial ||
+                                (p.confirmado !== null && p.confirmado !== p.totalQty)
+                            );
+                        }
+
                         if (filteredProducts.length === 0) return null;
 
                         const isOpen = expandedEditoriales[ed];
@@ -472,28 +622,43 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                                     <th className="p-3 text-center">PRECIO</th>
                                                     {vendors.map(v => <th key={v} className="p-3 text-center uppercase tracking-tighter">{v}</th>)}
                                                     {tiendaVendors.map(v => <th key={`t-${v}`} className="p-3 text-center text-secondary uppercase tracking-tighter">T. {v}</th>)}
-                                                    <th className="p-3 text-center">TOTAL</th>
+                                                    <th className="p-3 text-center">TOTAL <span className="text-[9px] block text-muted/60">PEDIDO</span></th>
+                                                    {masterConf && <th className="p-3 text-center text-accent">CONFIR. <span className="text-[9px] block text-accent/60">DESPACHO</span></th>}
                                                     <th className="p-3 text-right text-primary">SUBTOTAL</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {filteredProducts.map(p => (
-                                                    <tr key={p.titulo + p.ean} className="border-b border-border hover:bg-primary/5 transition-colors">
-                                                        <td className="p-3 font-semibold text-text">{p.titulo}</td>
-                                                        <td className="p-3 text-muted font-mono text-xs">{p.ean}</td>
-                                                        <td className="p-3 text-center font-medium">${p.precio?.toLocaleString()}</td>
+                                                    <tr key={(p?.titulo || 'extra') + (p?.ean || 'nuevo')} className={`border-b border-border transition-colors ${p?.isSpecial ? 'bg-accent/5 hover:bg-accent/10' : 'hover:bg-primary/5'}`}>
+                                                        <td className="p-3 font-semibold text-text">
+                                                            {p?.titulo || 'Sin Título'}
+                                                            {p?.isSpecial && <span className="ml-2 text-[8px] bg-accent text-white px-2 py-0.5 rounded-full font-bold uppercase tracking-widest leading-none align-middle shadow-sm">PEDIDO EXTRA</span>}
+                                                        </td>
+                                                        <td className="p-3 text-muted font-mono text-xs">{p?.ean || '—'}</td>
+                                                        <td className="p-3 text-center font-medium">${Math.round(p?.precio || 0).toLocaleString()}</td>
                                                         {vendors.map(v => (
-                                                            <td key={v} className={`p-3 text-center ${p.vendorQty[v] ? 'text-text font-bold' : 'text-muted/20'}`}>
-                                                                {p.vendorQty[v] || '—'}
+                                                            <td key={v} className={`p-3 text-center ${p?.vendorQty?.[v] ? 'text-text font-bold' : 'text-muted/20'}`}>
+                                                                {p?.vendorQty?.[v] || '—'}
                                                             </td>
                                                         ))}
                                                         {tiendaVendors.map(v => (
-                                                            <td key={`t-${v}`} className={`p-3 text-center border-l border-secondary/10 ${p.tiendaQty[v] ? 'text-secondary font-bold bg-secondary/5' : 'text-muted/20'}`}>
-                                                                {p.tiendaQty[v] || '—'}
+                                                            <td key={`t-${v}`} className={`p-3 text-center border-l border-secondary/10 ${p?.tiendaQty?.[v] ? 'text-secondary font-bold bg-secondary/5' : 'text-muted/20'}`}>
+                                                                {p?.tiendaQty?.[v] || '—'}
                                                             </td>
                                                         ))}
-                                                        <td className="p-3 text-center font-bold bg-background/30 border-l border-border">{p.totalQty}</td>
-                                                        <td className="p-3 text-right font-bold text-primary">${p.subtotal.toLocaleString()}</td>
+                                                        <td className="p-3 text-center font-bold bg-background/30 border-l border-border">{p?.totalQty || 0}</td>
+                                                        {masterConf && (
+                                                            <td className="p-3 text-center font-bold bg-accent/5 border-l border-border">
+                                                                <span className={
+                                                                    p?.confirmado == null ? '' :
+                                                                        (p?.confirmado === p?.totalQty ? 'text-green-600' :
+                                                                            p?.confirmado < p?.totalQty ? 'text-red-500' : 'text-accent')
+                                                                }>
+                                                                    {p?.confirmado != null ? p.confirmado : '—'}
+                                                                </span>
+                                                            </td>
+                                                        )}
+                                                        <td className="p-3 text-right font-bold text-primary">${Math.round(p?.subtotal || 0).toLocaleString()}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>

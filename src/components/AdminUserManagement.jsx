@@ -48,6 +48,28 @@ export default function AdminUserManagement() {
         else fetchVendedores();
     };
 
+    const toggleSocio = async (id, currentStatus) => {
+        const { error } = await supabase
+            .from('vendedores')
+            .update({ is_socio: !currentStatus })
+            .eq('id', id);
+
+        if (error) alert(translateError(error));
+        else fetchVendedores();
+    };
+
+    const deleteVendedor = async (v) => {
+        if (!window.confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${v.nombre}? Esta acción no se puede deshacer.`)) return;
+
+        const { error } = await supabase
+            .from('vendedores')
+            .delete()
+            .eq('id', v.id);
+
+        if (error) alert(translateError(error));
+        else fetchVendedores();
+    };
+
     const updateNombre = async (id) => {
         if (!newName.trim()) return;
         const { error } = await supabase
@@ -100,7 +122,12 @@ export default function AdminUserManagement() {
                                                 {v.nombre?.[0] || '?'}
                                             </div>
                                             <div>
-                                                <p className={`font-display text-xl tracking-wide uppercase ${v.active ? 'text-text' : 'text-muted line-through'}`}>{v.nombre}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <p className={`font-display text-xl tracking-wide uppercase ${v.active ? 'text-text' : 'text-muted line-through'}`}>{v.nombre}</p>
+                                                    {v.is_socio && (
+                                                        <span className="bg-primary/10 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded border border-primary/20">SOCIO</span>
+                                                    )}
+                                                </div>
                                                 <p className="text-xs text-muted flex items-center gap-1 font-medium mt-1">
                                                     <Calendar size={12} className="text-primary" /> {new Date(v.created_at).toLocaleDateString()}
                                                 </p>
@@ -140,6 +167,20 @@ export default function AdminUserManagement() {
                                             title={v.active ? 'Desactivar usuario' : 'Activar usuario'}
                                         >
                                             {v.active ? <XCircle size={16} /> : <CheckCircle size={16} />}
+                                        </button>
+                                        <button
+                                            onClick={() => toggleSocio(v.id, v.is_socio)}
+                                            className={`p-2 transition-colors ${v.is_socio ? 'text-primary hover:text-muted' : 'text-muted hover:text-primary'}`}
+                                            title={v.is_socio ? 'Quitar rol de Socio' : 'Hacer Socio'}
+                                        >
+                                            <User size={16} className={v.is_socio ? "fill-primary/20" : ""} />
+                                        </button>
+                                        <button
+                                            onClick={() => deleteVendedor(v)}
+                                            className="p-2 text-muted hover:text-error transition-colors"
+                                            title="Eliminar usuario"
+                                        >
+                                            <Trash2 size={16} />
                                         </button>
                                     </div>
                                 </td>
