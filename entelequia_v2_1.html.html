@@ -1,0 +1,2339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entelequia — Procesador Ivrea</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@400;600;800&display=swap');
+
+  :root {
+    --bg: #0e0e0e;
+    --surface: #161616;
+    --border: #2a2a2a;
+    --accent: #d4ff00;
+    --accent2: #ff6b35;
+    --text: #e8e8e8;
+    --muted: #666;
+    --ok: #4ade80;
+    --warn: #facc15;
+    --err: #f87171;
+    --reimpr: #60a5fa;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  header {
+    padding: 32px 40px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .logo-badge {
+    background: var(--accent);
+    color: #000;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  header h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+
+  header h1 span { color: var(--accent); }
+
+  .version-tag {
+    margin-left: auto;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ── MAIN LAYOUT ── */
+  main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 40px;
+  }
+
+  /* ── DROP ZONE ── */
+  #drop-zone {
+    border: 2px dashed var(--border);
+    padding: 64px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  #drop-zone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(212,255,0,0.04) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  #drop-zone:hover, #drop-zone.dragover {
+    border-color: var(--accent);
+    background: #1a1a0a;
+  }
+
+  #drop-zone.dragover { transform: scale(1.01); }
+
+  .drop-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+  }
+
+  #drop-zone h2 {
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+
+  #drop-zone p {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+
+  #drop-zone p span {
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  #file-input { display: none; }
+
+  /* ── PROCESSING ── */
+  #processing {
+    display: none;
+    text-align: center;
+    padding: 80px 40px;
+  }
+
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 24px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #processing h2 {
+    font-size: 18px;
+    font-weight: 800;
+  }
+
+  #processing p {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    margin-top: 8px;
+  }
+
+  /* ── RESULTS ── */
+  #results { display: none; }
+
+  /* ── REPORT CARDS ── */
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .stat-card.green::after { background: var(--ok); }
+  .stat-card.yellow::after { background: var(--warn); }
+  .stat-card.red::after { background: var(--err); }
+  .stat-card.blue::after { background: var(--reimpr); }
+  .stat-card.accent::after { background: var(--accent); }
+
+  .stat-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .stat-card.green .stat-value { color: var(--ok); }
+  .stat-card.yellow .stat-value { color: var(--warn); }
+  .stat-card.red .stat-value { color: var(--err); }
+  .stat-card.blue .stat-value { color: var(--reimpr); }
+  .stat-card.accent .stat-value { color: var(--accent); }
+
+  .stat-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
+  /* ── EAN BREAKDOWN ── */
+  .ean-breakdown {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px;
+    margin-bottom: 32px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: center;
+  }
+
+  .ean-breakdown h3 {
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    width: 100%;
+    margin-bottom: -12px;
+  }
+
+  .ean-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  .ean-pill .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+
+  /* ── TOOLBAR ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .toolbar h2 {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    flex: 1;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    letter-spacing: 0.3px;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+  }
+  .btn-primary:hover { background: #bfed00; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── FILTERS ── */
+  .filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .filter-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    outline: none;
+  }
+  .filter-input:focus { border-color: var(--accent); }
+  .filter-input::placeholder { color: var(--muted); }
+
+  .filter-select {
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+  }
+  .filter-select:focus { border-color: var(--accent); }
+
+  /* ── TABLE ── */
+  .table-container {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    background: #111;
+    padding: 10px 14px;
+    text-align: left;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  thead th:hover { color: var(--accent); }
+
+  tbody tr {
+    border-bottom: 1px solid #1c1c1c;
+    transition: background 0.1s;
+  }
+
+  tbody tr:hover { background: #1a1a1a; }
+
+  tbody td {
+    padding: 10px 14px;
+    vertical-align: middle;
+  }
+
+  .td-titulo {
+    font-weight: 600;
+    max-width: 320px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .td-mono {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .badge-cat {
+    background: #1c1c1c;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  .badge-ok { background: rgba(74,222,128,0.12); color: var(--ok); }
+  .badge-warn { background: rgba(250,204,21,0.12); color: var(--warn); }
+  .badge-err { background: rgba(248,113,113,0.12); color: var(--err); }
+  .badge-blue { background: rgba(96,165,250,0.12); color: var(--reimpr); }
+  .badge-accent { background: rgba(212,255,0,0.1); color: var(--accent); }
+
+  .reimpr-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--reimpr);
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  /* ── PAGINATION ── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    justify-content: center;
+  }
+
+  .page-info {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 0 12px;
+  }
+
+  /* ── CATEGORY BREAKDOWN ── */
+  .cat-breakdown-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px;
+  }
+  .cat-breakdown-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+  }
+  .cat-rows { display: flex; flex-direction: column; gap: 8px; }
+  .cat-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .cat-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    width: 220px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cat-bar-wrap {
+    flex: 1;
+    background: #1c1c1c;
+    height: 8px;
+    position: relative;
+  }
+  .cat-bar {
+    height: 100%;
+    transition: width 0.4s ease;
+  }
+  .cat-count {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    width: 50px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .cat-pct {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    width: 40px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  /* ── TABS ── */
+  .tab-btn {
+    padding: 10px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-panel { display: none; padding-top: 24px; }
+  .tab-panel.active { display: block; }
+
+  .editorial-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    color: var(--muted);
+  }
+
+  /* ── RESUMEN TABLE ── */
+  .resumen-wrap { margin-bottom:28px; }
+  .resumen-title { font-family:'Syne',sans-serif; font-size:16px; font-weight:700; color:var(--accent); margin-bottom:12px; letter-spacing:1px; }
+  .resumen-table { width:100%; border-collapse:collapse; font-family:monospace; font-size:12px; }
+  .resumen-table th {
+    text-align:left; padding:6px 12px;
+    border-bottom:1px solid var(--border);
+    font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); font-weight:400;
+  }
+  .resumen-table th.num { text-align:right; }
+  .resumen-table td { padding:8px 12px; border-bottom:1px solid #1a1a1a; vertical-align:middle; }
+  .resumen-table tbody tr:hover td { background:#111; cursor:pointer; }
+  .resumen-table tr.resumen-total td {
+    border-top:1px solid var(--border); border-bottom:none;
+    font-weight:700; padding-top:10px; color:var(--text);
+  }
+  .td-num { text-align:right; font-weight:600; }
+  .td-ok { color:var(--ok); }
+  .td-warn { color:var(--warn); }
+  .td-err { color:var(--err); }
+  .td-muted { color:var(--muted); }
+  .semaforo { font-size:13px; }
+  .chg-pill {
+    display:inline-block; font-size:9px; padding:1px 6px; margin:1px 2px;
+    font-family:monospace; font-weight:600;
+  }
+  .chg-dupe { background:rgba(248,113,113,0.12); color:#f87171; }
+  .chg-isbn { background:rgba(251,146,60,0.12); color:#fb923c; }
+  .chg-int  { background:rgba(250,204,21,0.12); color:#facc15; }
+  .chg-omit { background:rgba(148,163,184,0.12); color:#94a3b8; }
+  .chg-reimpr { background:rgba(96,165,250,0.12); color:#60a5fa; }
+  .expand-row td { padding:0 !important; }
+  .expand-inner {
+    padding:12px 16px 16px 32px;
+    background:#060606;
+    border-bottom:1px solid #1a1a1a;
+    border-left:2px solid #222;
+  }
+  .expand-group { margin-bottom:10px; }
+  .expand-group-title {
+    font-size:9px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:1px; margin-bottom:5px; font-family:monospace;
+  }
+  .expand-item {
+    display:flex; gap:16px; font-size:11px;
+    padding:3px 0; border-bottom:1px solid #111;
+  }
+  .expand-item:last-child { border-bottom:none; }
+  .expand-titulo { flex:1; color:#ccc; }
+  .expand-meta { color:#555; font-size:10px; white-space:nowrap; }
+  /* keep old summary-bar / summary-item names for compat */
+  .summary-bar, .summary-item, .summary-num, .summary-lbl, .summary-divider {}
+
+  /* ── RAW/CLEAN TOGGLE ── */
+  .view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .vt-btn {
+    padding: 7px 20px;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: all 0.15s;
+  }
+  .vt-btn.active { background: var(--accent); color: #000; }
+  .vt-btn:not(.active):hover { color: var(--text); }
+  .vt-divider { width: 1px; background: var(--border); }
+
+  .changes-tag {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    padding: 2px 6px;
+    margin-left: 4px;
+    vertical-align: middle;
+    cursor: default;
+  }
+  .ch-isbn { background: rgba(251,146,60,0.15); color: #fb923c; }
+  .ch-dupe { background: rgba(248,113,113,0.15); color: #f87171; }
+  .ch-reimpr { background: rgba(96,165,250,0.15); color: #60a5fa; }
+  .ch-int { background: rgba(250,204,21,0.15); color: #facc15; }
+
+  .raw-cell { color: var(--muted); font-style: italic; }
+
+  /* ── RESET ── */
+  .reset-bar {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo-badge">Entelequia</span>
+  <h1>Procesador <span>Entelequia</span></h1>
+  <span class="version-tag">v2.0 · Multi-editorial</span>
+</header>
+
+<main>
+
+  <!-- DROP ZONE -->
+  <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+    <span class="drop-icon">📂</span>
+    <h2>Subí el Excel del distribuidor</h2>
+    <p>Arrastrá el archivo acá o tocá el botón de abajo</p>
+    <p style="margin-top:8px;font-size:11px;">Procesa Ivrea + Ovnipress en una sola vez</p>
+    <label for="file-input" style="display:inline-block;margin-top:24px;padding:16px 48px;background:var(--accent);color:#000;font-family:'Syne',sans-serif;font-size:16px;font-weight:800;cursor:pointer;letter-spacing:0.3px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;" onclick="event.stopPropagation()">
+      📁 Seleccionar archivo
+    </label>
+    <input type="file" id="file-input" accept=".xlsx,.xls" style="display:none">
+  </div>
+
+  <!-- PROCESSING -->
+  <div id="processing">
+    <div class="spinner"></div>
+    <h2 id="proc-title">Procesando...</h2>
+    <p id="proc-status">Leyendo archivo...</p>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="results">
+
+    <!-- SUMMARY BAR -->
+    <div id="summary-bar" style="margin-bottom:24px;"></div>
+
+    <!-- TABS -->
+    <div id="tabs-nav" style="display:flex;gap:0;margin-bottom:0;border-bottom:1px solid #2a2a2a;flex-wrap:wrap;"></div>
+
+    <!-- TAB PANELS -->
+    <div id="tabs-panels"></div>
+
+    <!-- TOOLBAR -->
+    <div class="toolbar" style="margin-top:24px;">
+      <h2>Catálogo · <span id="count-label" style="color:var(--accent)"></span></h2>
+      <button class="btn btn-ghost" onclick="exportCSV()">↓ CSV</button>
+      <button class="btn btn-primary" onclick="exportExcel()">↓ Excel limpio</button>
+    </div>
+
+    <!-- RESET -->
+    <div class="reset-bar">
+      <button class="btn btn-ghost" onclick="reset()">↩ Procesar otro archivo</button>
+    </div>
+
+  </div>
+</main>
+
+<script>
+/* ───────── PROCESSOR CORE (mirrors ivrea_processor.py) ───────── */
+
+const SECTION_MARKERS = new Set([
+  'NOVEDADES','REIMPRESIONES','MANGAS EN CURSO',
+  'MANGAS YA COMPLETOS','MANGAS DE TOMO ÚNICO','COMICS'
+]);
+
+const SKIP_MARKERS = new Set([
+  'POR FAVOR COMPLETAR LAS REEDICIONES ARRIBA. NO EN EL FONDO!'
+]);
+
+const STOP_MARKERS = ['TOTAL','SUBTOTAL','GRAN TOTAL'];
+
+function normalizeTitle(t) {
+  return String(t).trim().toLowerCase().replace(/\s+/g,' ');
+}
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(31, h) + s.charCodeAt(i) | 0;
+  }
+  return (h >>> 0).toString(36).toUpperCase().padStart(6,'0').slice(-6);
+}
+
+function makeProductId(title) {
+  return 'ivrea:' + hashStr(normalizeTitle(title));
+}
+
+function parseEAN(value) {
+  if (value == null) return null;
+  let s = String(value).trim();
+  if (!s) return null;
+  if (/^(s\/d|sin\s*isbn|isbn\s*a\s*confirmar|a\s*confirmar|por\s*confirmar|sd)$/i.test(s)) return null;
+  s = s.replace(/[-\s.]/g, '').split(',')[0].replace(/[^0-9]/g, '');
+  return s.length >= 10 ? s : null;
+}
+
+function validateEAN13(s) {
+  // Regla: aceptamos ISBN con checksum invalido, asumimos correcto
+  return !!(s && s.length >= 10);
+}
+
+function makeInternalEAN(titleNorm) {
+  // Codigo corto INT-XXXXXX, consistente entre semanas
+  return 'INT-' + hashStr(titleNorm);
+}
+
+function isSkipRow(row) {
+  const nonNull = row.filter(v => v != null && String(v).trim() !== '');
+  if (!nonNull.length) return true;
+  // Check first string value for STOP/SKIP markers regardless of how many values in row
+  const firstStr = nonNull.find(v => typeof v === 'string');
+  if (firstStr) {
+    const t = firstStr.trim();
+    if (SKIP_MARKERS.has(t)) return true;
+    // Only stop on exact match — not when TOTAL/SUBTOTAL appears inside a title
+    const tUp = t.toUpperCase();
+    if (STOP_MARKERS.some(s => tUp === s)) return true;
+  }
+  return false;
+}
+
+function isSectionMarker(row) {
+  const nonNull = row.filter(v => v != null && String(v).trim() !== '');
+  if (nonNull.length === 1 && typeof nonNull[0] === 'string') {
+    const t = nonNull[0].trim();
+    if (SECTION_MARKERS.has(t)) return t;
+  }
+  return null;
+}
+
+function isHeaderRow(row) {
+  const first = row[0] ? String(row[0]).trim().toUpperCase() : '';
+  const second = row[1] ? String(row[1]).trim().toUpperCase() : '';
+  if (first === 'TITULO' || first === 'NOMBRE') {
+    if (!second || ['EAN','ISBN','PRECIO','PRECIO TAPA','PVP'].includes(second)) return true;
+  }
+  return false;
+}
+
+function processIvrea(sheetData) {
+  const rows = sheetData;
+
+  // Phase 1: Parse
+  const rawItems = [];
+  let started = false;
+  let currentSection = null;
+  let skippedBefore = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!started) {
+      const sec = isSectionMarker(row);
+      if (sec === 'NOVEDADES') { started = true; currentSection = 'NOVEDADES'; }
+      else skippedBefore++;
+      continue;
+    }
+    if (isSkipRow(row)) continue;
+    const sec = isSectionMarker(row);
+    if (sec) { currentSection = sec; continue; }
+    if (isHeaderRow(row)) continue;
+
+    const titulo = row[0] != null ? String(row[0]).trim() : null;
+    if (!titulo) continue;
+
+    const eanRaw = row[1] != null ? row[1] : null;
+    let precio = null;
+    if (row[2] != null) {
+      const p = parseFloat(String(row[2]).replace(',','.'));
+      if (!isNaN(p)) precio = Math.round(p);
+    }
+    let cantidad = null;
+    if (row[3] != null) {
+      const c = parseInt(row[3]);
+      if (!isNaN(c) && c > 0) cantidad = c;
+    }
+
+    rawItems.push({ titulo, tituloNorm: normalizeTitle(titulo), eanRaw, eanRawStr: String(eanRaw ?? ''), precio, cantidad, categoria: currentSection });
+  }
+
+  // Phase 2: Group by title
+  const byTitle = {};
+  for (const item of rawItems) {
+    if (!byTitle[item.tituloNorm]) byTitle[item.tituloNorm] = [];
+    byTitle[item.tituloNorm].push(item);
+  }
+
+  let exactDupesRemoved = 0;
+  const exactDupesDetail = [];
+  let reimprMarked = 0;
+  let reimprSoloError = 0;
+  const finalItems = [];
+
+  for (const [tituloNorm, occurrences] of Object.entries(byTitle)) {
+    const reimpr = occurrences.filter(o => o.categoria === 'REIMPRESIONES');
+    let main = occurrences.filter(o => o.categoria !== 'REIMPRESIONES');
+
+    // Dedupe main
+    const seen = new Set();
+    const deduped = [];
+    for (const o of main) {
+      const key = o.tituloNorm + '|' + String(o.eanRaw);
+      if (seen.has(key)) {
+        exactDupesRemoved++;
+        exactDupesDetail.push({ titulo: o.titulo, ean: o.eanRaw });
+      } else {
+        seen.add(key);
+        deduped.push(o);
+      }
+    }
+    main = deduped;
+
+    const isReimprWeek = reimpr.length > 0;
+    if (main.length > 0) {
+      if (isReimprWeek) reimprMarked++;
+      const base = main[0];
+      finalItems.push({ ...base, isReimprWeek, soloReimpr: false });
+    } else if (reimpr.length > 0) {
+      reimprSoloError++;
+      const base = reimpr[0];
+      finalItems.push({ ...base, categoria: null, isReimprWeek: true, soloReimpr: true });
+    }
+  }
+
+  // Phase 3: EAN resolution
+  const eanToTitles = {};
+  for (const item of finalItems) {
+    const eanStr = parseEAN(item.eanRaw);
+    if (eanStr) {
+      if (!eanToTitles[eanStr]) eanToTitles[eanStr] = [];
+      eanToTitles[eanStr].push(item.tituloNorm);
+    }
+  }
+
+  const eanCreatedReasons = {};
+  let eanCreatedTotal = 0;
+  const outputItems = [];
+
+  for (const item of finalItems) {
+    const productId = makeProductId(item.titulo);
+    const eanStr = parseEAN(item.eanRaw);
+    let eanOficial = null;
+    let eanInterno = null;
+    let eanRazon = 'ok';
+
+    if (!eanStr) {
+      eanRazon = 'en_blanco_o_por_confirmar';
+    } else if (!validateEAN13(eanStr)) {
+      eanRazon = 'ean_invalido';
+    } else if (eanToTitles[eanStr] && eanToTitles[eanStr].length > 1) {
+      eanRazon = 'ean_repetido_en_varios_titulos';
+    } else {
+      eanOficial = eanStr;
+    }
+
+    if (eanRazon !== 'ok') {
+      eanInterno = makeInternalEAN(item.tituloNorm);
+      eanCreatedReasons[eanRazon] = (eanCreatedReasons[eanRazon] || 0) + 1;
+      eanCreatedTotal++;
+    }
+
+    // Build changes log
+    const changes = [];
+    if (eanRazon !== 'ok') changes.push({ type: 'isbn', msg: eanRazon.replace(/_/g,' ') });
+    if (item.isReimprWeek) changes.push({ type: 'reimpr', msg: 'reimpresión semana' });
+    if (item.soloReimpr) changes.push({ type: 'dupe', msg: 'solo en reimpresiones' });
+
+    outputItems.push({
+      product_id: productId,
+      titulo: item.titulo,
+      titulo_normalizado: item.tituloNorm,
+      categoria_principal: item.categoria,
+      subetiquetas: { reimpresionSemana: item.isReimprWeek },
+      errores: { soloEnReimpresiones: item.soloReimpr },
+      ean_oficial: eanOficial,
+      ean_interno: eanInterno,
+      ean_final: eanOficial || eanInterno,
+      ean_razon: eanRazon,
+      precio_tapa: item.precio,
+      cantidad: item.cantidad,
+      // Raw originals for comparison
+      _raw_ean: item.eanRawStr,
+      _raw_titulo: item.titulo,
+      _changes: changes,
+    });
+  }
+
+  // Count by category (clean)
+  const itemsPorCategoria = {};
+  for (const item of outputItems) {
+    const cat = item.categoria_principal || 'Sin categoría';
+    itemsPorCategoria[cat] = (itemsPorCategoria[cat] || 0) + 1;
+  }
+
+  // Count by category (raw — before dedup)
+  const rawPorCategoria = {};
+  for (const item of rawItems) {
+    const cat = item.categoria || 'Sin categoría';
+    rawPorCategoria[cat] = (rawPorCategoria[cat] || 0) + 1;
+  }
+
+  // Build eliminated list
+  const eliminados = [];
+  for (const [tituloNorm, occurrences] of Object.entries(byTitle)) {
+    const reimpr = occurrences.filter(o => o.categoria === 'REIMPRESIONES');
+    const main = occurrences.filter(o => o.categoria !== 'REIMPRESIONES');
+    // Exact dupes within main
+    const seenE = new Set();
+    for (const o of main) {
+      const key = o.tituloNorm + '|' + String(o.eanRaw);
+      if (seenE.has(key)) {
+        eliminados.push({ titulo: o.titulo, ean: o.eanRawStr, motivo: 'Duplicado exacto (mismo título + ISBN)', categoria: o.categoria });
+      } else seenE.add(key);
+    }
+    // Reimpr merged into main
+    if (reimpr.length > 0 && main.length > 0) {
+      for (const r of reimpr) {
+        eliminados.push({ titulo: r.titulo, ean: r.eanRawStr, motivo: 'Reimpresión unificada con entrada principal', categoria: 'REIMPRESIONES' });
+      }
+    }
+  }
+
+  const report = {
+    total_filas_crudas: rawItems.length,
+    titulos_unicos: finalItems.length,
+    duplicados_exactos_eliminados: exactDupesRemoved,
+    reimpresion_titulos_marcados: reimprMarked,
+    errores_reimpresion_sin_categoria: reimprSoloError,
+    ean_creados_total: eanCreatedTotal,
+    ean_creados_por_razon: eanCreatedReasons,
+    filas_ignoradas_antes_novedades: skippedBefore,
+    items_por_categoria: itemsPorCategoria,
+    raw_por_categoria: rawPorCategoria,
+    eliminados,
+  };
+
+  return { items: outputItems, rawItems, report };
+}
+
+/* ───────── OVNIPRESS PROCESSOR ───────── */
+
+function cleanISBN(value) {
+  if (value == null) return null;
+  let s = String(value).trim();
+  if (!s || /^(s\/d|sin isbn|a confirmar)$/i.test(s)) return null;
+  // Remove everything except digits
+  s = s.replace(/[^0-9]/g, '');
+  return s.length >= 10 ? s : null;
+}
+
+function processOvnipress(rows) {
+  const rawItems = [];
+  let started = false;
+  let currentSection = null;
+  let skippedBefore = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nonNull = row.filter(v => v != null && String(v).trim() !== '');
+
+    // Not started yet — look for NOVEDADES in col A
+    if (!started) {
+      if (nonNull.length === 1 && String(nonNull[0]).trim() === 'NOVEDADES') {
+        started = true;
+        currentSection = 'NOVEDADES';
+      } else {
+        skippedBefore++;
+      }
+      continue;
+    }
+
+    // Skip empty rows
+    if (!nonNull.length) continue;
+
+    // Detect SUBTOTAL / TOTAL → stop only when the ENTIRE first string is a stop word
+    const firstStr = nonNull.find(v => typeof v === 'string');
+    if (firstStr) {
+      const t = firstStr.trim().toUpperCase();
+      if (t === 'TOTAL' || t === 'SUBTOTAL' || t === 'GRAN TOTAL') break;
+    }
+
+    // Detect header rows: col C (index 2) = 'ISBN'
+    // First header (fila 14): col A = 'Cant. de pág' → skip but keep NOVEDADES section
+    // Second header (fila 21): col A = null → marks transition to CATÁLOGO GENERAL
+    if (row[2] && typeof row[2] === 'string' && row[2].trim().toUpperCase() === 'ISBN') {
+      // Only switch to FONDO on the SECOND header (col A is null/empty)
+      if (!row[0] && !row[1] && currentSection === 'NOVEDADES') currentSection = 'CATÁLOGO GENERAL';
+      continue;
+    }
+    if (row[1] && typeof row[1] === 'string' && row[1].trim() === 'Título') continue;
+
+    // Extract product: col B = título, col C = ISBN, col D = precio, col E = cantidad
+    const titulo = row[1] ? String(row[1]).trim() : null;
+    if (!titulo) continue;
+
+    const isbnRaw = row[2] ?? null;
+    let precio = null;
+    if (row[3] != null) { const p = parseFloat(String(row[3]).replace(',','.')); if (!isNaN(p)) precio = Math.round(p); }
+    let cantidad = null;
+    if (row[4] != null) { const c = parseInt(row[4]); if (!isNaN(c) && c > 0) cantidad = c; }
+    // col A = páginas (extra info)
+    const paginas = row[0] && typeof row[0] === 'number' ? row[0] : null;
+
+    rawItems.push({ titulo, tituloNorm: normalizeTitle(titulo), isbnRaw, isbnRawStr: String(isbnRaw ?? ''), precio, cantidad, paginas, categoria: currentSection });
+  }
+
+  // Dedupe by title
+  const byTitle = {};
+  for (const item of rawItems) {
+    if (!byTitle[item.tituloNorm]) byTitle[item.tituloNorm] = [];
+    byTitle[item.tituloNorm].push(item);
+  }
+
+  let exactDupesRemoved = 0;
+  const finalItems = [];
+  for (const occurrences of Object.values(byTitle)) {
+    const seen = new Set(); const deduped = [];
+    for (const o of occurrences) {
+      const key = o.tituloNorm + '|' + o.isbnRawStr;
+      if (seen.has(key)) exactDupesRemoved++;
+      else { seen.add(key); deduped.push(o); }
+    }
+    finalItems.push(...deduped); // keep all editions (same title, different ISBN)
+  }
+
+  // EAN resolution (same logic as Ivrea but using cleanISBN)
+  const eanToTitles = {};
+  for (const item of finalItems) {
+    const e = cleanISBN(item.isbnRaw);
+    if (e) { if (!eanToTitles[e]) eanToTitles[e] = []; eanToTitles[e].push(item.tituloNorm); }
+  }
+
+  const eanCreatedReasons = {}; let eanCreatedTotal = 0;
+  const outputItems = finalItems.map(item => {
+    const isbnClean = cleanISBN(item.isbnRaw);
+    let eanOficial = null, eanInterno = null, eanRazon = 'ok';
+    if (!isbnClean) eanRazon = 'en_blanco_o_por_confirmar';
+    else if (!validateEAN13(isbnClean)) eanRazon = 'ean_invalido';
+    else if (eanToTitles[isbnClean]?.length > 1) eanRazon = 'ean_repetido_en_varios_titulos';
+    else eanOficial = isbnClean;
+    if (eanRazon !== 'ok') {
+      eanInterno = makeInternalEAN(item.tituloNorm);
+      eanCreatedReasons[eanRazon] = (eanCreatedReasons[eanRazon] || 0) + 1;
+      eanCreatedTotal++;
+    }
+    const changes = [];
+    const isbnCleanStr = cleanISBN(item.isbnRaw);
+    if (item.isbnRawStr && isbnCleanStr && item.isbnRawStr !== isbnCleanStr)
+      changes.push({ type: 'isbn', msg: 'ISBN normalizado (guiones removidos)' });
+    if (eanRazon !== 'ok') changes.push({ type: 'int', msg: eanRazon.replace(/_/g,' ') });
+
+    return {
+      product_id: 'ovni:' + hashStr(item.tituloNorm),
+      titulo: item.titulo,
+      titulo_normalizado: item.tituloNorm,
+      categoria_principal: item.categoria,
+      subetiquetas: { reimpresionSemana: false },
+      errores: { soloEnReimpresiones: false },
+      ean_oficial: eanOficial,
+      ean_interno: eanInterno,
+      ean_final: eanOficial || eanInterno,
+      ean_razon: eanRazon,
+      precio_tapa: item.precio,
+      cantidad: item.cantidad,
+      paginas: item.paginas,
+      _raw_ean: item.isbnRawStr,
+      _raw_titulo: item.titulo,
+      _changes: changes,
+    };
+  });
+
+  const itemsPorCategoria = {};
+  for (const item of outputItems) {
+    const cat = item.categoria_principal || 'Sin categoría';
+    itemsPorCategoria[cat] = (itemsPorCategoria[cat] || 0) + 1;
+  }
+
+  const rawPorCategoria = {};
+  for (const item of rawItems) {
+    const cat = item.categoria || 'Sin categoría';
+    rawPorCategoria[cat] = (rawPorCategoria[cat] || 0) + 1;
+  }
+
+  // Build eliminated list for Ovnipress — key must be title+isbn (same as dedup)
+  const eliminados = [];
+  const seenOvni = new Set();
+  for (const item of rawItems) {
+    const key = item.tituloNorm + '|' + item.isbnRawStr;
+    if (seenOvni.has(key)) {
+      eliminados.push({ titulo: item.titulo, ean: item.isbnRawStr, motivo: 'Duplicado exacto (mismo título + ISBN)', categoria: item.categoria });
+    } else { seenOvni.add(key); }
+  }
+
+  return {
+    items: outputItems,
+    rawItems,
+    report: {
+      editorial: 'Ovnipress',
+      total_filas_crudas: rawItems.length,
+      titulos_unicos: finalItems.length,
+      duplicados_exactos_eliminados: exactDupesRemoved,
+      reimpresion_titulos_marcados: 0,
+      errores_reimpresion_sin_categoria: 0,
+      ean_creados_total: eanCreatedTotal,
+      ean_creados_por_razon: eanCreatedReasons,
+      items_por_categoria: itemsPorCategoria,
+      raw_por_categoria: rawPorCategoria,
+      eliminados,
+    }
+  };
+}
+
+/* ───────── PANINI-UTOPIA PROCESSOR ───────── */
+
+function processPanini(rows) {
+  const rawItems = [];
+  let started = false;
+  let currentSection = null;
+  let skippedBefore = 0;
+  const SECTION_RE = /^\*+\s*(.+?)\s*\*+\s*$/;
+  const STOP_WORDS = ['TOTAL PANINI Y UTOPIA','TOTAL','SUBTOTAL','GRAN TOTAL'];
+
+  const eliminados = [];  // hoisted — also used during parsing phase
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+
+    if (!started) {
+      if (nn.length === 1 && String(nn[0]).trim() === 'NOVEDADES') {
+        started = true; currentSection = 'NOVEDADES';
+      } else skippedBefore++;
+      continue;
+    }
+
+    if (!nn.length) continue;
+
+    // STOP check — exact match on first string value
+    const firstStr = nn.find(v => typeof v === 'string');
+    if (firstStr) {
+      const t = firstStr.trim().toUpperCase();
+      if (STOP_WORDS.some(s => t === s)) break;
+    }
+
+    // Section marker: col A = null, col B = **NAME** or NOVEDADES date
+    if (!row[0] && row[1] && typeof row[1] === 'string') {
+      const b = row[1].trim();
+      const m = b.match(SECTION_RE);
+      if (m) { currentSection = m[1].trim(); continue; }
+      if (b.toUpperCase().startsWith('NOVEDADES')) { currentSection = b; continue; }
+      // col B only, no C, no D → track as omitted
+      if (!row[2] && !row[3]) {
+        eliminados.push({ titulo: b, ean: '', motivo: 'Sin código ni ISBN — omitido en lectura', categoria: currentSection });
+        continue;
+      }
+    }
+
+    // Header row
+    if (row[0] && typeof row[0] === 'string' && row[0].trim().toLowerCase() === 'código') continue;
+
+    const titulo = row[1] ? String(row[1]).trim() : null;
+    if (!titulo) continue;
+
+    const codigo = row[0] ? String(row[0]).trim() : null;
+    const isbnRaw = row[2] ?? null;
+    const isbnRawStr = String(isbnRaw ?? '');
+    let precio = null;
+    if (row[3] != null) { const p = parseFloat(String(row[3]).replace(',','.')); if (!isNaN(p)) precio = Math.round(p); }
+    let cantidad = null;
+    if (row[4] != null) { const c = parseInt(row[4]); if (!isNaN(c) && c > 0) cantidad = c; }
+
+    rawItems.push({ titulo, tituloNorm: normalizeTitle(titulo), codigo, isbnRaw, isbnRawStr, precio, cantidad, categoria: currentSection });
+  }
+
+  // Dedupe by title
+  const byTitle = {};
+  for (const item of rawItems) {
+    if (!byTitle[item.tituloNorm]) byTitle[item.tituloNorm] = [];
+    byTitle[item.tituloNorm].push(item);
+  }
+
+  let exactDupesRemoved = 0;
+  const finalItems = [];
+  for (const occurrences of Object.values(byTitle)) {
+    const seen = new Set(); const deduped = [];
+    for (const o of occurrences) {
+      const key = o.tituloNorm + '|' + o.isbnRawStr;
+      if (seen.has(key)) {
+        exactDupesRemoved++;
+        eliminados.push({ titulo: o.titulo, ean: o.isbnRawStr, motivo: 'Duplicado exacto (mismo título + ISBN)', categoria: o.categoria });
+      } else { seen.add(key); deduped.push(o); }
+    }
+    finalItems.push(...deduped); // keep all editions (same title, different ISBN)
+  }
+
+  // EAN resolution
+  const eanToTitles = {};
+  for (const item of finalItems) {
+    const e = cleanISBN(item.isbnRaw);
+    if (e) { if (!eanToTitles[e]) eanToTitles[e] = []; eanToTitles[e].push(item.tituloNorm); }
+  }
+
+  const eanCreatedReasons = {}; let eanCreatedTotal = 0;
+  const outputItems = finalItems.map(item => {
+    const isbnClean = cleanISBN(item.isbnRaw);
+    let eanOficial = null, eanInterno = null, eanRazon = 'ok';
+    if (!isbnClean) eanRazon = 'en_blanco_o_por_confirmar';
+    else if (!validateEAN13(isbnClean)) eanRazon = 'ean_invalido';
+    else if (eanToTitles[isbnClean]?.length > 1) eanRazon = 'ean_repetido_en_varios_titulos';
+    else eanOficial = isbnClean;
+    if (eanRazon !== 'ok') {
+      eanInterno = makeInternalEAN(item.tituloNorm);
+      eanCreatedReasons[eanRazon] = (eanCreatedReasons[eanRazon] || 0) + 1;
+      eanCreatedTotal++;
+    }
+    const changes = [];
+    if (item.isbnRawStr && isbnClean && item.isbnRawStr !== isbnClean)
+      changes.push({ type: 'isbn', msg: 'ISBN normalizado' });
+    if (eanRazon !== 'ok') changes.push({ type: 'int', msg: eanRazon.replace(/_/g, ' ') });
+
+    return {
+      product_id: 'panini:' + hashStr(item.tituloNorm),
+      titulo: item.titulo,
+      titulo_normalizado: item.tituloNorm,
+      categoria_principal: item.categoria,
+      codigo: item.codigo,
+      subetiquetas: { reimpresionSemana: false },
+      errores: { soloEnReimpresiones: false },
+      ean_oficial: eanOficial,
+      ean_interno: eanInterno,
+      ean_final: eanOficial || eanInterno,
+      ean_razon: eanRazon,
+      precio_tapa: item.precio,
+      cantidad: item.cantidad,
+      _raw_ean: item.isbnRawStr,
+      _raw_titulo: item.titulo,
+      _changes: changes,
+    };
+  });
+
+  const itemsPorCategoria = {};
+  const rawPorCategoria = {};
+  for (const item of outputItems) {
+    const cat = item.categoria_principal || 'Sin categoría';
+    itemsPorCategoria[cat] = (itemsPorCategoria[cat] || 0) + 1;
+  }
+  for (const item of rawItems) {
+    const cat = item.categoria || 'Sin categoría';
+    rawPorCategoria[cat] = (rawPorCategoria[cat] || 0) + 1;
+  }
+
+  return {
+    items: outputItems,
+    rawItems,
+    report: {
+      editorial: 'Panini-Utopia',
+      total_filas_crudas: rawItems.length,
+      titulos_unicos: finalItems.length,
+      duplicados_exactos_eliminados: exactDupesRemoved,
+      reimpresion_titulos_marcados: 0,
+      errores_reimpresion_sin_categoria: 0,
+      ean_creados_total: eanCreatedTotal,
+      ean_creados_por_razon: eanCreatedReasons,
+      items_por_categoria: itemsPorCategoria,
+      raw_por_categoria: rawPorCategoria,
+      eliminados,
+    }
+  };
+}
+
+/* ───────── PENGUIN PROCESSOR ───────── */
+
+function processPenguin(rows) {
+  const rawItems = [];
+  let started = false;
+  let currentSection = null;
+  let skippedBefore = 0;
+  const eliminados = [];
+  const STOP_WORDS = ['SUBTOTAL PENGUIN','SUBTOTAL','TOTAL','GRAN TOTAL'];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+
+    if (!started) {
+      if (nn.length === 1 && String(nn[0]).trim().toUpperCase().includes('NOVEDADES')) {
+        started = true; currentSection = String(nn[0]).trim();
+      } else skippedBefore++;
+      continue;
+    }
+
+    if (!nn.length) continue;
+
+    // STOP
+    const firstStr = nn.find(v => typeof v === 'string');
+    if (firstStr) {
+      const t = firstStr.trim().toUpperCase();
+      if (STOP_WORDS.some(s => t === s)) break;
+    }
+
+    // Section marker: single value anywhere
+    if (nn.length === 1) {
+      currentSection = String(nn[0]).trim();
+      continue;
+    }
+
+    // Header row
+    if (row[0] && typeof row[0] === 'string' && row[0].trim().toUpperCase() === 'AUTOR') continue;
+
+    const titulo = row[1] ? String(row[1]).trim() : null;
+    if (!titulo) continue;
+
+    const autor = row[0] ? String(row[0]).trim() : null;
+    const isbnRaw = row[2] ?? null;
+    const isbnRawStr = String(isbnRaw ?? '');
+    let precio = null;
+    if (row[3] != null) { const p = parseFloat(String(row[3]).replace(',','.')); if (!isNaN(p)) precio = Math.round(p); }
+    let cantidad = null;
+    if (row[4] != null) { const c = parseInt(row[4]); if (!isNaN(c) && c > 0) cantidad = c; }
+
+    rawItems.push({ titulo, tituloNorm: normalizeTitle(titulo), autor, isbnRaw, isbnRawStr, precio, cantidad, categoria: currentSection });
+  }
+
+  // Dedupe by title
+  const byTitle = {};
+  for (const item of rawItems) {
+    if (!byTitle[item.tituloNorm]) byTitle[item.tituloNorm] = [];
+    byTitle[item.tituloNorm].push(item);
+  }
+
+  let exactDupesRemoved = 0;
+  const finalItems = [];
+  for (const occurrences of Object.values(byTitle)) {
+    const seen = new Set(); const deduped = [];
+    for (const o of occurrences) {
+      const key = o.tituloNorm + '|' + o.isbnRawStr;
+      if (seen.has(key)) {
+        exactDupesRemoved++;
+        eliminados.push({ titulo: o.titulo, ean: o.isbnRawStr, motivo: 'Duplicado exacto', categoria: o.categoria });
+      } else { seen.add(key); deduped.push(o); }
+    }
+    finalItems.push(...deduped); // keep all editions (same title, different ISBN)
+  }
+
+  // EAN resolution
+  const eanToTitles = {};
+  for (const item of finalItems) {
+    const e = cleanISBN(item.isbnRaw);
+    if (e) { if (!eanToTitles[e]) eanToTitles[e] = []; eanToTitles[e].push(item.tituloNorm); }
+  }
+
+  const eanCreatedReasons = {}; let eanCreatedTotal = 0;
+  const outputItems = finalItems.map(item => {
+    const isbnClean = cleanISBN(item.isbnRaw);
+    let eanOficial = null, eanInterno = null, eanRazon = 'ok';
+    if (!isbnClean) eanRazon = 'en_blanco_o_por_confirmar';
+    else if (!validateEAN13(isbnClean)) eanRazon = 'ean_invalido';
+    else if (eanToTitles[isbnClean]?.length > 1) eanRazon = 'ean_repetido_en_varios_titulos';
+    else eanOficial = isbnClean;
+    if (eanRazon !== 'ok') {
+      eanInterno = makeInternalEAN(item.tituloNorm);
+      eanCreatedReasons[eanRazon] = (eanCreatedReasons[eanRazon] || 0) + 1;
+      eanCreatedTotal++;
+    }
+    const changes = [];
+    if (item.isbnRawStr && isbnClean && item.isbnRawStr !== isbnClean)
+      changes.push({ type: 'isbn', msg: 'ISBN normalizado' });
+    if (eanRazon !== 'ok') changes.push({ type: 'int', msg: eanRazon.replace(/_/g, ' ') });
+
+    return {
+      product_id: 'penguin:' + hashStr(item.tituloNorm),
+      titulo: item.titulo,
+      titulo_normalizado: item.tituloNorm,
+      categoria_principal: item.categoria,
+      autor: item.autor,
+      subetiquetas: { reimpresionSemana: false },
+      errores: { soloEnReimpresiones: false },
+      ean_oficial: eanOficial,
+      ean_interno: eanInterno,
+      ean_final: eanOficial || eanInterno,
+      ean_razon: eanRazon,
+      precio_tapa: item.precio,
+      cantidad: item.cantidad,
+      _raw_ean: item.isbnRawStr,
+      _raw_titulo: item.titulo,
+      _changes: changes,
+    };
+  });
+
+  const itemsPorCategoria = {}, rawPorCategoria = {};
+  for (const item of outputItems) { const c = item.categoria_principal||'Sin categoría'; itemsPorCategoria[c] = (itemsPorCategoria[c]||0)+1; }
+  for (const item of rawItems) { const c = item.categoria||'Sin categoría'; rawPorCategoria[c] = (rawPorCategoria[c]||0)+1; }
+
+  return {
+    items: outputItems, rawItems,
+    report: {
+      editorial: 'Penguin',
+      total_filas_crudas: rawItems.length,
+      titulos_unicos: finalItems.length,
+      duplicados_exactos_eliminados: exactDupesRemoved,
+      reimpresion_titulos_marcados: 0,
+      errores_reimpresion_sin_categoria: 0,
+      ean_creados_total: eanCreatedTotal,
+      ean_creados_por_razon: eanCreatedReasons,
+      items_por_categoria: itemsPorCategoria,
+      raw_por_categoria: rawPorCategoria,
+      eliminados,
+    }
+  };
+}
+
+/* ───────── PLANETA PROCESSOR ───────── */
+function processPlaneta(rows) {
+  const eliminados = [];
+  const rawItems = [];
+  let started = false, section = null;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+    if (!started) {
+      if (nn.length===1 && String(nn[0]).trim().toUpperCase().includes('NOVEDADES')) { started=true; section=String(nn[0]).trim(); }
+      continue;
+    }
+    if (!nn.length) continue;
+    // Stop check — first string in row
+    const _ps = nn.find(v=>typeof v==='string');
+    if (_ps && ['TOTAL','SUBTOTAL'].some(s=>_ps.trim().toUpperCase()===s)) break;
+    if (nn.length===1) {
+      const val=String(nn[0]).trim();
+      if (val==='0') continue;
+      section=val; continue;
+    }
+    if (row[0] && typeof row[0]==='string' && ['TITULO','TITLE'].includes(row[0].trim().toUpperCase())) continue;
+    const titulo = row[0] ? String(row[0]).trim() : null;
+    if (!titulo) continue;
+    const isbnRaw=row[1]??null, isbnRawStr=String(isbnRaw??'');
+    let precio=null; if(row[2]!=null){const p=parseFloat(String(row[2]).replace(',','.')); if(!isNaN(p))precio=Math.round(p);}
+    let cantidad=null; if(row[3]!=null){const c=parseInt(row[3]); if(!isNaN(c)&&c>0)cantidad=c;}
+    rawItems.push({titulo,tituloNorm:normalizeTitle(titulo),isbnRaw,isbnRawStr,precio,cantidad,categoria:section});
+  }
+  return buildResult('planeta', rawItems, eliminados);
+}
+
+/* ───────── DEUX-POPFICTION PROCESSOR ───────── */
+function processDeux(rows) {
+  // Col A (0) = PRODUCTO (tipo) — LANZAMIENTOS aparece aqui como celda combinada
+  // Col B (1) = SELLO → categoria (normalizar a uppercase)
+  // Col C (2) = TITULO
+  // Col D (3) = ISBN (puede ser numero o string)
+  // Col E (4) = precio
+  // Col F (5) = cantidad
+  const eliminados = [];
+  const rawItems = [];
+  let started = false;
+  // STOP solo cuando col A o col B tiene exactamente estas palabras (no col G que dice Subtotal en header)
+  const STOP_WORDS = ['TOTAL','SUBTOTAL','SUBTOTAL POP FICTION','SUBTOTAL DEUX','GRAN TOTAL'];
+  // Filas de encabezado a saltear: col A = PRODUCTO y col B = SELLO al mismo tiempo
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+    if (!nn.length) continue;
+    const colA = row[0] != null ? String(row[0]).trim() : null;
+    const colB = row[1] != null ? String(row[1]).trim() : null;
+    const colC = row[2] != null ? String(row[2]).split(String.fromCharCode(10)).join(' ').split(String.fromCharCode(13)).join(' ').trim() : null;
+    const colD = row[3] != null ? row[3] : null;
+
+    if (!started) {
+      if (colA && colA.toUpperCase().includes('LANZAMIENTO')) started = true;
+      continue;
+    }
+
+    // Stop — mirar col A, col B y col C
+    if ((colA && STOP_WORDS.includes(colA.toUpperCase())) ||
+        (colB && STOP_WORDS.includes(colB.toUpperCase())) ||
+        (colC && STOP_WORDS.includes(colC.toUpperCase()))) break;
+
+    // Saltear fila de encabezado: cuando col A=PRODUCTO y col B=SELLO simultaneamente
+    if (colA && colA.toUpperCase() === 'PRODUCTO' && colB && colB.toUpperCase() === 'SELLO') continue;
+
+    // Titulo en col C
+    const titulo = colC || null;
+    if (!titulo) continue;
+
+    const isbnRawStr = colD != null ? (typeof colD === 'number' ? Math.round(colD).toString() : String(colD).trim()) : '';
+    const isbnRaw = colD != null ? (typeof colD === 'number' ? Math.round(colD) : colD) : null;
+    let precio = null;
+    if (row[4] != null) { const p = parseFloat(String(row[4]).replace(',','.')); if (!isNaN(p)) precio = Math.round(p); }
+    let cantidad = null;
+    if (row[5] != null) { const c = parseInt(row[5]); if (!isNaN(c) && c > 0) cantidad = c; }
+
+    const sello = colB || 'SIN SELLO';
+    const cat = sello.toUpperCase().trim();
+
+    rawItems.push({ titulo, tituloNorm: normalizeTitle(titulo), isbnRaw, isbnRawStr, precio, cantidad, categoria: cat, sello });
+  }
+  return buildResult('deux', rawItems, eliminados);
+}
+
+/* ───────── HOTEL DE LAS IDEAS PROCESSOR ───────── */
+function processHotel(rows) {
+  const eliminados = [];
+  const rawItems = [];
+  let section = 'CATÁLOGO';
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+    if (!nn.length) continue;
+    // Stop
+    const firstStr = nn.find(v=>typeof v==='string');
+    if (firstStr) { const t=firstStr.trim().toUpperCase(); if(t.includes('TOTAL')) break; }
+    // Header
+    if (row[1] && typeof row[1]==='string' && ['TÍTULO','TITULO'].includes(row[1].trim().toUpperCase())) continue;
+    // Section: single value
+    if (nn.length===1) { section=String(nn[0]).trim(); continue; }
+    const titulo = row[1] ? String(row[1]).trim() : null;
+    if (!titulo) continue;
+    const autor = row[0] ? String(row[0]).trim() : null;
+    const isbnRaw=row[2]??null, isbnRawStr=String(isbnRaw??'');
+    const novedad = row[6] && String(row[6]).toUpperCase().includes('NOVEDAD');
+    let precio=null; if(row[3]!=null){const p=parseFloat(String(row[3]).replace(',','.')); if(!isNaN(p))precio=Math.round(p);}
+    let cantidad=null; if(row[4]!=null){const c=parseInt(row[4]); if(!isNaN(c)&&c>0)cantidad=c;}
+    const cat = novedad ? 'NOVEDADES' : section;
+    rawItems.push({titulo,tituloNorm:normalizeTitle(titulo),isbnRaw,isbnRawStr,precio,cantidad,categoria:cat,autor});
+  }
+  return buildResult('hotel', rawItems, eliminados);
+}
+
+/* ───────── V&R PROCESSOR ───────── */
+function processVR(rows) {
+  const eliminados = [];
+  const rawItems = [];
+  let section = 'NOVEDADES';
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+    if (!nn.length) continue;
+    if (nn.length===1) {
+      const val=String(nn[0]).trim();
+      if (['SUBTOTAL V&R','SUBTOTAL','TOTAL'].some(s=>val.toUpperCase()===s.toUpperCase())) break;
+      section=val; continue;
+    }
+    if (row[0] && typeof row[0]==='string' && row[0].trim().toUpperCase()==='AUTOR') continue;
+    const titulo = row[1] ? String(row[1]).trim() : null;
+    if (!titulo) continue;
+    const autor = row[0] ? String(row[0]).trim() : null;
+    const isbnRaw=row[2]??null, isbnRawStr=String(isbnRaw??'');
+    let precio=null; if(row[3]!=null){const p=parseFloat(String(row[3]).replace(',','.')); if(!isNaN(p))precio=Math.round(p);}
+    let cantidad=null; if(row[4]!=null){const c=parseInt(row[4]); if(!isNaN(c)&&c>0)cantidad=c;}
+    rawItems.push({titulo,tituloNorm:normalizeTitle(titulo),isbnRaw,isbnRawStr,precio,cantidad,categoria:section,autor});
+  }
+  return buildResult('vr', rawItems, eliminados);
+}
+
+/* ───────── OTRAS PROCESSOR ───────── */
+function processOtras(rows) {
+  const eliminados = [];
+  const rawItems = [];
+  let section = null;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+    if (!nn.length) continue;
+    if (row[0] && typeof row[0]==='string' && ['AUTOR','NOMBRE'].includes(row[0].trim().toUpperCase())) continue;
+    if (nn.length===1) {
+      const val=String(nn[0]).trim();
+      if (['SUBTOTAL','TOTAL'].some(s=>val.toUpperCase()===s)) break;
+      section=val; continue;
+    }
+    const firstStr = nn.find(v=>typeof v==='string');
+    if (firstStr && ['SUBTOTAL','TOTAL'].some(s=>firstStr.trim().toUpperCase()===s)) break;
+    const titulo = row[1] ? String(row[1]).trim() : null;
+    if (!titulo) continue;
+    const autor = row[0] ? String(row[0]).trim() : null;
+    const isbnRaw=row[2]??null, isbnRawStr=String(isbnRaw??'');
+    let precio=null; if(row[3]!=null){const p=parseFloat(String(row[3]).replace(',','.')); if(!isNaN(p))precio=Math.round(p);}
+    let cantidad=null; if(row[4]!=null){const c=parseInt(row[4]); if(!isNaN(c)&&c>0)cantidad=c;}
+    rawItems.push({titulo,tituloNorm:normalizeTitle(titulo),isbnRaw,isbnRawStr,precio,cantidad,categoria:section||'GENERAL',autor});
+  }
+  return buildResult('otras', rawItems, eliminados);
+}
+
+/* ───────── MERCHANDISING PROCESSOR ───────── */
+function processMerchandising(rows) {
+  const eliminados = [];
+  const rawItems = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const nn = row.filter(v => v != null && String(v).trim() !== '');
+    if (!nn.length) continue;
+    if (row[0] && typeof row[0]==='string' && row[0].trim().toUpperCase()==='PRODUCTO') continue;
+    const firstStr = nn.find(v=>typeof v==='string');
+    if (firstStr && ['SUBTOTAL','TOTAL'].some(s=>firstStr.trim().toUpperCase()===s)) break;
+    const titulo = row[0] ? String(row[0]).trim() : null;
+    if (!titulo) continue;
+    const isbnRaw=row[1]??null, isbnRawStr=String(isbnRaw??'');
+    let precio=null; if(row[2]!=null){const p=parseFloat(String(row[2]).replace(',','.')); if(!isNaN(p))precio=Math.round(p);}
+    let cantidad=null; if(row[3]!=null){const c=parseInt(row[3]); if(!isNaN(c)&&c>0)cantidad=c;}
+    const descuento = row[5] ? String(row[5]).trim() : null;
+    rawItems.push({titulo,tituloNorm:normalizeTitle(titulo),isbnRaw,isbnRawStr,precio,cantidad,categoria:'MERCHANDISING',descuento});
+  }
+  return buildResult('merch', rawItems, eliminados);
+}
+
+/* ───────── SHARED BUILD RESULT ───────── */
+function buildResult(prefix, rawItems, eliminados) {
+  const byTitle = {};
+  for (const item of rawItems) {
+    if (!byTitle[item.tituloNorm]) byTitle[item.tituloNorm] = [];
+    byTitle[item.tituloNorm].push(item);
+  }
+  let exactDupesRemoved = 0;
+  const finalItems = [];
+  for (const occurrences of Object.values(byTitle)) {
+    const seen = new Set(); const deduped = [];
+    for (const o of occurrences) {
+      const key = o.tituloNorm + '|' + o.isbnRawStr;
+      if (seen.has(key)) {
+        exactDupesRemoved++;
+        eliminados.push({titulo:o.titulo, ean:o.isbnRawStr, motivo:'Duplicado exacto (mismo título + ISBN)', categoria:o.categoria});
+      } else { seen.add(key); deduped.push(o); }
+    }
+    finalItems.push(...deduped);
+  }
+  const eanToTitles = {};
+  for (const item of finalItems) {
+    const e = cleanISBN(item.isbnRaw);
+    if (e) { if (!eanToTitles[e]) eanToTitles[e] = []; eanToTitles[e].push(item.tituloNorm); }
+  }
+  const eanCreatedReasons = {}; let eanCreatedTotal = 0;
+  const outputItems = finalItems.map(item => {
+    const isbnClean = cleanISBN(item.isbnRaw);
+    let eanOficial=null, eanInterno=null, eanRazon='ok';
+    if (!isbnClean) eanRazon='en_blanco_o_por_confirmar';
+    else if (!validateEAN13(isbnClean)) eanRazon='ean_invalido';
+    else if (eanToTitles[isbnClean]?.length>1) eanRazon='ean_repetido_en_varios_titulos';
+    else eanOficial=isbnClean;
+    if (eanRazon!=='ok') {
+      eanInterno=makeInternalEAN(item.tituloNorm);
+      eanCreatedReasons[eanRazon]=(eanCreatedReasons[eanRazon]||0)+1;
+      eanCreatedTotal++;
+    }
+    const changes=[];
+    const isbnCleanStr = isbnClean || '';
+    if (item.isbnRawStr && isbnCleanStr && item.isbnRawStr!==isbnCleanStr)
+      changes.push({type:'isbn',msg:'ISBN normalizado'});
+    if (eanRazon!=='ok') changes.push({type:'int',msg:eanRazon.replace(/_/g,' ')});
+    return {
+      product_id: prefix+':'+hashStr(item.tituloNorm),
+      titulo:item.titulo, titulo_normalizado:item.tituloNorm,
+      categoria_principal:item.categoria,
+      autor:item.autor||null, tipo:item.tipo||null, sello:item.sello||null,
+      codigo:item.codigo||null, descuento:item.descuento||null,
+      subetiquetas:{reimpresionSemana:false}, errores:{soloEnReimpresiones:false},
+      ean_oficial:eanOficial, ean_interno:eanInterno,
+      ean_final:eanOficial||eanInterno, ean_razon:eanRazon,
+      precio_tapa:item.precio, cantidad:item.cantidad,
+      _raw_ean:item.isbnRawStr, _raw_titulo:item.titulo, _changes:changes,
+    };
+  });
+  const itemsPorCategoria={}, rawPorCategoria={};
+  for (const item of outputItems) { const c=item.categoria_principal||'Sin categoría'; itemsPorCategoria[c]=(itemsPorCategoria[c]||0)+1; }
+  for (const item of rawItems) { const c=item.categoria||'Sin categoría'; rawPorCategoria[c]=(rawPorCategoria[c]||0)+1; }
+  return {
+    items:outputItems, rawItems,
+    report:{
+      total_filas_crudas:rawItems.length, titulos_unicos:finalItems.length,
+      duplicados_exactos_eliminados:exactDupesRemoved,
+      reimpresion_titulos_marcados:0, errores_reimpresion_sin_categoria:0,
+      ean_creados_total:eanCreatedTotal, ean_creados_por_razon:eanCreatedReasons,
+      items_por_categoria:itemsPorCategoria, raw_por_categoria:rawPorCategoria,
+      eliminados,
+    }
+  };
+}
+
+/* ───────── STATE ───────── */
+// Multi-sheet state: { sheetName: { items, report, filtered, page, sortKey, sortDir } }
+let sheetsData = {};
+let activeTab = null;
+const PAGE_SIZE = 80;
+
+/* ───────── FILE HANDLING ───────── */
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+const SHEET_PROCESSORS = {
+  'Ivrea': processIvrea,
+  'Ovnipress': processOvnipress,
+  'Panini-Utopia': processPanini,
+  'Penguin': processPenguin,
+  'Planeta': processPlaneta,
+  'Deux-PopFiction': processDeux,
+  'Hotel de las Ideas': processHotel,
+  'V&R': processVR,
+  'Otras': processOtras,
+  'Merchandising': processMerchandising,
+};
+
+function handleFile(file) {
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('processing').style.display = 'block';
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+
+      const available = Object.keys(SHEET_PROCESSORS).filter(s => wb.SheetNames.includes(s));
+      if (!available.length) {
+        alert('No se encontró ninguna pestaña compatible (Ivrea, Ovnipress).');
+        reset(); return;
+      }
+
+      sheetsData = {};
+      for (const sheetName of available) {
+        setStatus('Procesando ' + sheetName + '...');
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+        const result = SHEET_PROCESSORS[sheetName](rows);
+        sheetsData[sheetName] = {
+          items: result.items,
+          rawItems: result.rawItems || [],
+          report: result.report,
+          filtered: result.items,
+          page: 1, sortKey: null, sortDir: 1,
+          viewMode: 'raw',
+        };
+      }
+
+      setStatus('Renderizando...');
+      renderAll();
+
+      document.getElementById('processing').style.display = 'none';
+      document.getElementById('results').style.display = 'block';
+    } catch(err) {
+      console.error('Processing error:', err);
+      document.getElementById('processing').style.display = 'none';
+      document.getElementById('upload-area').innerHTML = `
+        <div style="color:#f87171;font-family:monospace;padding:24px;background:#1a0000;border:1px solid #f87171;margin:24px;">
+          <div style="font-size:14px;font-weight:700;margin-bottom:8px">❌ ERROR AL PROCESAR</div>
+          <div style="font-size:12px;margin-bottom:8px">${err.message}</div>
+          <div style="font-size:10px;color:#888;white-space:pre-wrap">${err.stack||''}</div>
+          <button onclick="location.reload()" style="margin-top:16px;padding:8px 16px;background:#333;color:#fff;border:none;cursor:pointer">Reintentar</button>
+        </div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function setStatus(msg) {
+  document.getElementById('proc-status').textContent = msg;
+}
+
+/* ───────── RENDER ALL ───────── */
+function renderAll() {
+  renderSummaryBar();
+  renderTabs();
+  activeTab = Object.keys(sheetsData)[0];
+  switchTab(activeTab);
+}
+
+/* ── RESUMEN GENERAL ── */
+function renderSummaryBar() {
+  if (!Object.keys(sheetsData).length) return;
+
+  let totalTitulos = 0, totalRaw = 0, totalDupes = 0, totalOmitidos = 0;
+  let totalEanOk = 0, totalEanInt = 0, totalReimp = 0;
+  const rows = [];
+
+  for (const [name, d] of Object.entries(sheetsData)) {
+    const r = d.report;
+    const raw = r.total_filas_crudas || 0;
+    const unicos = r.titulos_unicos || 0;
+    const dupes = r.duplicados_exactos_eliminados || 0;
+    const omitidos = (r.eliminados||[]).filter(e=>e.motivo.includes('omitido')).length;
+    const eanInt = r.ean_creados_total || 0;
+    const eanOk = unicos - eanInt;
+    const reimp = r.reimpresion_titulos_marcados || 0;
+    const eanProblem = (r.ean_creados_por_razon?.en_blanco_o_por_confirmar||0) + (r.ean_creados_por_razon?.ean_repetido_en_varios_titulos||0);
+    const semaforo = eanProblem > 0 ? '🟡' : (dupes > 0 || omitidos > 0 ? '🟠' : '🟢');
+
+    totalTitulos += unicos; totalRaw += raw; totalDupes += dupes;
+    totalOmitidos += omitidos; totalEanOk += eanOk; totalEanInt += eanInt; totalReimp += reimp;
+
+    // Build change pills
+    const pills = [];
+    if (dupes > 0) pills.push(`<span class="chg-pill chg-dupe">${dupes} dupes</span>`);
+    if (omitidos > 0) pills.push(`<span class="chg-pill chg-omit">${omitidos} omitidos</span>`);
+    if (reimp > 0) pills.push(`<span class="chg-pill chg-reimpr">${reimp} reimpr.</span>`);
+    if ((r.ean_creados_por_razon?.en_blanco_o_por_confirmar||0) > 0) pills.push(`<span class="chg-pill chg-int">${r.ean_creados_por_razon.en_blanco_o_por_confirmar} x confirmar</span>`);
+    if ((r.ean_creados_por_razon?.ean_invalido||0) > 0) pills.push(`<span class="chg-pill chg-isbn">${r.ean_creados_por_razon.ean_invalido} inválidos</span>`);
+    if ((r.ean_creados_por_razon?.ean_repetido_en_varios_titulos||0) > 0) pills.push(`<span class="chg-pill chg-isbn">${r.ean_creados_por_razon.ean_repetido_en_varios_titulos} repetidos</span>`);
+
+    // Build eliminados detail HTML
+    const elims = r.eliminados || [];
+    let detailHTML = '';
+    if (elims.length) {
+      const byMotivo = {};
+      for (const e of elims) { if(!byMotivo[e.motivo]) byMotivo[e.motivo]=[]; byMotivo[e.motivo].push(e); }
+      for (const [motivo, items] of Object.entries(byMotivo)) {
+        detailHTML += `<div class="expand-group">
+          <div class="expand-group-title">▸ ${escHtml(motivo)} (${items.length})</div>`;
+        for (const item of items) {
+          detailHTML += `<div class="expand-item">
+            <span class="expand-titulo">${escHtml(item.titulo)}</span>
+            <span class="expand-meta">${escHtml(item.ean||'—')}</span>
+            <span class="expand-meta">${escHtml(item.categoria||'—')}</span>
+          </div>`;
+        }
+        detailHTML += '</div>';
+      }
+    }
+    const hasDetail = detailHTML.length > 0;
+    const rowId = 'erow-' + name.replace(/[^a-z0-9]/gi,'_');
+
+    rows.push({name, semaforo, raw, unicos, eanOk, eanInt, pills, hasDetail, detailHTML, rowId, dupes, omitidos, reimp});
+  }
+
+  let html = `<div class="resumen-wrap">
+    <div class="resumen-title">RESUMEN DEL EXCEL</div>
+    <table class="resumen-table">
+      <thead><tr>
+        <th></th>
+        <th>Editorial</th>
+        <th class="num">En Excel</th>
+        <th class="num">Procesados</th>
+        <th class="num">Eliminados</th>
+        <th class="num td-ok">EAN válidos</th>
+        <th class="num td-warn">EAN internos</th>
+        <th>Cambios</th>
+      </tr></thead>
+      <tbody>`;
+
+  for (const row of rows) {
+    const eliminadosCount = row.raw - row.unicos;
+    const clickAttr = row.hasDetail ? `onclick="toggleDetail('${row.rowId}')"` : '';
+    const arrow = row.hasDetail ? `<span id="arr-${row.rowId}" style="float:right;color:var(--muted);font-size:10px">▶</span>` : '';
+    html += `<tr ${clickAttr} onclick="switchTab('${row.name}')">
+      <td class="semaforo">${row.semaforo}</td>
+      <td><strong>${escHtml(row.name)}</strong>${arrow}</td>
+      <td class="td-num td-muted">${row.raw.toLocaleString()}</td>
+      <td class="td-num">${row.unicos.toLocaleString()}</td>
+      <td class="td-num ${eliminadosCount>0?'td-err':'td-muted'}">${eliminadosCount>0?'-'+eliminadosCount:'—'}</td>
+      <td class="td-num td-ok">${row.eanOk.toLocaleString()}</td>
+      <td class="td-num ${row.eanInt>0?'td-warn':'td-muted'}">${row.eanInt||'—'}</td>
+      <td>${row.pills.join('')||'<span class="td-muted" style="font-size:10px">sin cambios</span>'}</td>
+    </tr>`;
+    if (row.hasDetail) {
+      html += `<tr class="expand-row" id="${row.rowId}">
+        <td colspan="7" style="padding:0">
+          <div class="expand-inner">${row.detailHTML}</div>
+        </td>
+      </tr>`;
+    }
+  }
+
+  // Totals row
+  html += `<tr class="resumen-total">
+    <td></td>
+    <td>TOTAL (${rows.length} editoriales)</td>
+    <td class="td-num td-muted">${totalRaw.toLocaleString()}</td>
+    <td class="td-num">${totalTitulos.toLocaleString()}</td>
+    <td class="td-num td-err">${(totalRaw-totalTitulos)>0?'-'+(totalRaw-totalTitulos).toLocaleString():'—'}</td>
+    <td class="td-num td-ok">${totalEanOk.toLocaleString()}</td>
+    <td class="td-num td-warn">${totalEanInt||'—'}</td>
+    <td></td>
+  </tr>`;
+
+  html += '</tbody></table></div>';
+  document.getElementById('summary-bar').innerHTML = html;
+}
+
+function toggleDetail(rowId) {
+  event.stopPropagation();
+  const row = document.getElementById(rowId);
+  const arr = document.getElementById('arr-' + rowId);
+  if (!row) return;
+  const open = row.style.display === 'table-row';
+  row.style.display = open ? 'none' : 'table-row';
+  if (arr) arr.textContent = open ? '▶' : '▼';
+}
+
+/* ── TABS NAV ── */
+function renderTabs() {
+  const nav = document.getElementById('tabs-nav');
+  const panels = document.getElementById('tabs-panels');
+  nav.innerHTML = '';
+  panels.innerHTML = '';
+
+  for (const sheetName of Object.keys(sheetsData)) {
+    const d = sheetsData[sheetName];
+    // Tab button
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn';
+    btn.id = 'tab-btn-' + sheetName;
+    btn.textContent = sheetName + ' (' + d.items.length.toLocaleString() + ')';
+    btn.onclick = () => switchTab(sheetName);
+    nav.appendChild(btn);
+
+    // Tab panel
+    const panel = document.createElement('div');
+    panel.className = 'tab-panel';
+    panel.id = 'tab-panel-' + sheetName;
+    panel.innerHTML = buildPanelHTML(sheetName);
+    panels.appendChild(panel);
+  }
+}
+
+function buildPanelHTML(sheetName) {
+  return `
+    <div class="editorial-label">${sheetName}</div>
+    <div class="report-grid" id="rg-${sheetName}"></div>
+    <div class="ean-breakdown" id="eb-${sheetName}"></div>
+    <div id="cb-${sheetName}" style="margin-bottom:24px;"></div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap;">
+      <div class="view-toggle">
+        <button class="vt-btn active" id="vt-raw-${sheetName}" onclick="setView('${sheetName}','raw')">RAW</button>
+        <div class="vt-divider"></div>
+        <button class="vt-btn" id="vt-clean-${sheetName}" onclick="setView('${sheetName}','clean')">LIMPIO</button>
+      </div>
+      <span id="vt-hint-${sheetName}" style="font-family:monospace;font-size:11px;color:var(--muted)">
+        Datos originales del Excel sin modificar
+      </span>
+    </div>
+
+    <div class="filters">
+      <input class="filter-input" id="search-${sheetName}" placeholder="Buscar título..." oninput="applyFilters('${sheetName}')">
+      <select class="filter-select" id="catf-${sheetName}" onchange="applyFilters('${sheetName}')">
+        <option value="">Todas las categorías</option>
+      </select>
+      <select class="filter-select" id="eanf-${sheetName}" onchange="applyFilters('${sheetName}')">
+        <option value="">Todos los EAN</option>
+        <option value="ok">✓ EAN válido</option>
+        <option value="en_blanco_o_por_confirmar">⚠ Por confirmar</option>
+        <option value="ean_invalido">✗ Inválido</option>
+        <option value="ean_repetido_en_varios_titulos">⚠ Repetido</option>
+      </select>
+      <select class="filter-select" id="reimf-${sheetName}" onchange="applyFilters('${sheetName}')">
+        <option value="">Todas</option>
+        <option value="1">🔵 Reimpresiones</option>
+        <option value="0">Sin reimpr.</option>
+      </select>
+    </div>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr id="thead-${sheetName}"></tr>
+        </thead>
+        <tbody id="tb-${sheetName}"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="btn btn-ghost" onclick="prevPage('${sheetName}')">← Ant.</button>
+      <span class="page-info" id="pi-${sheetName}"></span>
+      <button class="btn btn-ghost" onclick="nextPage('${sheetName}')">Sig. →</button>
+    </div>`;
+}
+
+function setView(sheetName, mode) {
+  const d = sheetsData[sheetName];
+  d.viewMode = mode;
+
+  // Toggle button states
+  document.getElementById('vt-raw-' + sheetName).classList.toggle('active', mode === 'raw');
+  document.getElementById('vt-clean-' + sheetName).classList.toggle('active', mode === 'clean');
+
+  const hints = {
+    raw:   'Datos exactos del Excel — sin ninguna modificación',
+    clean: 'Datos procesados — en naranja lo que fue modificado',
+  };
+  document.getElementById('vt-hint-' + sheetName).textContent = hints[mode];
+
+  // Re-render category breakdown + eliminados panel based on mode
+  renderBreakdownPanel(sheetName, d.report, mode);
+
+  renderTable(sheetName);
+}
+
+function switchTab(sheetName) {
+  activeTab = sheetName;
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-btn-' + sheetName).classList.add('active');
+  // Update panels
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-panel-' + sheetName).classList.add('active');
+  // Render this panel if not yet rendered
+  const d = sheetsData[sheetName];
+  if (!d._rendered) {
+    renderReport(sheetName, d.report);
+    populateCategoryFilter(sheetName);
+    applyFilters(sheetName);
+    d._rendered = true;
+  }
+  // Update count label
+  updateCountLabel();
+}
+
+function updateCountLabel() {
+  const d = sheetsData[activeTab];
+  if (d) document.getElementById('count-label').textContent =
+    activeTab + ': ' + d.filtered.length.toLocaleString() + ' productos';
+}
+
+/* ───────── REPORT ───────── */
+function renderReport(sheetName, report) {
+  const eanOk = (report.titulos_unicos || 0) - (report.ean_creados_total || 0);
+  document.getElementById('rg-' + sheetName).innerHTML = `
+    <div class="stat-card accent">
+      <div class="stat-label">Títulos únicos</div>
+      <div class="stat-value">${(report.titulos_unicos||0).toLocaleString()}</div>
+      <div class="stat-sub">${report.total_filas_crudas} filas brutas</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">EAN Oficiales</div>
+      <div class="stat-value">${eanOk.toLocaleString()}</div>
+      <div class="stat-sub">EAN-13 válidos y únicos</div>
+    </div>
+    <div class="stat-card yellow">
+      <div class="stat-label">EAN Internos</div>
+      <div class="stat-value">${(report.ean_creados_total||0).toLocaleString()}</div>
+      <div class="stat-sub">Códigos generados</div>
+    </div>
+    <div class="stat-card blue">
+      <div class="stat-label">Reimpresiones</div>
+      <div class="stat-value">${report.reimpresion_titulos_marcados||0}</div>
+      <div class="stat-sub">Esta semana</div>
+    </div>
+    <div class="stat-card ${(report.duplicados_exactos_eliminados||0) > 0 ? 'red' : 'green'}">
+      <div class="stat-label">Duplicados</div>
+      <div class="stat-value">${report.duplicados_exactos_eliminados||0}</div>
+      <div class="stat-sub">Eliminados</div>
+    </div>`;
+
+  // EAN reasons
+  const reasons = report.ean_creados_por_razon || {};
+  const reasonLabels = {
+    'en_blanco_o_por_confirmar': { label: 'Por confirmar', color: '#facc15' },
+    'ean_invalido': { label: 'EAN inválido', color: '#f87171' },
+    'ean_repetido_en_varios_titulos': { label: 'EAN repetido', color: '#fb923c' },
+  };
+  let pills = '<h3>Motivos de EAN interno</h3>';
+  if (!Object.keys(reasons).length) {
+    pills += '<span style="font-family:monospace;font-size:12px;color:var(--ok)">✓ Todos los EAN son válidos</span>';
+  } else {
+    for (const [k, c] of Object.entries(reasons)) {
+      const info = reasonLabels[k] || { label: k, color: '#888' };
+      pills += `<div class="ean-pill"><span class="dot" style="background:${info.color}"></span>${info.label}: <strong>${c}</strong></div>`;
+    }
+  }
+  document.getElementById('eb-' + sheetName).innerHTML = pills;
+
+  // Initial render uses RAW counts (default view is RAW)
+  renderBreakdownPanel(sheetName, report, 'raw');
+}
+
+const CAT_COLORS = {
+  'NOVEDADES':'#d4ff00','REIMPRESIONES':'#60a5fa','MANGAS EN CURSO':'#4ade80',
+  'MANGAS YA COMPLETOS':'#a78bfa','MANGAS DE TOMO ÚNICO':'#fb923c','COMICS':'#f472b6',
+  'CATÁLOGO GENERAL':'#38bdf8','PANINI MANGA':'#c084fc','PANINI MARVEL':'#f87171','PANINI COMICS':'#fb923c','UTOPIA MANGA':'#34d399','UTOPIA COMICS':'#22d3ee','MANGA':'#c084fc','COMICS':'#f472b6','LIBROS':'#38bdf8','POKÉMON':'#facc15','HARRY POTTER':'#818cf8','STEPHEN KING':'#f87171','BRANDON SANDERSON':'#34d399','QUINO':'#fb923c','FIVE NIGHTS AT FREDDYS':'#e879f9','Sin categoría':'#555',
+};
+
+function renderBreakdownPanel(sheetName, report, mode) {
+  const container = document.getElementById('cb-' + sheetName);
+  if (!container) return;
+
+  const isRaw = mode === 'raw';
+  const counts = isRaw ? (report.raw_por_categoria || {}) : (report.items_por_categoria || {});
+  const total = isRaw ? (report.total_filas_crudas || 1) : (report.titulos_unicos || 1);
+  const label = isRaw ? 'Items por categoría (Excel original)' : 'Items por categoría (después de limpieza)';
+
+  // ── Category bars ──
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  const max = sorted[0]?.[1] || 1;
+  let html = '<div class="cat-breakdown-wrap"><div class="cat-breakdown-title">' + label + '</div><div class="cat-rows">';
+  for (const [cat, count] of sorted) {
+    const cleanCount = (report.items_por_categoria || {})[cat] || 0;
+    const rawCount = (report.raw_por_categoria || {})[cat] || 0;
+    const diff = rawCount - cleanCount;
+    const pct = Math.round(count / total * 100);
+    const barW = Math.round(count / max * 100);
+    const color = CAT_COLORS[cat] || '#888';
+    // In clean mode, show diff badge if any items were removed from this category
+    const diffBadge = (!isRaw && diff > 0)
+      ? ' <span title="' + diff + ' eliminados en limpieza" style="font-family:monospace;font-size:9px;background:rgba(248,113,113,0.15);color:#f87171;padding:1px 5px;">-' + diff + '</span>'
+      : '';
+    html += '<div class="cat-row">' +
+      '<div class="cat-name" style="color:' + color + '">' + cat + '</div>' +
+      '<div class="cat-bar-wrap"><div class="cat-bar" style="width:' + barW + '%;background:' + color + ';opacity:0.75"></div></div>' +
+      '<div class="cat-count" style="color:' + color + '">' + count.toLocaleString() + diffBadge + '</div>' +
+      '<div class="cat-pct">' + pct + '%</div>' +
+      '</div>';
+  }
+  html += '</div></div>';
+
+  // ── Eliminados panel (only in clean mode) ──
+  const eliminados = report.eliminados || [];
+  if (!isRaw && eliminados.length) {
+    const byMotivo = {};
+    for (const e of eliminados) {
+      if (!byMotivo[e.motivo]) byMotivo[e.motivo] = [];
+      byMotivo[e.motivo].push(e);
+    }
+    html += '<div style="margin-top:16px;background:#110a00;border:1px solid #3a2a00;padding:16px;">';
+    html += '<div style="font-family:monospace;font-size:10px;color:#fb923c;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">⚠ Filas eliminadas durante limpieza (' + eliminados.length + ')</div>';
+    for (const [motivo, items] of Object.entries(byMotivo)) {
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:monospace;font-size:11px;color:#facc15;margin-bottom:5px;">▸ ' + escHtml(motivo) + ' — ' + items.length + ' item' + (items.length > 1 ? 's' : '') + '</div>';
+      for (const item of items) {
+        html += '<div style="display:flex;gap:12px;font-size:11px;padding:3px 8px;border-left:2px solid #3a2a00;margin-bottom:2px;">' +
+          '<span style="flex:1;color:#e8e8e8;font-family:monospace">' + escHtml(item.titulo) + '</span>' +
+          '<span style="color:#666;font-family:monospace;font-size:10px;white-space:nowrap">' + escHtml(item.ean || 'sin ISBN') + '</span>' +
+          '<span style="color:#555;font-family:monospace;font-size:10px;white-space:nowrap">' + escHtml(item.categoria || '—') + '</span>' +
+          '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+/* ───────── FILTERS ───────── */
+function populateCategoryFilter(sheetName) {
+  const d = sheetsData[sheetName];
+  const cats = [...new Set(d.items.map(i => i.categoria_principal).filter(Boolean))].sort();
+  const sel = document.getElementById('catf-' + sheetName);
+  sel.innerHTML = '<option value="">Todas las categorías</option>';
+  cats.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+}
+
+function applyFilters(sheetName) {
+  const d = sheetsData[sheetName];
+  const search = document.getElementById('search-' + sheetName).value.toLowerCase().trim();
+  const cat = document.getElementById('catf-' + sheetName).value;
+  const ean = document.getElementById('eanf-' + sheetName).value;
+  const reimpr = document.getElementById('reimf-' + sheetName).value;
+
+  d.filtered = d.items.filter(item => {
+    if (search && !item.titulo.toLowerCase().includes(search)) return false;
+    if (cat && item.categoria_principal !== cat) return false;
+    if (ean && item.ean_razon !== ean) return false;
+    const rs = item.subetiquetas?.reimpresionSemana;
+    if (reimpr === '1' && !rs) return false;
+    if (reimpr === '0' && rs) return false;
+    return true;
+  });
+
+  if (d.sortKey) {
+    d.filtered.sort((a,b) => {
+      const va = a[d.sortKey] ?? '', vb = b[d.sortKey] ?? '';
+      if (typeof va === 'number' && typeof vb === 'number') return (va-vb)*d.sortDir;
+      return String(va).localeCompare(String(vb))*d.sortDir;
+    });
+  }
+  d.page = 1;
+  renderTable(sheetName);
+  updateCountLabel();
+}
+
+function sortBy(sheetName, key) {
+  const d = sheetsData[sheetName];
+  if (d.sortKey === key) d.sortDir *= -1;
+  else { d.sortKey = key; d.sortDir = 1; }
+  applyFilters(sheetName);
+}
+
+/* ───────── TABLE ───────── */
+const EAN_BADGE = {
+  ok: ['badge-ok','✓ OK'],
+  en_blanco_o_por_confirmar: ['badge-warn','⚠ x confirmar'],
+  ean_invalido: ['badge-err','✗ Inválido'],
+  ean_repetido_en_varios_titulos: ['badge-warn','⚠ Repetido'],
+};
+
+const CHANGE_TAG = {
+  isbn: ['ch-isbn', 'ISBN normalizado'],
+  int:  ['ch-int',  'EAN interno generado'],
+  reimpr: ['ch-reimpr', 'reimpresión'],
+  dupe:   ['ch-dupe', 'solo en reimpr.'],
+};
+
+function renderTable(sheetName) {
+  const d = sheetsData[sheetName];
+  const mode = d.viewMode || 'raw';
+  const totalPages = Math.ceil(d.filtered.length / PAGE_SIZE);
+  const start = (d.page-1)*PAGE_SIZE;
+  const pageItems = d.filtered.slice(start, start+PAGE_SIZE);
+
+  document.getElementById('pi-' + sheetName).textContent =
+    'Página ' + d.page + ' de ' + (totalPages||1) + ' · ' + d.filtered.length.toLocaleString() + ' resultados';
+
+  // Dynamic header based on mode
+  const thead = document.getElementById('thead-' + sheetName);
+  const sn = sheetName;
+  if (mode === 'raw') {
+    thead.innerHTML = '<th>Título (original)</th><th>Categoría</th><th>ISBN/EAN (original)</th><th>Precio</th><th>Cant.</th>';
+  } else {
+    thead.innerHTML = [
+      '<th onclick="sortBy(\'' + sn + '\',\'titulo\')">Título ↕</th>',
+      '<th onclick="sortBy(\'' + sn + '\',\'categoria_principal\')">Categoría ↕</th>',
+      '<th onclick="sortBy(\'' + sn + '\',\'ean_final\')">EAN Limpio ↕</th>',
+      '<th>Estado EAN</th>',
+      '<th onclick="sortBy(\'' + sn + '\',\'precio_tapa\')">Precio ↕</th>',
+      '<th onclick="sortBy(\'' + sn + '\',\'cantidad\')">Cant.</th>',
+      '<th>Cambios</th>'
+    ].join('');
+  }
+
+  document.getElementById('tb-' + sheetName).innerHTML = pageItems.map((item, i) => {
+    if (mode === 'raw') {
+      // RAW: show exactly what came from Excel
+      return '<tr>' +
+        '<td class="td-titulo">' + escHtml(item._raw_titulo || item.titulo) + '</td>' +
+        '<td><span class="badge badge-cat">' + escHtml(item.categoria_principal||'—') + '</span></td>' +
+        '<td class="td-mono">' + escHtml(item._raw_ean || '—') + '</td>' +
+        '<td class="td-mono">' + (item.precio_tapa!=null ? '$'+item.precio_tapa.toLocaleString('es-AR') : '—') + '</td>' +
+        '<td class="td-mono" style="text-align:center">' + (item.cantidad??'—') + '</td>' +
+        '</tr>';
+    } else {
+      // CLEAN: show processed data + highlight changes
+      const [ebClass, ebLabel] = EAN_BADGE[item.ean_razon] || ['badge-ok','✓ OK'];
+      const rs = item.subetiquetas?.reimpresionSemana;
+      const changes = item._changes || [];
+      const eanChanged = item._raw_ean && item.ean_final && item._raw_ean !== item.ean_final;
+      const changeTags = changes.map(c => {
+        const [cls, lbl] = CHANGE_TAG[c.type] || ['ch-int', c.type];
+        return '<span class="changes-tag ' + cls + '" title="' + escHtml(c.msg) + '">' + lbl + '</span>';
+      }).join('');
+      return '<tr>' +
+        '<td class="td-titulo" title="' + escHtml(item.titulo) + '">' +
+          (rs ? '<span class="reimpr-dot"></span>' : '') + escHtml(item.titulo) +
+          (item.errores?.soloEnReimpresiones ? '<span class="badge badge-err" style="font-size:9px">⚠</span>' : '') +
+        '</td>' +
+        '<td><span class="badge badge-cat">' + escHtml(item.categoria_principal||'—') + '</span></td>' +
+        '<td class="td-mono" style="' + (eanChanged ? 'color:var(--warn)' : '') + '">' + escHtml(item.ean_final||'—') + '</td>' +
+        '<td><span class="badge ' + ebClass + '">' + ebLabel + '</span></td>' +
+        '<td class="td-mono">' + (item.precio_tapa!=null ? '$'+item.precio_tapa.toLocaleString('es-AR') : '—') + '</td>' +
+        '<td class="td-mono" style="text-align:center">' + (item.cantidad??'—') + '</td>' +
+        '<td>' + (changeTags || '<span style="color:var(--muted);font-size:10px;font-family:monospace">sin cambios</span>') + '</td>' +
+        '</tr>';
+    }
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function prevPage(sheetName) {
+  const d = sheetsData[sheetName];
+  if (d.page > 1) { d.page--; renderTable(sheetName); window.scrollTo(0,0); }
+}
+function nextPage(sheetName) {
+  const d = sheetsData[sheetName];
+  const totalPages = Math.ceil(d.filtered.length/PAGE_SIZE);
+  if (d.page < totalPages) { d.page++; renderTable(sheetName); window.scrollTo(0,0); }
+}
+
+/* ───────── EXPORT ───────── */
+function exportCSV() {
+  const d = sheetsData[activeTab];
+  if (!d) return;
+  const headers = ['product_id','titulo','categoria_principal','reimpresion_semana','ean_oficial','ean_interno','ean_final','ean_razon','precio_tapa','cantidad'];
+  const rows = [headers.join(',')];
+  for (const i of d.filtered) {
+    rows.push([
+      i.product_id, `"${i.titulo.replace(/"/g,'""')}"`,
+      i.categoria_principal||'',
+      i.subetiquetas?.reimpresionSemana ? 1 : 0,
+      i.ean_oficial||'', i.ean_interno||'', i.ean_final||'',
+      i.ean_razon, i.precio_tapa??'', i.cantidad??''
+    ].join(','));
+  }
+  const blob = new Blob(['\uFEFF'+rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=activeTab+'_limpio.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportExcel() {
+  const wb = XLSX.utils.book_new();
+  for (const [sheetName, d] of Object.entries(sheetsData)) {
+    const headers = ['Product ID','Título','Categoría','Reimpr. Semana','EAN Oficial','EAN Interno','EAN Final','Estado EAN','Precio Tapa','Cantidad'];
+    const data = [headers, ...d.items.map(i => [
+      i.product_id, i.titulo, i.categoria_principal||'',
+      i.subetiquetas?.reimpresionSemana ? 'SÍ' : 'NO',
+      i.ean_oficial||'', i.ean_interno||'', i.ean_final||'',
+      i.ean_razon, i.precio_tapa, i.cantidad
+    ])];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [15,50,25,8,15,15,15,20,12,8].map(w=>({wch:w}));
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  }
+  XLSX.writeFile(wb, 'entelequia_limpio.xlsx');
+}
+
+/* ───────── RESET ───────── */
+function reset() {
+  document.getElementById('drop-zone').style.display = 'block';
+  document.getElementById('processing').style.display = 'none';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('file-input').value = '';
+  sheetsData = {}; activeTab = null;
+}
+</script>
+</body>
+</html>

@@ -161,7 +161,6 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
     const [selectedSocioItems, setSelectedSocioItems] = useState({});
     const [checkedItemsToAddToPlan, setCheckedItemsToAddToPlan] = useState({});
-    const [manualSocioItems, setManualSocioItems] = useState([]);
     const [newSocioExtraDesc, setNewSocioExtraDesc] = useState('');
     const [newSocioExtraBs, setNewSocioExtraBs] = useState('');
 
@@ -172,12 +171,37 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [ctaExtraLbl, setCtaExtraLbl] = useState('');
     const [ctaExtraAmt, setCtaExtraAmt] = useState('');
 
+    // States for enhanced Payment/Plan features
+    const [collapsedPlans, setCollapsedPlans] = useState({}); // { planId: boolean }
+    const [hidePaidPlans, setHidePaidPlans] = useState(false);
+    const [editingPagoPlanKey, setEditingPagoPlanKey] = useState(null); // "planId-pagoIdx"
+    const [editingPagoCtaIdx, setEditingPagoCtaIdx] = useState(null); // idx
+    const [editPagoNote, setEditPagoNote] = useState('');
+
+    const [editingExtraId, setEditingExtraId] = useState(null); // id del extra que se está editando
+
     // Alquiler Config Modal State
     const [showConfigAlq, setShowConfigAlq] = useState(false);
     const [alqConfigData, setAlqConfigData] = useState({ totalBS: '', socioBS: '', mesInicio: '' });
 
     const [loading, setLoading] = useState(true);
     const [compactMode, setCompactMode] = useState(false);
+    const [toasts, setToasts] = useState([]); // [{id, msg, type}]
+
+    // Custom Confirmation Modal State
+    const [confirmModal, setConfirmModal] = useState({ show: false, title: '', msg: '', onConfirm: null });
+
+    const openConfirm = (title, msg, onConfirm) => {
+        setConfirmModal({ show: true, title, msg, onConfirm });
+    };
+
+    const showToast = (msg, type = 'info') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, msg, type }]);
+        setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== id));
+        }, 4000);
+    };
 
     // Carga inicial (initApp)
     useEffect(() => {
@@ -198,8 +222,20 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
                 let loadedPlans = resPlans.data?.data?.plans || [];
                 let loadedNplan = resPlans.data?.data?.nplan || 1;
-                let loadedManualSocioItems = resPlans.data?.data?.manualSocioItems || [];
                 let loadedCta = resCta.data?.data || { pagos: [], extras: [] };
+
+                // Migración: Si existen manualSocioItems en planes_socio, los movemos a extras de cuenta_corriente si no están
+                let oldManualItems = resPlans.data?.data?.manualSocioItems || [];
+                if (oldManualItems.length > 0) {
+                    oldManualItems.forEach(it => {
+                        const exists = (loadedCta.extras || []).some(ex => ex.id === it.id || (ex.label === it.desc && ex.amount === it.amount));
+                        if (!exists) {
+                            if (!loadedCta.extras) loadedCta.extras = [];
+                            loadedCta.extras.push({ id: it.id || Date.now().toString() + Math.random(), label: it.desc, amount: it.amount });
+                        }
+                    });
+                }
+
                 let loadedAlq = resAlq.data?.data || { meses: [], config: { totalBS: 1850, socioBS: 600, mesInicio: '' } };
                 if (!loadedAlq.config) loadedAlq.config = { totalBS: 1850, socioBS: 600, mesInicio: '' };
 
@@ -227,7 +263,6 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 setDist(loadedDist);
                 setPlans(loadedPlans);
                 setNplan(loadedNplan);
-                setManualSocioItems(loadedManualSocioItems);
                 setCta(loadedCta);
                 setAlq(loadedAlq);
             } catch (error) {
@@ -291,35 +326,39 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                     changedAlq = true;
                 }
 
-                // Cargar meses vencidos a Socio (manualSocioItems)
-                let currentManualItems = [...manualSocioItems];
-                let changedManualItems = false;
+                // Cargar meses vencidos a Socio (cta.extras)
+                let currentCta = { ...cta };
+                let changedCta = false;
 
                 currentAlq.meses.forEach((mes, idx) => {
                     if (mes.ym < currentYm && !mes.cargado) {
                         currentAlq.meses[idx].cargado = true;
-                        currentManualItems.push({
-                            id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 5),
-                            desc: 'Alquiler Mes: ' + formatMesAlq(mes.ym),
-                            amount: parseFloat(mes.socioBS) || 0
-                        });
+                        const desc = 'Alquiler Mes: ' + formatMesAlq(mes.ym);
+                        const exists = (currentCta.extras || []).some(ex => ex.label === desc);
+                        if (!exists) {
+                            currentCta.extras.push({
+                                id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 5),
+                                label: desc,
+                                amount: parseFloat(mes.socioBS) || 0
+                            });
+                            changedCta = true;
+                        }
                         changedAlq = true;
-                        changedManualItems = true;
                     }
                 });
 
                 if (changedAlq) {
                     setAlq(currentAlq);
-                    await supabase.from('app_state').upsert({ id: 'alquiler', data: currentAlq });
+                    saveAlq(currentAlq);
                 }
-                if (changedManualItems) {
-                    setManualSocioItems(currentManualItems);
-                    await savePlans(plans, nplan, currentManualItems);
+                if (changedCta) {
+                    setCta(currentCta);
+                    saveCta(currentCta);
                 }
             };
             checkAutoAlquiler();
         }
-    }, [activeTab, loading, alq.meses?.length, manualSocioItems, plans, nplan]);
+    }, [activeTab, loading, alq.meses?.length, cta, plans, nplan]);
 
     // Estados UI Distribuidor
     const [pedNombre, setPedNombre] = useState('');
@@ -439,7 +478,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         let monto = parseFloat(pedMonto) || 0;
 
         if (!monto) {
-            alert('Ingresa un monto válido para el pedido.');
+            showToast('Ingresa un monto válido para el pedido.', 'error');
             return;
         }
 
@@ -453,7 +492,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
         // Sincronizar con los remitos usando el estado fresco
         await syncDistToRows(newDist);
-        alert('Pedido guardado y sincronizado.');
+        showToast('Pedido guardado y sincronizado.', 'success');
     };
 
     // Evento para guardar un Pago
@@ -463,7 +502,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         let tc = parseFloat(pagoTc) || 0;
 
         if (!monto) {
-            alert('Ingresa un monto válido para el pago.');
+            showToast('Ingresa un monto válido para el pago.', 'error');
             return;
         }
 
@@ -478,7 +517,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
         // Sincronizar con los remitos
         await syncDistToRows(newDist);
-        alert('Pago guardado y sincronizado.');
+        showToast('Pago guardado y sincronizado.', 'success');
     };
 
     const startEditPedido = (idx, ped) => {
@@ -500,13 +539,14 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const cancelEditPedido = () => setEditingPedidoIdx(null);
 
     const handleDeletePedido = async (idx) => {
-        if (window.confirm('¿Eliminar pedido?')) {
+        openConfirm('Confirmar Eliminación', '¿Deseas eliminar este pedido?', async () => {
             const updated = dist.pedidos.filter((_, i) => i !== idx);
             const newDist = { ...dist, pedidos: updated };
             setDist(newDist);
             await saveDist(newDist);
             await syncDistToRows(newDist);
-        }
+            showToast('Pedido eliminado correctamente.', 'success');
+        });
     };
 
     const startEditPago = (idx, pago) => {
@@ -532,13 +572,14 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const cancelEditPago = () => setEditingPagoIdx(null);
 
     const handleDeletePago = async (idx) => {
-        if (window.confirm('¿Eliminar pago?')) {
+        openConfirm('Confirmar Eliminación', '¿Deseas eliminar este pago?', async () => {
             const updated = dist.pagos.filter((_, i) => i !== idx);
             const newDist = { ...dist, pagos: updated };
             setDist(newDist);
             await saveDist(newDist);
             await syncDistToRows(newDist);
-        }
+            showToast('Pago eliminado correctamente.', 'success');
+        });
     };
 
     const saveSaldoInicial = async () => {
@@ -553,13 +594,14 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     };
 
     const handleDeleteAjuste = async (idx) => {
-        if (window.confirm('¿Eliminar ajuste?')) {
+        openConfirm('Confirmar Eliminación', '¿Deseas eliminar este ajuste?', async () => {
             const updated = (dist.ajustes || []).filter((_, i) => i !== idx);
             const newDist = { ...dist, ajustes: updated };
             setDist(newDist);
             await saveDist(newDist);
             await syncDistToRows(newDist);
-        }
+            showToast('Ajuste eliminado correctamente.', 'success');
+        });
     };
 
     // Resumen variables
@@ -605,8 +647,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     // ==========================================
     // LÓGICA SOCIO
     // ==========================================
-    const savePlans = async (newPlans, newNplan, newManualSocioItems = manualSocioItems) => {
-        try { await supabase.from('app_state').upsert({ id: 'planes_socio', data: { plans: newPlans, nplan: newNplan, manualSocioItems: newManualSocioItems } }); } catch (err) { }
+    const savePlans = async (newPlans, newNplan) => {
+        try { await supabase.from('app_state').upsert({ id: 'planes_socio', data: { plans: newPlans, nplan: newNplan } }); } catch (err) { }
     };
     const getAvailableItems = () => {
         let used = {};
@@ -617,14 +659,14 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             let sEnv = parseFloat(r._sEnvBS) || 0;
             let sFlt = parseFloat(r._sFltBS) || 0;
             let sPed = parseFloat(r._sPedBS) || 0;
-            if (sEnv > 0 && !used[`${r.id}-envio`]) items.push({ remId: r.id, type: 'envio', label: 'Envío Arg', nro, amount: sEnv });
-            if (sFlt > 0 && !used[`${r.id}-flete`]) items.push({ remId: r.id, type: 'flete', label: 'Flete Bol', nro, amount: sFlt });
-            if (sPed > 0 && !used[`${r.id}-pedido`]) items.push({ remId: r.id, type: 'pedido', label: 'Costo Libros', nro, amount: sPed });
+            if (sEnv !== 0 && !used[`${r.id}-envio`]) items.push({ remId: r.id, type: 'envio', label: 'Envío Arg', nro, amount: sEnv });
+            if (sFlt !== 0 && !used[`${r.id}-flete`]) items.push({ remId: r.id, type: 'flete', label: 'Flete Bol', nro, amount: sFlt });
+            if (sPed !== 0 && !used[`${r.id}-pedido`]) items.push({ remId: r.id, type: 'pedido', label: 'Costo Libros', nro, amount: sPed });
         });
-        // Agregamos ítems extras manuales
-        manualSocioItems.forEach(ex => {
+        // Agregamos ítems extras manuales (desde cta.extras)
+        (cta.extras || []).forEach(ex => {
             if (!used[`extra-${ex.id}-extra`]) {
-                items.push({ remId: `extra-${ex.id}`, type: 'extra', label: ex.desc, nro: 'OTROS CARGOS / ALQUILER', amount: ex.amount });
+                items.push({ remId: `extra-${ex.id}`, type: 'extra', label: ex.label, nro: 'OTROS CARGOS / ALQUILER', amount: ex.amount });
             }
         });
 
@@ -635,26 +677,26 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const handleAddManualSocioItem = async () => {
         const desc = newSocioExtraDesc.trim();
         const bs = parseFloat(newSocioExtraBs);
-        if (!desc || isNaN(bs) || bs <= 0) return alert('Descripción o monto inválido');
+        if (!desc || isNaN(bs)) return showToast('Descripción o monto inválido', 'error');
 
-        const newItem = { id: Date.now().toString(), desc, amount: bs };
-        const newManualItems = [...manualSocioItems, newItem];
-        setManualSocioItems(newManualItems);
+        const newItem = { id: Date.now().toString(), label: desc, amount: bs, isAlq: false };
+        const newCta = { ...cta, extras: [...(cta.extras || []), newItem] };
+        setCta(newCta);
         setNewSocioExtraDesc('');
         setNewSocioExtraBs('');
-        await savePlans(plans, nplan, newManualItems);
+        await saveCta(newCta);
     };
 
     const handleDeleteManualSocioItem = async (id) => {
-        const newManualItems = manualSocioItems.filter(item => item.id !== id);
-        setManualSocioItems(newManualItems);
-        setSelectedSocioItems({}); // Resetear selección para evitar inconsistencias
-        await savePlans(plans, nplan, newManualItems);
+        const newCta = { ...cta, extras: (cta.extras || []).filter(item => item.id !== id) };
+        setCta(newCta);
+        setSelectedSocioItems({});
+        await saveCta(newCta);
     };
 
     const handleAddExtraToPlan = async (planId) => {
         const toAdd = availSocioItems.filter(it => checkedItemsToAddToPlan[`${it.remId}-${it.type}`]);
-        if (toAdd.length === 0) return alert('Selecciona al menos un ítem.');
+        if (toAdd.length === 0) return showToast('Selecciona al menos un ítem.', 'error');
 
         const newPlans = plans.map(p => {
             if (p.id === planId) {
@@ -675,19 +717,19 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         setPlans(newPlans);
         setAddingItemToPlan(null);
         setCheckedItemsToAddToPlan({});
-        await savePlans(newPlans, nplan, manualSocioItems);
+        await savePlans(newPlans, nplan);
     };
 
     const handleGeneratePlan = async () => {
         const toWrap = availSocioItems.filter(it => selectedSocioItems[`${it.remId}-${it.type}`]);
-        if (toWrap.length === 0) { alert('Selecciona al menos un ítem.'); return; }
+        if (toWrap.length === 0) { showToast('Selecciona al menos un ítem.', 'error'); return; }
         const newPlan = { id: nplan, fecha: new Date().toISOString().slice(0, 10), items: toWrap, pagos: [] };
         const newPlans = [...plans, newPlan];
         setPlans(newPlans);
         setNplan(nplan + 1);
         setSelectedSocioItems({});
-        await savePlans(newPlans, nplan + 1, manualSocioItems);
-        alert(`Plan de pagos #${newPlan.id} generado correctamente.`);
+        await savePlans(newPlans, nplan + 1);
+        showToast(`Plan de pagos #${newPlan.id} generado correctamente.`, 'success');
     };
 
     const handleAddPagoPlan = async (pid) => {
@@ -695,9 +737,21 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         const p = newPlans.find(x => x.id === pid);
         if (p) {
             if (!p.pagos) p.pagos = [];
-            p.pagos.push({ monto: 0, fecha: new Date().toISOString().slice(0, 10) });
+            const newPago = {
+                id: 'pg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+                monto: 0,
+                fecha: new Date().toISOString().slice(0, 10),
+                nota: `Pago Plan #${pid}`
+            };
+            p.pagos.push(newPago);
             setPlans(newPlans);
+
+            // Sync with CTA
+            const newCta = { ...cta, pagos: [...(cta.pagos || []), { ...newPago, isFromPlan: true, planId: pid }] };
+            setCta(newCta);
+
             await savePlans(newPlans, nplan);
+            await saveCta(newCta);
         }
     };
 
@@ -705,20 +759,86 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         const newPlans = [...plans];
         const p = newPlans.find(x => x.id === pid);
         if (p) {
-            p.pagos[pidx][field] = field === 'monto' ? (parseFloat(val) || 0) : val;
+            const pg = p.pagos[pidx];
+            pg[field] = field === 'monto' ? (parseFloat(val) || 0) : val;
             setPlans(newPlans);
+
+            // Sync with CTA
+            if (pg.id) {
+                const newCta = { ...cta };
+                const ctp = (newCta.pagos || []).find(x => x.id === pg.id);
+                if (ctp) {
+                    ctp[field] = pg[field];
+                    setCta(newCta);
+                    await saveCta(newCta);
+                }
+            }
+
             await savePlans(newPlans, nplan);
         }
     };
 
     const deletePagoPlan = async (pid, pidx) => {
-        const newPlans = [...plans];
-        const p = newPlans.find(x => x.id === pid);
-        if (p) {
-            p.pagos.splice(pidx, 1);
+        openConfirm('Confirmar Eliminación', '¿Borrar pago del plan?', async () => {
+            const newPlans = [...plans];
+            const p = newPlans.find(x => x.id === pid);
+            if (p) {
+                const pg = p.pagos[pidx];
+                p.pagos.splice(pidx, 1);
+                setPlans(newPlans);
+
+                // Sync with CTA
+                const newCta = { ...cta };
+                if (pg.id) {
+                    newCta.pagos = (newCta.pagos || []).filter(x => x.id !== pg.id);
+                    setCta(newCta);
+                    await saveCta(newCta);
+                }
+
+                await savePlans(newPlans, nplan);
+                showToast('Pago eliminado correctamente.', 'success');
+            }
+        });
+    };
+
+    const handleUpdateExtra = async (id, field, val) => {
+        const newCta = { ...cta };
+        const idx = newCta.extras.findIndex(ex => ex.id === id);
+        if (idx !== -1) {
+            newCta.extras[idx][field] = field === 'amount' ? (parseFloat(val) || 0) : val;
+
+            // Si el ítem está en algún plan, también debemos actualizarlo allí
+            const newPlans = plans.map(p => ({
+                ...p,
+                items: p.items.map(it => {
+                    if (it.remId === `extra-${id}` && it.type === 'extra') {
+                        return { ...it, label: field === 'label' ? val : it.label, amount: field === 'amount' ? (parseFloat(val) || 0) : it.amount };
+                    }
+                    return it;
+                })
+            }));
+
+            setCta(newCta);
             setPlans(newPlans);
+            await saveCta(newCta);
             await savePlans(newPlans, nplan);
         }
+    };
+
+
+    const deleteItemFromPlan = async (pid, itemKey) => {
+        const newPlans = plans.map(p => {
+            if (p.id === pid) {
+                return { ...p, items: p.items.filter(it => `${it.remId}-${it.type}` !== itemKey) };
+            }
+            return p;
+        });
+        setPlans(newPlans);
+        await savePlans(newPlans, nplan);
+    };
+
+    const togglePlanCollapse = (pid) => {
+        setCollapsedPlans(prev => ({ ...prev, [pid]: !prev[pid] }));
     };
 
     // ==========================================
@@ -729,8 +849,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     };
     const ctaTotalDeuda = () => {
         let fromSocioDisp = availSocioItems.reduce((s, it) => s + (it.amount || 0), 0);
-        let extras = (cta.extras || []).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-        return fromSocioDisp + extras;
+        let fromPlans = plans.reduce((acc, p) => acc + p.items.reduce((s, it) => s + (it.amount || 0), 0), 0);
+        return fromSocioDisp + fromPlans;
     };
     const ctaTotalPagado = () => (cta.pagos || []).reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
     const ctaDeuda = ctaTotalDeuda();
@@ -738,16 +858,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const ctaSaldo = ctaDeuda - ctaPagado;
     const ctaPct = ctaDeuda > 0 ? Math.min(100, Math.round((ctaPagado / ctaDeuda) * 100)) : 0;
 
-    const handleSaveExtraCta = async () => {
-        let lbl = ctaExtraLbl.trim();
-        let amt = parseFloat(ctaExtraAmt) || 0;
-        if (!lbl || amt <= 0) return alert('Datos inválidos');
-        const newCta = { ...cta, extras: [...(cta.extras || []), { label: lbl, amount: amt }] };
-        setCta(newCta);
-        setCtaExtraLbl('');
-        setCtaExtraAmt('');
-        await saveCta(newCta);
-    };
+    const handleSaveExtraCta = handleAddManualSocioItem; // Alias for reuse
 
     const handleAddPagoCta = async () => {
         const newCta = { ...cta, pagos: [...(cta.pagos || []), { monto: 0, fecha: new Date().toISOString().slice(0, 10) }] };
@@ -757,25 +868,59 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
     const updatePagoCta = async (idx, field, val) => {
         const newCta = { ...cta };
-        newCta.pagos[idx][field] = field === 'monto' ? (parseFloat(val) || 0) : val;
+        const pg = newCta.pagos[idx];
+        pg[field] = field === 'monto' ? (parseFloat(val) || 0) : val;
         setCta(newCta);
+
+        // Sync with Plan
+        if (pg.isFromPlan && pg.planId && pg.id) {
+            const newPlans = plans.map(p => {
+                if (p.id === pg.planId) {
+                    const ppg = (p.pagos || []).find(x => x.id === pg.id);
+                    if (ppg) ppg[field] = pg[field];
+                    return { ...p };
+                }
+                return p;
+            });
+            setPlans(newPlans);
+            await savePlans(newPlans, nplan);
+        }
+
         await saveCta(newCta);
     };
 
     const handleDelExtraCta = async (idx) => {
-        if (!window.confirm('¿Seguro que deseas eliminar este cargo extra?')) return;
-        const newCta = { ...cta };
-        newCta.extras.splice(idx, 1);
-        setCta(newCta);
-        await saveCta(newCta);
+        openConfirm('Confirmar Eliminación', '¿Seguro que deseas eliminar este cargo extra?', async () => {
+            const newCta = { ...cta };
+            newCta.extras.splice(idx, 1);
+            setCta(newCta);
+            await saveCta(newCta);
+            showToast('Cargo extra eliminado.', 'success');
+        });
     };
 
     const handleDelPagoCta = async (idx) => {
-        if (!window.confirm('¿Seguro que deseas eliminar este pago?')) return;
-        const newCta = { ...cta };
-        newCta.pagos.splice(idx, 1);
-        setCta(newCta);
-        await saveCta(newCta);
+        openConfirm('¡ATENCIÓN CRÍTICA!', '¿Estás seguro de que deseas eliminar este PAGO?\n\nSi el pago proviene de un plan de pagos, también será eliminado de dicho plan. Esta acción no se puede deshacer.', async () => {
+            const newCta = { ...cta };
+            const pg = newCta.pagos[idx];
+            newCta.pagos.splice(idx, 1);
+            setCta(newCta);
+
+            // Sync with Plan
+            if (pg.isFromPlan && pg.planId && pg.id) {
+                const newPlans = plans.map(p => {
+                    if (p.id === pg.planId) {
+                        return { ...p, pagos: (p.pagos || []).filter(x => x.id !== pg.id) };
+                    }
+                    return p;
+                });
+                setPlans(newPlans);
+                await savePlans(newPlans, nplan);
+            }
+
+            await saveCta(newCta);
+            showToast('Pago eliminado correctamente.', 'success');
+        });
     };
 
     // ==========================================
@@ -797,7 +942,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         if (alq.meses && alq.meses.length > 0) {
             lastYm = alq.meses[alq.meses.length - 1].ym;
         } else {
-            return alert('Por favor, ingresa a "⚙ Configurar" y define el Mes de Inicio primero.');
+            return showToast('Por favor, ingresa a "⚙ Configurar" y define el Mes de Inicio primero.', 'error');
         }
 
         let [year, month] = lastYm.split('-').map(Number);
@@ -841,14 +986,6 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         if (m && m.ym) {
             const descTarget = 'Alquiler Mes: ' + formatMesAlq(m.ym);
 
-            // Eliminar de manualSocioItems
-            const newManualItems = manualSocioItems.filter(item => item.desc !== descTarget);
-            if (newManualItems.length !== manualSocioItems.length) {
-                setManualSocioItems(newManualItems);
-                await savePlans(plans, nplan, newManualItems);
-            }
-
-            // Eliminar de cta.extras viejo si existe
             if (cta && cta.extras) {
                 const newExtras = cta.extras.filter(ex => ex.label !== descTarget);
                 if (newExtras.length !== cta.extras.length) {
@@ -861,24 +998,25 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     };
     const cargarAlqToCta = async (idx) => {
         const m = alq.meses[idx];
-        if (!m.ym || !m.totalBS) return alert('Datos de mes incompletos.');
+        if (!m.ym || !m.totalBS) return showToast('Datos de mes incompletos.', 'error');
         let cuota = parseFloat(m.socioBS) || 0;
 
         const newItem = {
             id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 5),
-            desc: 'Alquiler Mes: ' + formatMesAlq(m.ym),
-            amount: cuota
+            label: 'Alquiler Mes: ' + formatMesAlq(m.ym),
+            amount: cuota,
+            isAlq: true
         };
-        const newManualItems = [...manualSocioItems, newItem];
-        setManualSocioItems(newManualItems);
+        const newCta = { ...cta, extras: [...(cta.extras || []), newItem] };
+        setCta(newCta);
 
         const newAlq = { ...alq };
         newAlq.meses[idx].cargado = true;
         setAlq(newAlq);
 
-        await savePlans(plans, nplan, newManualItems);
+        await saveCta(newCta);
         await saveAlq(newAlq);
-        alert('Alquiler agregado a los items del socio.');
+        showToast('Alquiler agregado a los ítems del socio.', 'success');
     };
 
     if (loading) {
@@ -933,11 +1071,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                             >Editar</button>
                                             <button
                                                 onClick={() => {
-                                                    if (window.confirm('¿Eliminar el saldo inicial?')) {
+                                                    openConfirm('Confirmar Eliminación', '¿Eliminar el saldo inicial?', () => {
                                                         const newDist = { ...dist, saldoInicial: null };
                                                         setDist(newDist);
                                                         saveDist(newDist);
-                                                    }
+                                                        showToast('Saldo inicial eliminado.', 'success');
+                                                    });
                                                 }}
                                                 style={{ background: 'transparent', border: '1px solid rgba(235, 87, 87, 0.5)', color: '#eb5757', borderRadius: '4px', padding: '4px 12px', fontSize: '0.75rem', cursor: 'pointer', transition: 'background 0.2s' }}
                                                 onMouseOver={e => e.currentTarget.style.background = 'rgba(235, 87, 87, 0.1)'}
@@ -1680,22 +1819,33 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             {
                 activeTab === 'socio' && (
                     <div id="page-socio" style={{ marginBottom: '20px', fontFamily: '"DM Sans", sans-serif' }}>
-                        <div style={{ background: '#fff', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', marginBottom: '1.5rem' }}>
-                            <div style={{ background: 'var(--navy)', color: '#fff', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <h3 style={{ margin: 0, fontSize: '0.8rem', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
+                        <div style={{ background: '#fff', borderRadius: '8px', overflow: 'visible', border: '1px solid var(--border)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', marginBottom: '1.5rem' }}>
+                            <div style={{
+                                background: 'var(--navy)',
+                                color: '#fff',
+                                padding: '10px 16px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 100,
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}>
+                                <h3 style={{ margin: 0, fontSize: '0.85rem', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
                                     <span>📦</span> ITEMS DISPONIBLES AL SOCIO
                                 </h3>
                                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                                    <div style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', padding: '4px 12px', borderRadius: '4px', fontWeight: 'bold', fontSize: '0.75rem' }}>
+                                    <div style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '0.8rem', border: '1px solid rgba(255,255,255,0.1)' }}>
                                         Seleccionado: {fBS(Object.keys(selectedSocioItems).filter(k => selectedSocioItems[k]).reduce((s, k) => {
                                             let item = availSocioItems.find(it => `${it.remId}-${it.type}` === k);
                                             return s + (item ? item.amount : 0);
-                                        }, 0))} BS
+                                        }, 0))}
                                     </div>
-                                    <button onClick={handleGeneratePlan} style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '4px 12px', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '0.75rem' }}>+ Generar Plan</button>
+                                    <button onClick={handleGeneratePlan} style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '6px 16px', cursor: 'pointer', borderRadius: '6px', fontWeight: 'bold', fontSize: '0.8rem', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', transition: 'transform 0.2s' }} onMouseOver={e => e.currentTarget.style.transform = 'scale(1.02)'} onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}>+ Generar Plan</button>
                                 </div>
                             </div>
-                            <div style={{ padding: '16px' }}>
+                            <div style={{ padding: '16px', overflow: 'visible' }}>
                                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#f8f9fa', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
                                     <input type="text" value={newSocioExtraDesc} onChange={e => setNewSocioExtraDesc(e.target.value)} placeholder="Descripción (ej: deuda anterior)" style={{ flex: 1, minWidth: '200px', padding: '6px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem' }} />
                                     <input type="number" value={newSocioExtraBs} onChange={e => setNewSocioExtraBs(e.target.value)} placeholder="0.00 BS" style={{ width: '120px', padding: '6px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem' }} />
@@ -1711,46 +1861,111 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                             acc[item.nro].push(item);
                                             return acc;
                                         }, {})).map(([groupName, items]) => (
-                                            <div key={groupName} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: '#fff', overflow: 'hidden' }}>
-                                                <div style={{ background: groupName === 'Items extra' ? '#fdf8ed' : '#f4f7f9', padding: '10px 16px', fontSize: '12px', fontWeight: 'bold', color: 'var(--navy)', borderBottom: '1px solid var(--border)' }}>
-                                                    {groupName === 'Items extra' ? groupName : `Pedido: ${groupName}`}
+                                            <div key={groupName} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: '#fff', marginBottom: '10px' }}>
+                                                <div style={{
+                                                    background: groupName === 'OTRO CARGOS / ALQUILER' || groupName === 'Items extra' ? '#fdf8ed' : '#f4f7f9',
+                                                    padding: '10px 16px',
+                                                    fontSize: '12px',
+                                                    fontWeight: 'bold',
+                                                    color: 'var(--navy)',
+                                                    borderBottom: '1px solid var(--border)',
+                                                    position: 'sticky',
+                                                    top: '44px',
+                                                    zIndex: 80,
+                                                    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                                    borderRadius: '8px 8px 0 0'
+                                                }}>
+                                                    {groupName === 'OTRO CARGOS / ALQUILER' || groupName === 'Items extra' ? 'OTROS CARGOS / ALQUILER' : `Pedido: ${groupName}`}
                                                 </div>
                                                 <div>
-                                                    {items.map(item => {
+                                                    {items.map((item, i) => {
                                                         const key = `${item.remId}-${item.type}`;
+                                                        const isExtra = item.type === 'extra';
+                                                        const extraId = isExtra ? item.remId.replace('extra-', '') : null;
+                                                        const isEditing = isExtra && editingExtraId === extraId;
                                                         const tagProps = {
                                                             envio: { bg: '#d4e4f7', color: '#1a3a5f' },
                                                             flete: { bg: '#fdf8ed', color: '#f37021' },
                                                             pedido: { bg: '#fff2cc', color: '#b38600' },
-                                                            extra: { bg: '#fde4cc', color: '#cc5500' }
+                                                            extra: { bg: '#fde4cc', color: '#cc5500' },
+                                                            alq: { bg: '#e0f7fa', color: '#006064' }
                                                         };
-                                                        const tprop = tagProps[item.type] || { bg: '#eee', color: '#333' };
+                                                        const isRental = item.isAlq || (item.type === 'extra' && item.label.startsWith('Alquiler Mes:'));
+                                                        const tprop = isRental ? tagProps.alq : (tagProps[item.type] || { bg: '#eee', color: '#333' });
 
                                                         return (
-                                                            <label key={key} style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}>
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={!!selectedSocioItems[key]}
-                                                                    onChange={e => setSelectedSocioItems({ ...selectedSocioItems, [key]: e.target.checked })}
-                                                                    style={{ marginRight: '16px', width: '16px', height: '16px' }}
-                                                                />
-                                                                <span style={{ background: tprop.bg, color: tprop.color, padding: '4px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '16px', minWidth: '60px', textAlign: 'center' }}>
-                                                                    {item.type}
-                                                                </span>
-                                                                <span style={{ flex: 1, fontSize: '13px', color: '#444' }}>{item.label}</span>
-                                                                <span style={{ fontWeight: 'bold', color: 'var(--navy)', fontFamily: 'monospace', fontSize: '14px', marginRight: item.type === 'extra' ? '12px' : '0' }}>
-                                                                    {fBS(item.amount)}
-                                                                </span>
-                                                                {item.type === 'extra' && (
-                                                                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteManualSocioItem(item.remId.replace('extra-', '')); }} style={{ background: '#fff', color: '#eb5757', border: '1px solid #eb5757', borderRadius: '4px', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '10px' }}>✕</button>
+                                                            <div key={key} style={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                padding: '10px 16px',
+                                                                borderBottom: i < items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                                                                background: isEditing ? '#fffaf2' : 'transparent',
+                                                                border: isEditing ? '1px solid var(--warn)' : 'none'
+                                                            }}>
+                                                                {!isEditing && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={!!selectedSocioItems[key]}
+                                                                        onChange={e => setSelectedSocioItems({ ...selectedSocioItems, [key]: e.target.checked })}
+                                                                        style={{ marginRight: '16px', width: '16px', height: '16px' }}
+                                                                    />
                                                                 )}
-                                                            </label>
+                                                                <span style={{
+                                                                    background: tprop.bg,
+                                                                    color: tprop.color,
+                                                                    padding: '4px 8px',
+                                                                    borderRadius: '4px',
+                                                                    fontSize: '10px',
+                                                                    fontWeight: 'bold',
+                                                                    textTransform: 'uppercase',
+                                                                    marginRight: '16px',
+                                                                    minWidth: '60px',
+                                                                    textAlign: 'center'
+                                                                }}>
+                                                                    {isRental ? 'Alquiler' : item.type}
+                                                                </span>
+
+                                                                {isEditing ? (
+                                                                    <div style={{ flex: 1, display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={item.label}
+                                                                            onChange={e => handleUpdateExtra(extraId, 'label', e.target.value)}
+                                                                            style={{ flex: 1, padding: '4px 8px', border: '1px solid var(--warn)', borderRadius: '4px', fontSize: '12px' }}
+                                                                        />
+                                                                        <input
+                                                                            type="number"
+                                                                            value={item.amount}
+                                                                            onChange={e => handleUpdateExtra(extraId, 'amount', e.target.value)}
+                                                                            style={{ width: '100px', padding: '4px 8px', border: '1px solid var(--warn)', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace', fontWeight: 'bold' }}
+                                                                        />
+                                                                        <button onClick={() => setEditingExtraId(null)} style={{ background: 'var(--ok)', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' }}>OK</button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <span style={{ flex: 1, fontSize: '13px', color: '#444' }}>{item.label}</span>
+                                                                        <span style={{ fontWeight: 'bold', color: 'var(--navy)', fontFamily: 'monospace', fontSize: '14px', marginRight: '12px' }}>
+                                                                            {fBS(item.amount)}
+                                                                        </span>
+                                                                        {isExtra && (
+                                                                            <div style={{ display: 'flex', gap: '4px' }}>
+                                                                                {!isRental && (
+                                                                                    <button onClick={() => setEditingExtraId(extraId)} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '12px' }}>✏️</button>
+                                                                                )}
+                                                                                {!isRental && (
+                                                                                    <button onClick={() => handleDeleteManualSocioItem(extraId)} style={{ background: 'transparent', border: 'none', color: '#eb5757', cursor: 'pointer', fontSize: '12px' }}>✕</button>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </div>
                                                         )
                                                     })}
                                                 </div>
-                                                <div style={{ background: groupName === 'Items extra' ? '#fdf8ed' : '#f4f7f9', padding: '10px 16px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', color: '#666', borderTop: '1px solid var(--border)' }}>
-                                                    <span>Subtotal {groupName === 'Items extra' ? 'Items extra' : 'Pedido'}</span>
-                                                    <span style={{ fontWeight: 'bold', color: 'var(--navy)', fontFamily: 'monospace', fontSize: '14px' }}>
+                                                <div style={{ background: groupName === 'Items extra' ? '#fdf8ed' : '#f8f9fa', padding: '10px 16px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#555', borderTop: '1px solid var(--border)', fontWeight: '600' }}>
+                                                    <span style={{ textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.8 }}>Subtotal {groupName === 'Items extra' ? 'Items extra' : 'Pedido'}</span>
+                                                    <span style={{ fontWeight: '900', color: 'var(--navy)', fontFamily: 'monospace', fontSize: '14px' }}>
                                                         {fBS(items.reduce((s, it) => s + (it.amount || 0), 0))}
                                                     </span>
                                                 </div>
@@ -1761,7 +1976,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px', borderTop: '1px solid var(--border)', background: '#fdf8ed', marginTop: '10px' }}>
                                     <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--navy)' }}>
-                                        Total disponible: <span style={{ fontFamily: 'monospace', fontSize: '1.1rem', color: 'var(--accent)', marginLeft: '8px' }}>{fBS(availSocioItems.reduce((s, it) => s + (it.amount || 0), 0))} BS</span>
+                                        Total disponible: <span style={{ fontFamily: 'monospace', fontSize: '1.1rem', color: 'var(--accent)', marginLeft: '8px' }}>{fBS(availSocioItems.reduce((s, it) => s + (it.amount || 0), 0))}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1769,133 +1984,179 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
                         {plans.length > 0 && (
                             <div style={{ background: '#fff', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', marginBottom: '1.5rem' }}>
-                                <div style={{ background: 'var(--navy)', color: '#fff', padding: '8px 16px', display: 'flex', justifyItems: 'space-between', alignItems: 'center' }}>
+                                <div style={{ background: 'var(--navy)', color: '#fff', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <h3 style={{ margin: 0, fontSize: '0.8rem', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
                                         <span>📜</span> PLANES GENERADOS AL SOCIO
                                     </h3>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={hidePaidPlans} onChange={e => setHidePaidPlans(e.target.checked)} />
+                                        Ocultar Pagados
+                                    </label>
                                 </div>
                                 <div style={{ padding: '16px', background: 'var(--bg)' }}>
-                                    {[...plans].reverse().map(p => {
+                                    {[...plans].reverse().filter(p => {
+                                        if (!hidePaidPlans) return true;
+                                        let total = p.items.reduce((s, it) => s + it.amount, 0);
+                                        let pagado = (p.pagos || []).reduce((s, pg) => s + (pg.monto || 0), 0);
+                                        return (total - pagado) >= 0.01 || total === 0;
+                                    }).map(p => {
                                         let total = p.items.reduce((s, it) => s + it.amount, 0);
                                         let pagado = (p.pagos || []).reduce((s, pg) => s + (pg.monto || 0), 0);
                                         let resta = total - pagado;
-                                        let saldado = pagado >= total && total > 0;
+                                        let saldado = resta < 0.01 && total > 0;
+                                        const isCollapsed = !!collapsedPlans[p.id];
 
                                         return (
                                             <div key={p.id} style={{ background: '#fff', border: '1px solid ' + (saldado ? 'var(--border)' : 'var(--warn)'), borderLeft: saldado ? '1px solid var(--border)' : '4px solid var(--warn)', boxShadow: saldado ? 'none' : '0 4px 12px rgba(245, 168, 0, 0.05)', borderRadius: '8px', marginBottom: '24px', overflow: 'hidden' }}>
 
                                                 <div style={{ background: saldado ? '#f9f9f9' : '#fdf8ed', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                        <span style={{ color: saldado ? 'gray' : 'var(--navy)', fontWeight: '900', fontSize: '14px' }}>▼ Plan #{p.id}</span>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => togglePlanCollapse(p.id)}>
+                                                        <span style={{ color: saldado ? '#2ecc71' : 'var(--navy)', fontWeight: '900', fontSize: '14px' }}>
+                                                            {isCollapsed ? '▶' : '▼'} Plan #{p.id} {saldado && <span style={{ background: '#2ecc71', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontSize: '9px', marginLeft: '8px', verticalAlign: 'middle' }}>PAGADO</span>}
+                                                        </span>
                                                         <span style={{ color: '#999', fontSize: '11px' }}>{p.fecha}</span>
                                                     </div>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', fontWeight: 'bold' }}>
                                                         <span style={{ color: '#d4af37' }}>{fBS(pagado)} / {fBS(total)}</span>
-                                                        <span style={{ color: saldado ? 'green' : '#f37021' }}>Resta: {fBS(Math.max(0, resta))}</span>
-                                                        <button onClick={() => { if (window.confirm('¿Borrar plan?')) { const nps = plans.filter(x => x.id !== p.id); setPlans(nps); savePlans(nps, nplan, manualSocioItems); } }} style={{ background: '#fff', color: '#eb5757', border: '1px solid #eb5757', borderRadius: '4px', padding: '4px 16px', fontSize: '11px', cursor: 'pointer', transition: 'all 0.2s' }}>Borrar</button>
+                                                        <span style={{ color: saldado ? 'green' : '#f37021' }}>{resta < 0 ? 'Saldo a favor: ' : 'Resta: '}{fBS(Math.abs(resta))}</span>
+                                                        <button onClick={() => {
+                                                            openConfirm('¡ADVERTENCIA CRÍTICA!', '¿Estás seguro de que deseas BORRAR este Plan de Pagos completo?\n\nEsta acción eliminará el plan y todos sus registros asociados. No se puede deshacer.', async () => {
+                                                                const nps = plans.filter(x => x.id !== p.id);
+                                                                setPlans(nps);
+                                                                await savePlans(nps, nplan);
+                                                                showToast('Plan de pagos eliminado.', 'success');
+                                                            });
+                                                        }} style={{ background: '#fff', color: '#eb5757', border: '1px solid #eb5757', borderRadius: '4px', padding: '4px 16px', fontSize: '11px', cursor: 'pointer', transition: 'all 0.2s', fontWeight: 'bold' }}>Borrar Plan</button>
                                                     </div>
                                                 </div>
 
-                                                <div style={{ padding: '0 20px' }}>
-                                                    <div style={{ paddingTop: '20px' }}>
-                                                        <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'gray', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>ITEMS DEL PLAN</div>
-                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                            {p.items.map((it, i) => {
-                                                                const tagProps = {
-                                                                    envio: { bg: '#d4e4f7', color: '#1a3a5f' },
-                                                                    flete: { bg: '#fdf8ed', color: '#f37021' },
-                                                                    pedido: { bg: '#fff2cc', color: '#b38600' },
-                                                                    extra: { bg: '#fde4cc', color: '#cc5500' }
-                                                                };
-                                                                const tprop = tagProps[it.type] || { bg: '#eee', color: '#333' };
-                                                                return (
-                                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f9f9f9' }}>
-                                                                        <span style={{ background: tprop.bg, color: tprop.color, padding: '4px 8px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '16px', minWidth: '50px', textAlign: 'center' }}>
-                                                                            {it.type}
-                                                                        </span>
-                                                                        <span style={{ flex: 1, fontSize: '13px', color: '#333' }}>{it.label} <span style={{ color: '#999' }}>({it.nro})</span></span>
-                                                                        <strong style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--purple)' }}>{fBS(it.amount)}</strong>
-                                                                    </div>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 0', borderTop: '2px solid var(--border)', marginTop: '8px' }}>
-                                                            <strong style={{ fontSize: '14px', color: '#111' }}>Total</strong>
-                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                                                <button onClick={() => { setAddingItemToPlan(p.id); setCheckedItemsToAddToPlan({}); }} style={{ background: 'transparent', border: '1px solid var(--purple)', color: 'var(--purple)', borderRadius: '4px', padding: '4px 12px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>+ Agregar item</button>
-                                                                <strong style={{ fontFamily: 'monospace', fontSize: '17px', color: 'var(--purple)' }}>{fBS(total)}</strong>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    {addingItemToPlan === p.id && (
-                                                        <div style={{ padding: '16px', background: '#f4f2ff', border: '1px solid var(--purple)', borderRadius: '8px', marginTop: '10px', marginBottom: '10px' }}>
-                                                            <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>SELECCIONAR ITEMS A AGREGAR</div>
+                                                {!isCollapsed && (
+                                                    <div style={{ padding: '0 20px' }}>
+                                                        <div style={{ paddingTop: '20px' }}>
+                                                            <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'gray', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>ITEMS DEL PLAN</div>
                                                             <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                {availSocioItems.length === 0 ? (
-                                                                    <div style={{ textAlign: 'center', color: 'gray', padding: '10px', fontSize: '12px' }}>No hay ítems disponibles.</div>
-                                                                ) : (
-                                                                    availSocioItems.map(it => {
-                                                                        const tagProps = {
-                                                                            envio: { bg: '#d4e4f7', color: '#1a3a5f' },
-                                                                            flete: { bg: '#fdf8ed', color: '#f37021' },
-                                                                            pedido: { bg: '#fff2cc', color: '#b38600' },
-                                                                            extra: { bg: '#fde4cc', color: '#cc5500' }
-                                                                        };
-                                                                        const tprop = tagProps[it.type] || { bg: '#eee', color: '#333' };
-                                                                        const key = `${it.remId}-${it.type}`;
-                                                                        return (
-                                                                            <label key={key} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.05)', cursor: 'pointer' }}>
-                                                                                <input
-                                                                                    type="checkbox"
-                                                                                    checked={!!checkedItemsToAddToPlan[key]}
-                                                                                    onChange={e => setCheckedItemsToAddToPlan({ ...checkedItemsToAddToPlan, [key]: e.target.checked })}
-                                                                                    style={{ marginRight: '16px', width: '16px', height: '16px' }}
-                                                                                />
-                                                                                <span style={{ background: tprop.bg, color: tprop.color, padding: '4px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '16px', minWidth: '60px', textAlign: 'center' }}>
-                                                                                    {it.type}
-                                                                                </span>
-                                                                                <span style={{ flex: 1, fontSize: '13px', color: '#444' }}>{it.nro ? `${it.nro} ` : ''}{it.label}</span>
-                                                                                <span style={{ fontWeight: 'bold', color: 'var(--navy)', fontFamily: 'monospace', fontSize: '14px' }}>
-                                                                                    {fBS(it.amount)}
-                                                                                </span>
-                                                                            </label>
-                                                                        )
-                                                                    })
-                                                                )}
+                                                                {p.items.map((it, i) => {
+                                                                    const tagProps = {
+                                                                        envio: { bg: '#d4e4f7', color: '#1a3a5f' },
+                                                                        flete: { bg: '#fdf8ed', color: '#f37021' },
+                                                                        pedido: { bg: '#fff2cc', color: '#b38600' },
+                                                                        extra: { bg: '#fde4cc', color: '#cc5500' }
+                                                                    };
+                                                                    const tprop = tagProps[it.type] || { bg: '#eee', color: '#333' };
+                                                                    const itemKey = `${it.remId}-${it.type}`;
+                                                                    return (
+                                                                        <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f9f9f9' }}>
+                                                                            <span style={{ background: tprop.bg, color: tprop.color, padding: '4px 8px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '16px', minWidth: '50px', textAlign: 'center' }}>
+                                                                                {it.type}
+                                                                            </span>
+                                                                            <span style={{ flex: 1, fontSize: '13px', color: '#333' }}>{it.label} <span style={{ color: '#999' }}>({it.nro})</span></span>
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                                                <strong style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--purple)' }}>{fBS(it.amount)}</strong>
+                                                                                <button onClick={() => deleteItemFromPlan(p.id, itemKey)} style={{ background: 'transparent', border: 'none', color: '#eb5757', cursor: 'pointer', fontSize: '12px' }} title="Quitar item del plan">✕</button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )
+                                                                })}
                                                             </div>
-                                                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-                                                                <button onClick={() => setAddingItemToPlan(null)} style={{ background: '#fff', color: '#666', border: '1px solid var(--border)', borderRadius: '4px', padding: '6px 12px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}>Cancelar</button>
-                                                                <button onClick={() => handleAddExtraToPlan(p.id)} style={{ background: '#673ab7', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 16px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>Agregar seleccionados</button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px', paddingBottom: '20px' }}>
-                                                    <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'gray', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>PAGOS REGISTRADOS</div>
-                                                    {(!p.pagos || p.pagos.length === 0) ? (
-                                                        <div style={{ textAlign: 'center', fontSize: '12px', color: 'gray', padding: '20px 0' }}>Sin pagos aún.</div>
-                                                    ) : (
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                                            {(p.pagos || []).map((pg, pidx) => (
-                                                                <div key={pidx} style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                                                                    <input type="number" value={pg.monto || ''} onChange={e => updatePagoPlan(p.id, pidx, 'monto', e.target.value)} placeholder="0.00" style={{ width: '120px', padding: '8px', fontFamily: 'monospace', border: '1px solid var(--border)', borderRadius: '4px' }} />
-                                                                    <input type="date" value={pg.fecha || ''} onChange={e => updatePagoPlan(p.id, pidx, 'fecha', e.target.value)} style={{ padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '12px', color: '#666' }} />
-                                                                    <button onClick={() => deletePagoPlan(p.id, pidx)} style={{ background: '#fff', color: '#eb5757', border: '1px solid #eb5757', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 0', borderTop: '2px solid var(--border)', marginTop: '8px' }}>
+                                                                <strong style={{ fontSize: '14px', color: '#111' }}>Total</strong>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                                    <button onClick={() => { setAddingItemToPlan(p.id); setCheckedItemsToAddToPlan({}); }} style={{ background: 'transparent', border: '1px solid var(--purple)', color: 'var(--purple)', borderRadius: '4px', padding: '4px 12px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>+ Agregar item</button>
+                                                                    <strong style={{ fontFamily: 'monospace', fontSize: '17px', color: 'var(--purple)' }}>{fBS(total)}</strong>
                                                                 </div>
-                                                            ))}
+                                                            </div>
                                                         </div>
-                                                    )}
-                                                </div>
 
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderTop: '1px solid var(--border)' }}>
-                                                    <div style={{ fontSize: '13px', fontWeight: 'bold', display: 'flex', gap: '16px' }}>
-                                                        <span style={{ color: 'green' }}>Pagado: {fBS(pagado)}</span>
-                                                        <span style={{ color: saldado ? 'green' : '#f37021' }}>Resta: {fBS(Math.max(0, resta))}</span>
+                                                        {addingItemToPlan === p.id && (
+                                                            <div style={{ padding: '16px', background: '#f4f2ff', border: '1px solid var(--purple)', borderRadius: '8px', marginTop: '10px', marginBottom: '10px' }}>
+                                                                <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>SELECCIONAR ITEMS A AGREGAR</div>
+                                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                    {availSocioItems.length === 0 ? (
+                                                                        <div style={{ textAlign: 'center', color: 'gray', padding: '10px', fontSize: '12px' }}>No hay ítems disponibles.</div>
+                                                                    ) : (
+                                                                        availSocioItems.map(it => {
+                                                                            const tagProps = {
+                                                                                envio: { bg: '#d4e4f7', color: '#1a3a5f' },
+                                                                                flete: { bg: '#fdf8ed', color: '#f37021' },
+                                                                                pedido: { bg: '#fff2cc', color: '#b38600' },
+                                                                                extra: { bg: '#fde4cc', color: '#cc5500' }
+                                                                            };
+                                                                            const tprop = tagProps[it.type] || { bg: '#eee', color: '#333' };
+                                                                            const key = `${it.remId}-${it.type}`;
+                                                                            return (
+                                                                                <label key={key} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.05)', cursor: 'pointer' }}>
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={!!checkedItemsToAddToPlan[key]}
+                                                                                        onChange={e => setCheckedItemsToAddToPlan({ ...checkedItemsToAddToPlan, [key]: e.target.checked })}
+                                                                                        style={{ marginRight: '16px', width: '16px', height: '16px' }}
+                                                                                    />
+                                                                                    <span style={{ background: tprop.bg, color: tprop.color, padding: '4px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '16px', minWidth: '60px', textAlign: 'center' }}>
+                                                                                        {it.type}
+                                                                                    </span>
+                                                                                    <span style={{ flex: 1, fontSize: '13px', color: '#444' }}>{it.nro ? `${it.nro} ` : ''}{it.label}</span>
+                                                                                    <span style={{ fontWeight: 'bold', color: 'var(--navy)', fontFamily: 'monospace', fontSize: '14px' }}>
+                                                                                        {fBS(it.amount)}
+                                                                                    </span>
+                                                                                </label>
+                                                                            )
+                                                                        })
+                                                                    )}
+                                                                </div>
+                                                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                                                                    <button onClick={() => setAddingItemToPlan(null)} style={{ background: '#fff', color: '#666', border: '1px solid var(--border)', borderRadius: '4px', padding: '6px 12px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}>Cancelar</button>
+                                                                    <button onClick={() => handleAddExtraToPlan(p.id)} style={{ background: '#673ab7', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 16px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>Agregar seleccionados</button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px', paddingBottom: '20px' }}>
+                                                            <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'gray', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>PAGOS REGISTRADOS</div>
+                                                            {(!p.pagos || p.pagos.length === 0) ? (
+                                                                <div style={{ textAlign: 'center', fontSize: '12px', color: 'gray', padding: '20px 0' }}>Sin pagos aún.</div>
+                                                            ) : (
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                                    {(p.pagos || []).map((pg, pidx) => {
+                                                                        const key = `${p.id}-${pidx}`;
+                                                                        const isEditing = editingPagoPlanKey === key;
+                                                                        return (
+                                                                            <div key={pidx} style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', padding: '12px', background: isEditing ? '#fffaf2' : '#fcfcfc', border: '1px solid ' + (isEditing ? 'var(--warn)' : '#eee'), borderRadius: '6px' }}>
+                                                                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                                                    <input type="number" readOnly={!isEditing} value={pg.monto || ''} onChange={e => updatePagoPlan(p.id, pidx, 'monto', e.target.value)} placeholder="0.00" style={{ width: '100px', padding: '8px', fontFamily: 'monospace', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', background: isEditing ? '#fff' : 'transparent', fontWeight: 'bold' }} />
+                                                                                    <input type="date" readOnly={!isEditing} value={pg.fecha || ''} onChange={e => updatePagoPlan(p.id, pidx, 'fecha', e.target.value)} style={{ padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', color: '#666', background: isEditing ? '#fff' : 'transparent' }} />
+                                                                                </div>
+                                                                                <input
+                                                                                    type="text"
+                                                                                    readOnly={!isEditing}
+                                                                                    placeholder="Notas del pago..."
+                                                                                    value={pg.nota || ''}
+                                                                                    onChange={e => updatePagoPlan(p.id, pidx, 'nota', e.target.value)}
+                                                                                    style={{ flex: 1, minWidth: '150px', padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', background: isEditing ? '#fff' : 'transparent' }}
+                                                                                />
+                                                                                <div style={{ display: 'flex', gap: '6px' }}>
+                                                                                    {isEditing ? (
+                                                                                        <button onClick={() => setEditingPagoPlanKey(null)} style={{ background: 'var(--ok)', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>Confirmar</button>
+                                                                                    ) : (
+                                                                                        <button onClick={() => setEditingPagoPlanKey(key)} style={{ background: '#fff', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '11px' }}>Editar</button>
+                                                                                    )}
+                                                                                    <button onClick={() => deletePagoPlan(p.id, pidx)} style={{ background: '#fff', color: '#eb5757', border: '1px solid #eb5757', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '11px' }}>✕</button>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderTop: '1px solid var(--border)' }}>
+                                                            <div style={{ fontSize: '13px', fontWeight: 'bold', display: 'flex', gap: '16px' }}>
+                                                                <span style={{ color: 'green' }}>Pagado: {fBS(pagado)}</span>
+                                                                <span style={{ color: saldado ? 'green' : '#f37021' }}>{resta < 0 ? 'Saldo a favor: ' : 'Resta: '}{fBS(Math.abs(resta))}</span>
+                                                            </div>
+                                                            <button onClick={() => handleAddPagoPlan(p.id)} style={{ background: '#f37021', color: '#fff', border: 'none', padding: '8px 24px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>+ Registrar Pago</button>
+                                                        </div>
                                                     </div>
-                                                    <button onClick={() => handleAddPagoPlan(p.id)} style={{ background: '#f37021', color: '#fff', border: 'none', padding: '8px 24px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>+ Registrar Pago</button>
-                                                </div>
+                                                )}
                                             </div>
                                         )
                                     })}
@@ -1946,15 +2207,38 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                         </div>
 
                         {/* 2. DESGLOSE DE DEUDA Panel */}
-                        <div style={{ background: '#fff', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', marginBottom: '1.5rem' }}>
-                            <div style={{ background: '#fdf8ed', color: 'var(--navy)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ background: '#fff', borderRadius: '8px', overflow: 'visible', border: '1px solid var(--border)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', marginBottom: '1.5rem' }}>
+                            <div style={{
+                                background: '#fdf8ed',
+                                color: 'var(--navy)',
+                                padding: '12px 16px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                borderBottom: '1px solid var(--border)',
+                                position: 'sticky',
+                                top: '0',
+                                zIndex: 100,
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                            }}>
                                 <h3 style={{ margin: 0, fontSize: '0.8rem', letterSpacing: '0.05em', textTransform: 'uppercase', fontWeight: 'bold' }}>
                                     DETALLE DE CUENTA (BS)
                                 </h3>
-                                <div style={{ display: 'flex', gap: '6px' }}>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    {Object.keys(selectedSocioItems).some(k => selectedSocioItems[k]) && (
+                                        <div style={{ marginRight: '10px', display: 'flex', gap: '8px' }}>
+                                            <div style={{ background: 'var(--accent)', color: '#fff', padding: '4px 12px', borderRadius: '4px', fontWeight: 'bold', fontSize: '0.75rem', display: 'flex', alignItems: 'center' }}>
+                                                Sel: {fBS(Object.keys(selectedSocioItems).filter(k => selectedSocioItems[k]).reduce((s, k) => {
+                                                    let item = availSocioItems.find(it => `${it.remId}-${it.type}` === k);
+                                                    return s + (item ? item.amount : 0);
+                                                }, 0))}
+                                            </div>
+                                            <button onClick={handleGeneratePlan} style={{ background: 'var(--navy)', color: '#fff', border: '1px solid #fff', padding: '4px 10px', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold', fontSize: '0.7rem' }}>Gen Plan</button>
+                                        </div>
+                                    )}
                                     <input value={ctaExtraLbl} onChange={e => setCtaExtraLbl(e.target.value)} type="text" placeholder="Desc Extra" style={{ padding: '4px 8px', fontSize: '0.75rem', border: '1px solid var(--border)', borderRadius: '4px', width: '120px', color: '#000' }} />
-                                    <input value={ctaExtraAmt} onChange={e => setCtaExtraAmt(e.target.value)} type="number" placeholder="BS" style={{ padding: '4px 8px', fontSize: '0.75rem', border: '1px solid var(--border)', borderRadius: '4px', width: '70px', color: '#000' }} />
-                                    <button onClick={handleSaveExtraCta} style={{ background: 'var(--navy)', border: 'none', color: '#fff', borderRadius: '4px', padding: '4px 12px', fontSize: '0.7rem', fontWeight: 'bold', cursor: 'pointer' }}>+ Item Extra</button>
+                                    <input value={ctaExtraAmt} onChange={e => setCtaExtraAmt(e.target.value)} type="number" placeholder="0.00 BS" style={{ width: '80px', padding: '4px 8px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem' }} />
+                                    <button onClick={handleSaveExtraCta} style={{ background: 'var(--navy)', border: 'none', color: '#fff', borderRadius: '4px', padding: '4px 12px', fontSize: '0.7rem', fontWeight: 'bold', cursor: 'pointer' }}>+ Extra</button>
                                 </div>
                             </div>
 
@@ -1965,9 +2249,21 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                     acc[item.nro].push(item);
                                     return acc;
                                 }, {})).map(([groupName, items], idx) => (
-                                    <div key={idx} style={{ border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
-                                        <div style={{ background: '#f4f7f9', padding: '8px 12px', fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--navy)', borderBottom: '1px solid var(--border)' }}>
-                                            {groupName}
+                                    <div key={groupName} style={{ border: '1px solid var(--border)', borderRadius: '8px', background: '#fff', marginBottom: '16px', overflow: 'visible', boxShadow: '0 2px 6px rgba(0,0,0,0.03)' }}>
+                                        <div style={{
+                                            background: groupName === 'OTRO CARGOS / ALQUILER' || groupName === 'Items extra' ? '#fdf8ed' : '#f4f7f9',
+                                            padding: '10px 16px',
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            color: 'var(--navy)',
+                                            borderBottom: '1px solid var(--border)',
+                                            position: 'sticky',
+                                            top: '44px',
+                                            zIndex: 80,
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                            borderRadius: '8px 8px 0 0'
+                                        }}>
+                                            {groupName === 'OTRO CARGOS / ALQUILER' || groupName === 'Items extra' ? 'OTROS CARGOS / ALQUILER' : `Pedido: ${groupName}`}
                                         </div>
                                         <div>
                                             {items.map((item, i) => {
@@ -1981,6 +2277,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
                                                 return (
                                                     <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: i < items.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={!!selectedSocioItems[`${item.remId}-${item.type}`]}
+                                                            onChange={e => setSelectedSocioItems({ ...selectedSocioItems, [`${item.remId}-${item.type}`]: e.target.checked })}
+                                                            style={{ marginRight: '12px', width: '15px', height: '15px', cursor: 'pointer' }}
+                                                        />
                                                         <span style={{ background: tprop.bg, color: tprop.color, padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '12px', minWidth: '50px', textAlign: 'center' }}>
                                                             {item.type}
                                                         </span>
@@ -2002,20 +2304,84 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                             CARGOS MANUALES (CUENTA CORRIENTE)
                                         </div>
                                         <div>
-                                            {(cta.extras || []).map((ex, eidx) => (
-                                                <div key={eidx} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: eidx < cta.extras.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
-                                                    <span style={{ background: '#fde4cc', color: '#cc5500', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold', textTransform: 'uppercase', marginRight: '12px', minWidth: '50px', textAlign: 'center' }}>
-                                                        EXTRA
-                                                    </span>
-                                                    <span style={{ flex: 1, fontSize: '0.8rem', color: '#444' }}>{ex.label}</span>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                                        <span style={{ fontWeight: 'bold', color: 'var(--purple)', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                                                            {fBS(ex.amount)}
-                                                        </span>
-                                                        <button onClick={() => handleDelExtraCta(eidx)} style={{ background: '#fff', color: '#eb5757', border: '1px solid rgba(235, 87, 87, 0.4)', borderRadius: '4px', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '0.6rem' }}>✕</button>
+                                            {(cta.extras || []).filter(ex => availSocioItems.some(it => it.remId === `extra-${ex.id}` && it.type === 'extra')).map((ex, idx) => {
+                                                const isRental = ex.isAlq || (ex.label || '').startsWith('Alquiler Mes:');
+                                                const isEditing = editingExtraId === ex.id;
+                                                return (
+                                                    <div key={ex.id || idx} style={{
+                                                        display: 'flex',
+                                                        flexWrap: 'wrap',
+                                                        gap: '12px',
+                                                        alignItems: 'center',
+                                                        padding: '10px 12px',
+                                                        background: isEditing ? '#fffaf2' : 'transparent',
+                                                        border: isEditing ? '1px solid var(--warn)' : 'none',
+                                                        borderBottom: '1px solid var(--border)',
+                                                        borderRadius: isEditing ? '8px' : '0'
+                                                    }}>
+                                                        <div style={{ flex: 1, display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                            <span style={{
+                                                                background: isRental ? '#e0f7fa' : '#fde4cc',
+                                                                color: isRental ? '#006064' : '#cc5500',
+                                                                padding: '2px 6px',
+                                                                borderRadius: '4px',
+                                                                fontSize: '0.65rem',
+                                                                fontWeight: 'bold',
+                                                                textTransform: 'uppercase',
+                                                                width: '60px',
+                                                                textAlign: 'center'
+                                                            }}>
+                                                                {isRental ? 'Alquiler' : 'Extra'}
+                                                            </span>
+                                                            <input
+                                                                type="text"
+                                                                readOnly={!isEditing || isRental}
+                                                                value={ex.label || ''}
+                                                                onChange={e => handleUpdateExtra(ex.id, 'label', e.target.value)}
+                                                                style={{
+                                                                    flex: 1,
+                                                                    padding: '4px 8px',
+                                                                    border: isEditing && !isRental ? '1px solid var(--warn)' : 'none',
+                                                                    borderRadius: '4px',
+                                                                    fontSize: '0.8rem',
+                                                                    background: isEditing && !isRental ? '#fff' : 'transparent'
+                                                                }}
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                readOnly={!isEditing || isRental}
+                                                                value={ex.amount || ''}
+                                                                onChange={e => handleUpdateExtra(ex.id, 'amount', e.target.value)}
+                                                                style={{
+                                                                    width: '100px',
+                                                                    padding: '4px 8px',
+                                                                    fontFamily: 'monospace',
+                                                                    border: isEditing && !isRental ? '1px solid var(--warn)' : 'none',
+                                                                    borderRadius: '4px',
+                                                                    fontSize: '0.8rem',
+                                                                    background: isEditing && !isRental ? '#fff' : 'transparent',
+                                                                    textAlign: 'right',
+                                                                    fontWeight: 'bold'
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                                            {isEditing ? (
+                                                                <button onClick={() => setEditingExtraId(null)} style={{ background: 'var(--ok)', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold' }}>Confirmar</button>
+                                                            ) : (
+                                                                <>
+                                                                    {!isRental && (
+                                                                        <button onClick={() => setEditingExtraId(ex.id)} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem' }} title="Editar item">✏️</button>
+                                                                    )}
+                                                                </>
+                                                            )}
+                                                            {!isRental && (
+                                                                <button onClick={() => handleDeleteManualSocioItem(ex.id)} style={{ background: 'transparent', border: 'none', color: '#eb5757', cursor: 'pointer', fontSize: '0.9rem' }} title="Borrar item">✕</button>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                         <div style={{ background: '#fdf8ed', padding: '8px 12px', fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between', color: '#666', borderTop: '1px solid var(--border)' }}>
                                             <span>Subtotal Items Extra</span>
@@ -2042,14 +2408,34 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                     <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--border)', padding: '20px 0' }}>Sin pagos aún.</div>
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                        {(cta.pagos || []).map((pg, pidx) => (
-                                            <div key={pidx} style={{ display: 'flex', gap: '12px', alignItems: 'center', background: '#f8f9fa', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                                                <span style={{ fontSize: '0.7rem', color: 'var(--border)', fontWeight: 'bold', width: '20px' }}>#{pidx + 1}</span>
-                                                <input type="date" value={pg.fecha || ''} onChange={e => updatePagoCta(pidx, 'fecha', e.target.value)} style={{ padding: '6px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.75rem', color: '#666', width: '130px' }} />
-                                                <input type="number" value={pg.monto || ''} onChange={e => updatePagoCta(pidx, 'monto', e.target.value)} style={{ flex: 1, padding: '6px', fontFamily: 'monospace', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem' }} placeholder="Monto Pagado BS" />
-                                                <button onClick={() => handleDelPagoCta(pidx)} style={{ background: '#fff', color: '#eb5757', border: '1px solid rgba(235, 87, 87, 0.4)', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.7rem' }}>✕</button>
-                                            </div>
-                                        ))}
+                                        {(cta.pagos || []).map((pg, pidx) => {
+                                            const isEditing = editingPagoCtaIdx === pidx;
+                                            return (
+                                                <div key={pidx} style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', background: isEditing ? '#fffaf2' : '#f8f9fa', padding: '12px', borderRadius: '8px', border: '1px solid ' + (isEditing ? 'var(--warn)' : 'var(--border)') }}>
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--border)', fontWeight: 'bold', width: '20px' }}>#{pidx + 1}</span>
+                                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                        <input type="date" readOnly={!isEditing} value={pg.fecha || ''} onChange={e => updatePagoCta(pidx, 'fecha', e.target.value)} style={{ padding: '6px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '0.75rem', color: '#666', width: '130px', background: isEditing ? '#fff' : 'transparent' }} />
+                                                        <input type="number" readOnly={!isEditing} value={pg.monto || ''} onChange={e => updatePagoCta(pidx, 'monto', e.target.value)} style={{ width: '120px', padding: '6px', fontFamily: 'monospace', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '0.8rem', background: isEditing ? '#fff' : 'transparent', fontWeight: 'bold' }} placeholder="Monto BS" />
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        readOnly={!isEditing}
+                                                        placeholder="Notas del pago..."
+                                                        value={pg.nota || ''}
+                                                        onChange={e => updatePagoCta(pidx, 'nota', e.target.value)}
+                                                        style={{ flex: 1, minWidth: '150px', padding: '6px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', background: isEditing ? '#fff' : 'transparent' }}
+                                                    />
+                                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                                        {isEditing ? (
+                                                            <button onClick={() => setEditingPagoCtaIdx(null)} style={{ background: 'var(--ok)', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 12px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold' }}>Confirmar</button>
+                                                        ) : (
+                                                            <button onClick={() => setEditingPagoCtaIdx(pidx)} style={{ background: '#fff', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.7rem' }}>Editar</button>
+                                                        )}
+                                                        <button onClick={() => handleDelPagoCta(pidx)} style={{ background: '#fff', color: '#eb5757', border: '1px solid rgba(235, 87, 87, 0.4)', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.7rem' }}>✕</button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -2158,10 +2544,10 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 <td style={{ padding: '16px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
                                                     {!m.cargado && (
                                                         <button
-                                                            onClick={async () => {
-                                                                if (window.confirm(`¿Forzar carga de ${formatMesAlq(m.ym)} a Cuenta Corriente?`)) {
+                                                            onClick={() => {
+                                                                openConfirm('Carga Manual', `¿Forzar carga de ${formatMesAlq(m.ym)} a Cuenta Corriente?`, async () => {
                                                                     await cargarAlqToCta(idx);
-                                                                }
+                                                                });
                                                             }}
                                                             style={{ background: '#2980b9', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
                                                         >
@@ -2169,10 +2555,11 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         </button>
                                                     )}
                                                     <button
-                                                        onClick={async () => {
-                                                            if (window.confirm('¿Borrar mes?')) {
-                                                                await deleteAlq(idx);
-                                                            }
+                                                        onClick={() => {
+                                                            openConfirm('Borrar Mes', '¿Estás seguro de que deseas borrar este mes de alquiler?', () => {
+                                                                deleteAlq(idx);
+                                                                showToast('Mes eliminado.', 'success');
+                                                            });
                                                         }}
                                                         style={{ background: '#fff', color: '#eb5757', border: '1px solid rgba(235, 87, 87, 0.4)', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
                                                     >
@@ -2231,7 +2618,130 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                             </div>
                         )}
                     </div>
-                )}
-        </div >
+                )
+            }
+            {/* 6. TOAST NOTIFICATIONS CONTAINER */}
+            <div style={{
+                position: 'fixed',
+                bottom: '24px',
+                right: '24px',
+                zIndex: 9999,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                pointerEvents: 'none'
+            }}>
+                {toasts.map(t => (
+                    <div key={t.id} style={{
+                        background: t.type === 'error' ? '#fff1f0' : (t.type === 'success' ? '#f6ffed' : '#e6f7ff'),
+                        border: '1px solid ' + (t.type === 'error' ? '#ffa39e' : (t.type === 'success' ? '#b7eb8f' : '#91d5ff')),
+                        color: t.type === 'error' ? '#cf1322' : (t.type === 'success' ? '#389e0d' : '#096dd9'),
+                        padding: '12px 20px',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        minWidth: '280px',
+                        animation: 'toastIn 0.3s ease-out forwards',
+                        pointerEvents: 'auto'
+                    }}>
+                        <span style={{ fontSize: '18px' }}>
+                            {t.type === 'success' ? '✅' : (t.type === 'error' ? '❌' : 'ℹ️')}
+                        </span>
+                        {t.msg}
+                    </div>
+                ))}
+            </div>
+
+            {/* 7. CUSTOM CONFIRMATION MODAL */}
+            {confirmModal.show && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    background: 'rgba(0,0,0,0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10000,
+                    backdropFilter: 'blur(4px)',
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        background: '#fff',
+                        borderRadius: '12px',
+                        width: '90%',
+                        maxWidth: '450px',
+                        padding: '24px',
+                        boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+                        animation: 'slideUp 0.3s ease-out'
+                    }}>
+                        <h3 style={{ margin: '0 0 16px 0', color: '#1a1a1a', fontSize: '1.2rem', fontWeight: '800' }}>
+                            {confirmModal.title}
+                        </h3>
+                        <p style={{ margin: '0 0 24px 0', color: '#444', lineHeight: '1.5', fontSize: '14px', whiteSpace: 'pre-wrap' }}>
+                            {confirmModal.msg}
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                            <button
+                                onClick={() => setConfirmModal({ ...confirmModal, show: false })}
+                                style={{
+                                    background: '#f4f4f4',
+                                    color: '#666',
+                                    border: 'none',
+                                    padding: '10px 20px',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                    fontSize: '14px'
+                                }}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (confirmModal.onConfirm) confirmModal.onConfirm();
+                                    setConfirmModal({ ...confirmModal, show: false });
+                                }}
+                                style={{
+                                    background: confirmModal.title.includes('BORRAR') || confirmModal.title.includes('CRÍTICA') ? '#ff4d4f' : 'var(--navy)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    padding: '10px 20px',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                    fontSize: '14px',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                                }}
+                            >
+                                Aceptar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+                @keyframes toastIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+                @keyframes slideUp {
+                    from { transform: translateY(20px); opacity: 0; }
+                    to { transform: translateY(0); opacity: 1; }
+                }
+            `}</style>
+
+        </div>
     );
 }

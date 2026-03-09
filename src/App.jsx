@@ -8,7 +8,8 @@ import AdminUserManagement from './components/AdminUserManagement';
 import SellerDashboard from './components/SellerDashboard';
 import RemitosManagement from './components/RemitosManagement';
 import AdminMasterView from './components/AdminMasterView';
-import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2 } from 'lucide-react';
+import ComicAnalysisTool from './components/ComicAnalysisTool';
+import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2, Zap } from 'lucide-react';
 import { supabase } from './services/supabase';
 
 function Main() {
@@ -125,6 +126,13 @@ function Main() {
                                 <Users size={20} />
                                 {sidebarOpen && <span>Vendedores</span>}
                             </button>
+                            <button
+                                onClick={() => setActiveTab('entelequia')}
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'entelequia' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                            >
+                                <Zap size={20} />
+                                {sidebarOpen && <span>Herramienta Editorial</span>}
+                            </button>
                         </>
                     ) : (
                         <>
@@ -193,7 +201,8 @@ function Main() {
                                     activeTab === 'remitos' ? 'Remitos y Finanzas' :
                                         activeTab === 'confirmaciones' ? 'Base Master' :
                                             activeTab === 'mis-pedidos' ? 'Mis Pedidos como Vendedor' :
-                                                'Gestión de Vendedores')
+                                                activeTab === 'usuarios' ? 'Gestión de Vendedores' :
+                                                    'Herramienta Editorial (Entelequia)')
                             : 'Mis Pedidos Semanales'
                         }
                     </h2>
@@ -207,7 +216,8 @@ function Main() {
                                 activeTab === 'remitos' ? <RemitosManagement /> :
                                     activeTab === 'confirmaciones' ? <AdminMasterView /> :
                                         activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
-                                            <AdminUserManagement />
+                                            activeTab === 'usuarios' ? <AdminUserManagement /> :
+                                                <ComicAnalysisTool />
                     ) : (
                         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
                             <SellerDashboard isAdmin={isAdmin} />

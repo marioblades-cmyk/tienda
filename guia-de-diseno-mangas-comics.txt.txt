@@ -1,0 +1,250 @@
+======================================================================
+  GUÍA DE DISEÑO - MANGAS COMICS BOLIVIA STORE
+======================================================================
+
+Sistema de diseño inspirado en la estética comic del logo, adaptado para interfaces web profesionales y funcionales.
+
+--------------------------------------------------
+  PALETA DE COLORES
+--------------------------------------------------
+
+  Navy Profundo (primary)
+    HSL: 215 55% 22%
+    Uso: Fondo de navegación, encabezados principales, elementos de autoridad
+
+  Naranja Comic (accent)
+    HSL: 28 90% 52%
+    Uso: Botones CTA, enlaces activos, badges importantes, indicadores de acción
+
+  Amarillo Destacado (comicYellow)
+    HSL: 45 92% 60%
+    Uso: Highlights de texto, tags, notificaciones, precios
+
+  Azul Cielo (comicSky)
+    HSL: 205 55% 65%
+    Uso: Fondos secundarios, bordes suaves, estados hover
+
+  Crema (comicCream)
+    HSL: 45 60% 94%
+    Uso: Fondos de tarjetas destacadas, fondos de sección alternos
+
+  Gris Claro (background)
+    HSL: 220 20% 97%
+    Uso: Fondo general de la aplicación
+
+  Casi Negro (foreground)
+    HSL: 220 30% 12%
+    Uso: Texto principal del cuerpo
+
+  Gris Suave (muted)
+    HSL: 210 20% 93%
+    Uso: Fondos de inputs deshabilitados, separadores suaves
+
+  Gris Medio (mutedForeground)
+    HSL: 215 15% 48%
+    Uso: Texto secundario, placeholders, captions
+
+  Rojo Error (destructive)
+    HSL: 0 72% 51%
+    Uso: Mensajes de error, botones de eliminación
+
+--------------------------------------------------
+  TIPOGRAFÍA
+--------------------------------------------------
+
+  FUENTES:
+  - Display: Bangers (400)
+    Uso: Títulos decorativos hero, banners promocionales. NO usar para texto largo.
+  - Cuerpo: Nunito (pesos: 400, 600, 700, 800)
+    Uso: Todo el texto de la interfaz: cuerpo, títulos, botones, navegación.
+  - Monospace: JetBrains Mono (pesos: 400, 500)
+    Uso: Código, IDs de pedido, números de referencia, datos técnicos.
+
+  TAMAÑOS:
+  - display: 3rem (48px) | line-height: 1.1
+    Uso: Hero principal, página de aterrizaje
+  - h1: 2.25rem (36px) | line-height: 1.2
+    Uso: Título de página
+  - h2: 1.75rem (28px) | line-height: 1.25
+    Uso: Título de sección
+  - h3: 1.375rem (22px) | line-height: 1.3
+    Uso: Subtítulo, título de tarjeta
+  - h4: 1.125rem (18px) | line-height: 1.4
+    Uso: Título de subsección, label destacado
+  - body: 1rem (16px) | line-height: 1.6
+    Uso: Texto general del cuerpo
+  - small: 0.875rem (14px) | line-height: 1.5
+    Uso: Texto secundario, metadata
+  - caption: 0.75rem (12px) | line-height: 1.4
+    Uso: Captions, timestamps, footnotes
+
+--------------------------------------------------
+  BORDES Y RADIOS
+--------------------------------------------------
+
+  GROSORES:
+  - Thin: 1px — Separadores, bordes de inputs, divisiones de tabla
+  - Medium: 2px — Bordes de tarjetas activas, bordes de elementos seleccionados
+  - Thick: 3px — Bordes decorativos, indicador de sección activa en nav, bordes de tarjetas destacadas
+
+  RADIOS:
+  - sm: 0.375rem (6px) — Badges, chips, tags pequeños
+  - md: 0.5rem (8px) — Botones, inputs, elementos pequeños
+  - lg: 0.625rem (10px) — Tarjetas, paneles, modales
+
+  COLORES DE BORDE:
+  - Default: hsl(215 25% 85%) — Borde por defecto
+  - Activo/Focus: hsl(28 90% 52%) — Borde activo/focus
+  - Destacado: hsl(215 55% 22%) — Borde en secciones destacadas
+
+--------------------------------------------------
+  TABLAS
+--------------------------------------------------
+
+  headerBackground: primary (navy)
+  headerText: primary-foreground (crema claro)
+  headerFontWeight: 700 (bold)
+  headerFontSize: small (14px)
+  headerTextTransform: uppercase
+  headerLetterSpacing: 0.05em
+  rowAlternate: Filas pares con fondo comic-cream, impares con fondo card (blanco)
+  rowHover: Fondo secondary con transición 150ms
+  cellPadding: 0.75rem horizontal, 0.875rem vertical
+  borderStyle: Borde inferior thin en cada fila, sin bordes verticales
+  borderColor: border (hsl 215 25% 85%)
+
+--------------------------------------------------
+  TARJETAS (CARDS)
+--------------------------------------------------
+
+  background: card (blanco)
+  border: thin solid border
+  borderRadius: lg (0.625rem)
+  shadow: shadow-card (sutil, dos capas)
+  shadowHover: shadow-card-hover (más pronunciada al hover)
+  padding: 1.25rem a 1.5rem
+  destacada:
+    borderLeft: thick solid accent (naranja)
+    background: comic-cream
+
+--------------------------------------------------
+  BOTONES
+--------------------------------------------------
+
+  PRIMARY:
+    background: accent (naranja)
+    text: accent-foreground (blanco)
+    border: ninguno
+    shadow: shadow-button
+    hover: Oscurecer 10%, escala 1.02
+    borderRadius: md
+    padding: 0.625rem 1.25rem
+    fontWeight: 700
+    fontSize: body (16px)
+
+  SECONDARY:
+    background: secondary (azul claro)
+    text: secondary-foreground (navy)
+    border: thin solid border
+    hover: Fondo ligeramente más oscuro
+
+  OUTLINE:
+    background: transparente
+    text: foreground
+    border: medium solid border
+    hover: Fondo muted
+
+  GHOST:
+    background: transparente
+    text: muted-foreground
+    hover: Fondo muted, texto foreground
+
+--------------------------------------------------
+  NAVEGACIÓN
+--------------------------------------------------
+
+  TOPBAR:
+    background: gradient-nav (navy degradado)
+    text: primary-foreground (crema claro)
+    height: 4rem (64px)
+    shadow: shadow-nav
+    logoMaxHeight: 2.5rem
+
+  LINKS:
+    default: primary-foreground con opacity 0.8
+    hover: primary-foreground opacity 1, underline offset 4px con accent
+    active: Borde inferior thick accent (naranja), opacity 1
+    fontSize: small (14px)
+    fontWeight: 600
+    spacing: 1.5rem entre links
+
+  SIDEBAR:
+    background: sidebar-background (navy oscuro)
+    width: 260px
+    itemPadding: 0.75rem 1rem
+    itemHover: sidebar-accent (navy más claro)
+    itemActive: Borde izquierdo thick sidebar-primary (naranja), fondo sidebar-accent
+
+  MOBILE:
+    menuIcon: Hamburguesa, 24px, primary-foreground
+    drawer: Desde la izquierda, fondo sidebar-background, ancho 80% max 320px
+
+--------------------------------------------------
+  RESALTADO DE TEXTO
+--------------------------------------------------
+
+  PALABRA:
+    tipo: highlight-word
+    background: comic-yellow con 35% opacidad
+    padding: 0.1em 0.4em
+    borderRadius: 0.25rem
+    fontWeight: 700
+    uso: Resaltar palabras clave, términos importantes, precios
+
+  ACENTO:
+    tipo: highlight-accent
+    background: comic-orange con 15% opacidad
+    color: comic-orange
+    padding: 0.1em 0.4em
+    borderRadius: 0.25rem
+    fontWeight: 700
+    uso: Destacar acciones, estados, etiquetas de categoría
+
+--------------------------------------------------
+  BADGES / ETIQUETAS
+--------------------------------------------------
+
+  DEFAULT: bg: secondary, text: secondary-foreground, border: none
+  NUEVO: bg: accent, text: accent-foreground, fontWeight: 700
+  OFERTA: bg: comic-yellow, text: comic-dark, fontWeight: 700
+  AGOTADO: bg: muted, text: muted-foreground
+
+--------------------------------------------------
+  ESPACIADO
+--------------------------------------------------
+
+  seccion: 3rem a 4rem entre secciones
+  grupo: 1.5rem a 2rem entre grupos de elementos
+  elemento: 0.75rem a 1rem entre elementos relacionados
+  inline: 0.5rem entre elementos en línea
+
+--------------------------------------------------
+  SOMBRAS
+--------------------------------------------------
+
+  card: 0 2px 8px -2px navy/8%, 0 4px 16px -4px navy/6%
+  cardHover: 0 4px 12px -2px navy/12%, 0 8px 24px -4px navy/10%
+  button: 0 2px 6px -1px orange/30%
+  nav: 0 4px 20px -4px navy/15%
+
+--------------------------------------------------
+  GRADIENTES
+--------------------------------------------------
+
+  hero: 135deg: naranja → amarillo
+  nav: 180deg: navy oscuro → navy
+  cardAccent: 135deg: azul cielo → navy
+
+======================================================================
+  FIN DE LA GUÍA DE DISEÑO
+======================================================================

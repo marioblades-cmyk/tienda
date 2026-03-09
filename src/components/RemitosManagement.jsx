@@ -83,7 +83,7 @@ export default function RemitosManagement({ isSocio = false }) {
 
 
             {/* Main Content Area */}
-            <div className="bg-white rounded-[2rem] shadow-xl shadow-navy/5 border border-border/40 overflow-hidden min-h-[600px]">
+            <div className="bg-white rounded-[2rem] shadow-xl shadow-navy/5 border border-border/40 overflow-visible min-h-[600px]">
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <RemitosTable activeTab={activeTab} isSocio={isSocio} />
                 </div>

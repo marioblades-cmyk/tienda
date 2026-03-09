@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Anton&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Bangers&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -25,6 +25,43 @@
     --surface: #ffffff;
     --danger: #eb5757;
     --success: #27ae60;
+
+    /* COMIC DESIGN SYSTEM - Solo para la nueva herramienta */
+    --comic-primary: hsl(215 55% 22%);
+    /* Navy Profundo */
+    --comic-primary-foreground: hsl(45 60% 94%);
+    /* Crema Claro */
+    --comic-accent: hsl(28 90% 52%);
+    /* Naranja Comic */
+    --comic-accent-foreground: #ffffff;
+    --comic-yellow: hsl(45 92% 60%);
+    /* Amarillo Destacado */
+    --comic-sky: hsl(205 55% 65%);
+    /* Azul Cielo */
+    --comic-cream: hsl(45 60% 94%);
+    /* Crema */
+    --comic-background: hsl(220 20% 97%);
+    /* Gris Claro */
+    --comic-foreground: hsl(220 30% 12%);
+    /* Casi Negro */
+    --comic-muted: hsl(210 20% 93%);
+    /* Gris Suave */
+    --comic-muted-foreground: hsl(215 15% 48%);
+    /* Gris Medio */
+    --comic-destructive: hsl(0 72% 51%);
+    /* Rojo Error */
+    --comic-border: hsl(215 25% 85%);
+
+    /* Fonts */
+    --font-comic-display: 'Bangers', cursive;
+    --font-comic-body: 'Nunito', sans-serif;
+    --font-comic-mono: 'JetBrains Mono', monospace;
+
+    /* Shadows */
+    --comic-shadow-card: 0 2px 8px -2px hsla(215, 55%, 22%, 0.08), 0 4px 16px -4px hsla(215, 55%, 22%, 0.06);
+    --comic-shadow-card-hover: 0 4px 12px -2px hsla(215, 55%, 22%, 0.12), 0 8px 24px -4px hsla(215, 55%, 22%, 0.10);
+    --comic-shadow-button: 0 2px 6px -1px hsla(28, 90%, 52%, 0.3);
+    --comic-shadow-nav: 0 4px 20px -4px hsla(215, 55%, 22%, 0.15);
   }
 
   h1 {
@@ -110,4 +147,49 @@
   background-color: #ffffff;
   border: 1px solid #e2e0da;
   @apply shadow-sm;
+}
+
+@layer utilities {
+  .font-comic-display {
+    font-family: var(--font-comic-display);
+  }
+
+  .font-comic-body {
+    font-family: var(--font-comic-body);
+  }
+
+  .font-comic-mono {
+    font-family: var(--font-comic-mono);
+  }
+
+  .shadow-comic-card {
+    box-shadow: var(--comic-shadow-card);
+  }
+
+  .shadow-comic-card-hover:hover {
+    box-shadow: var(--comic-shadow-card-hover);
+  }
+
+  .shadow-comic-button {
+    box-shadow: var(--comic-shadow-button);
+  }
+
+  .shadow-comic-nav {
+    box-shadow: var(--comic-shadow-nav);
+  }
+
+  .highlight-word {
+    background-color: hsla(45, 92%, 60%, 0.35);
+    padding: 0.1em 0.4em;
+    border-radius: 0.25rem;
+    font-weight: 700;
+  }
+
+  .highlight-accent {
+    background-color: hsla(28, 90%, 52%, 0.15);
+    color: var(--comic-accent);
+    padding: 0.1em 0.4em;
+    border-radius: 0.25rem;
+    font-weight: 700;
+  }
 }
