@@ -73,7 +73,7 @@ function Main() {
     }
 
     return (
-        <div className="min-h-screen bg-background flex text-text font-sans antialiased overflow-x-hidden">
+        <div className="min-h-screen bg-background flex text-text font-sans antialiased">
             {/* Sidebar */}
             <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-[#1a2d42] transition-all duration-300 flex flex-col sticky top-0 h-screen z-50 border-r border-white/5`}>
                 <div className="p-6 flex items-center gap-3 border-b border-white/5">
@@ -187,7 +187,7 @@ function Main() {
             </aside>
 
             {/* Main Content Area */}
-            <div className="flex-1 flex flex-col min-h-screen max-w-full overflow-x-hidden">
+            <div className="flex-1 flex flex-col min-h-screen max-w-full overflow-x-auto">
                 <header className="p-4 md:p-6 pb-0">
                     <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-[0.2em] mb-4">
                         <span className="text-primary font-mono opacity-80">PLATAFORMA</span>

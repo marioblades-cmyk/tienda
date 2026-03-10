@@ -1,9 +1,15 @@
 /* ComicAnalysisTool.css */
 
 .comic-tool-container {
-    padding: 2rem;
+    padding: 1rem;
     background-color: hsl(220 20% 97%);
     min-height: 100%;
+}
+
+@media (min-width: 768px) {
+    .comic-tool-container {
+        padding: 2rem;
+    }
 }
 
 :root {
@@ -159,8 +165,9 @@
     background: white;
     border-radius: 10px;
     border: 1px solid var(--comic-border);
-    overflow: hidden;
+    overflow-x: auto;
     box-shadow: var(--shadow-card);
+    -webkit-overflow-scrolling: touch;
 }
 
 .comic-table {
