@@ -73,10 +73,10 @@ function Main() {
     }
 
     return (
-        <div className="min-h-screen bg-background flex text-text font-sans antialiased">
+        <div className="min-h-screen bg-background flex text-text font-sans antialiased overflow-x-hidden">
             {/* Sidebar */}
-            <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} border-r border-border bg-text transition-all duration-300 flex flex-col sticky top-0 h-screen z-50`}>
-                <div className="p-6 flex items-center gap-3 border-b border-white/10">
+            <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-[#1a2d42] transition-all duration-300 flex flex-col sticky top-0 h-screen z-50 border-r border-white/5`}>
+                <div className="p-6 flex items-center gap-3 border-b border-white/5">
                     <div className="bg-primary text-text p-2 rounded font-display text-xl min-w-[36px] text-center">MC</div>
                     {sidebarOpen && <span className="font-display text-2xl tracking-wide whitespace-nowrap text-white">MANGAS <span className="text-primary">COMICS</span></span>}
                 </div>
@@ -86,49 +86,49 @@ function Main() {
                         <>
                             <button
                                 onClick={() => setActiveTab('semanas')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'semanas' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'semanas' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <Calendar size={20} />
                                 {sidebarOpen && <span>Semanas</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('mis-pedidos')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'mis-pedidos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'mis-pedidos' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <LayoutDashboard size={20} />
                                 {sidebarOpen && <span>Mis Pedidos</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('consolidado')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'consolidado' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'consolidado' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <LayoutDashboard size={20} />
                                 {sidebarOpen && <span>Consolidado</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('confirmaciones')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'confirmaciones' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'confirmaciones' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <CheckCircle2 size={20} />
                                 {sidebarOpen && <span>Confirmaciones</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('remitos')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'remitos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'remitos' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <Database size={20} />
                                 {sidebarOpen && <span>Gestión Integral</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('usuarios')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'usuarios' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'usuarios' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <Users size={20} />
                                 {sidebarOpen && <span>Vendedores</span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('entelequia')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'entelequia' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'entelequia' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <Zap size={20} />
                                 {sidebarOpen && <span>Herramienta Editorial</span>}
@@ -138,7 +138,7 @@ function Main() {
                         <>
                             <button
                                 onClick={() => setActiveTab('pedidos')}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'pedidos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'pedidos' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
                                 <LayoutDashboard size={20} />
                                 {sidebarOpen && <span>Mis Pedidos</span>}
@@ -146,7 +146,7 @@ function Main() {
                             {isSocio && (
                                 <button
                                     onClick={() => setActiveTab('remitos')}
-                                    className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'remitos' ? 'bg-primary text-primary-text font-bold shadow-lg shadow-primary/20' : 'text-white/60 hover:bg-white/5 hover:text-primary'}`}
+                                    className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'remitos' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                                 >
                                     <Database size={20} />
                                     {sidebarOpen && <span>Gestión Integral</span>}
@@ -187,8 +187,8 @@ function Main() {
             </aside>
 
             {/* Main Content Area */}
-            <div className="flex-1 flex flex-col min-h-screen">
-                <header className="p-8 pb-0">
+            <div className="flex-1 flex flex-col min-h-screen max-w-full overflow-x-hidden">
+                <header className="p-4 md:p-6 pb-0">
                     <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-[0.2em] mb-4">
                         <span className="text-primary font-mono opacity-80">PLATAFORMA</span>
                         <span className="opacity-30">/</span>
@@ -202,14 +202,14 @@ function Main() {
                                         activeTab === 'confirmaciones' ? 'Base Master' :
                                             activeTab === 'mis-pedidos' ? 'Mis Pedidos como Vendedor' :
                                                 activeTab === 'usuarios' ? 'Gestión de Vendedores' :
-                                                    'Herramienta Editorial (Entelequia)')
+                                                    'Herramienta Editorial (Mangas Comics Bolivia)')
                             : 'Mis Pedidos Semanales'
                         }
                     </h2>
                     <div className="h-1 w-12 bg-primary mt-4"></div>
                 </header>
 
-                <main className="p-8 flex-1 animate-in fade-in duration-500">
+                <main className="p-4 md:p-6 flex-1 animate-in fade-in duration-500">
                     {isAdmin ? (
                         activeTab === 'semanas' ? <AdminWeeklyView /> :
                             activeTab === 'consolidado' ? <AdminConsolidatedView /> :

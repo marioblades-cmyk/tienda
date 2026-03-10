@@ -172,7 +172,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [ctaExtraAmt, setCtaExtraAmt] = useState('');
 
     // States for enhanced Payment/Plan features
-    const [collapsedPlans, setCollapsedPlans] = useState({}); // { planId: boolean }
+    const [expandedPlans, setExpandedPlans] = useState({}); // { planId: boolean }
     const [hidePaidPlans, setHidePaidPlans] = useState(false);
     const [editingPagoPlanKey, setEditingPagoPlanKey] = useState(null); // "planId-pagoIdx"
     const [editingPagoCtaIdx, setEditingPagoCtaIdx] = useState(null); // idx
@@ -837,8 +837,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         await savePlans(newPlans, nplan);
     };
 
-    const togglePlanCollapse = (pid) => {
-        setCollapsedPlans(prev => ({ ...prev, [pid]: !prev[pid] }));
+    const togglePlanExpand = (id) => {
+        setExpandedPlans(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
     // ==========================================
@@ -2004,15 +2004,15 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         let pagado = (p.pagos || []).reduce((s, pg) => s + (pg.monto || 0), 0);
                                         let resta = total - pagado;
                                         let saldado = resta < 0.01 && total > 0;
-                                        const isCollapsed = !!collapsedPlans[p.id];
+                                        const isExpanded = !!expandedPlans[p.id];
 
                                         return (
                                             <div key={p.id} style={{ background: '#fff', border: '1px solid ' + (saldado ? 'var(--border)' : 'var(--warn)'), borderLeft: saldado ? '1px solid var(--border)' : '4px solid var(--warn)', boxShadow: saldado ? 'none' : '0 4px 12px rgba(245, 168, 0, 0.05)', borderRadius: '8px', marginBottom: '24px', overflow: 'hidden' }}>
 
                                                 <div style={{ background: saldado ? '#f9f9f9' : '#fdf8ed', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => togglePlanCollapse(p.id)}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => togglePlanExpand(p.id)}>
                                                         <span style={{ color: saldado ? '#2ecc71' : 'var(--navy)', fontWeight: '900', fontSize: '14px' }}>
-                                                            {isCollapsed ? '▶' : '▼'} Plan #{p.id} {saldado && <span style={{ background: '#2ecc71', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontSize: '9px', marginLeft: '8px', verticalAlign: 'middle' }}>PAGADO</span>}
+                                                            {isExpanded ? '▼' : '▶'} Plan #{p.id} {saldado && <span style={{ background: '#2ecc71', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontSize: '9px', marginLeft: '8px', verticalAlign: 'middle' }}>PAGADO</span>}
                                                         </span>
                                                         <span style={{ color: '#999', fontSize: '11px' }}>{p.fecha}</span>
                                                     </div>
@@ -2030,7 +2030,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                     </div>
                                                 </div>
 
-                                                {!isCollapsed && (
+                                                {isExpanded && (
                                                     <div style={{ padding: '0 20px' }}>
                                                         <div style={{ paddingTop: '20px' }}>
                                                             <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'gray', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>ITEMS DEL PLAN</div>

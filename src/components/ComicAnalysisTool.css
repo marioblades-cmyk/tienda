@@ -2,15 +2,23 @@
 
 .comic-tool-container {
     padding: 2rem;
-    background-color: var(--comic-background);
+    background-color: hsl(220 20% 97%);
     min-height: 100%;
+}
+
+:root {
+    --shadow-card: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+.shadow-card {
+    box-shadow: var(--shadow-card);
 }
 
 /* ── HEADER ── */
 .comic-header {
     background: linear-gradient(180deg, var(--comic-primary), hsl(215 55% 15%));
     padding: 2rem;
-    border-radius: var(--comic-radius-lg, 0.625rem);
+    border-radius: 10px;
     color: var(--comic-primary-foreground);
     display: flex;
     align-items: center;
@@ -45,41 +53,53 @@
     color: var(--comic-accent);
 }
 
-/* ── DROP ZONE ── */
+/* ── DROP ZONE (Premium Redesign) ── */
 .comic-drop-zone {
-    background-color: var(--comic-cream);
-    border: 4px dashed var(--comic-accent);
-    padding: 4rem 2rem;
+    background-color: hsl(45 60% 94%); /* Comic Cream */
+    border: 2px dashed var(--comic-primary);
+    border-radius: 10px;
+    padding: 3rem;
     text-align: center;
-    border-radius: 0.75rem;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     margin-bottom: 2rem;
     box-shadow: var(--comic-shadow-card);
+    color: var(--comic-primary);
+    position: relative;
+    overflow: hidden;
+}
+
+.comic-drop-zone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(var(--comic-accent-rgb), 0.05) 0%, transparent 70%);
 }
 
 .comic-drop-zone:hover {
-    transform: scale(1.01);
-    background-color: hsl(45 60% 90%);
-    box-shadow: var(--comic-shadow-card-hover);
+    transform: translateY(-5px);
+    border-color: var(--comic-accent);
+    background-color: hsl(215, 30%, 15%);
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.8);
 }
 
 .comic-drop-icon {
     font-size: 4rem;
     display: block;
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
+    filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.3));
 }
 
 .comic-drop-zone h2 {
     font-family: var(--font-comic-display);
-    font-size: 1.75rem;
-    color: var(--comic-primary);
-    margin-bottom: 0.5rem;
+    font-size: 2rem;
+    color: white;
+    margin-bottom: 0.75rem;
+    letter-spacing: 0.05em;
 }
 
 .comic-drop-zone p {
     font-family: var(--font-comic-body);
-    color: var(--comic-muted-foreground);
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
 }
 
 /* ── TABS ── */
@@ -137,10 +157,10 @@
 /* ── TABLE ── */
 .comic-table-container {
     background: white;
-    border-radius: 0.625rem;
-    border: 2px solid var(--comic-primary);
+    border-radius: 10px;
+    border: 1px solid var(--comic-border);
     overflow: hidden;
-    box-shadow: var(--comic-shadow-card);
+    box-shadow: var(--shadow-card);
 }
 
 .comic-table {
@@ -150,14 +170,15 @@
 
 .comic-table thead th {
     background-color: var(--comic-primary);
-    color: var(--comic-primary-foreground);
+    color: var(--comic-cream);
     text-align: left;
-    padding: 1rem;
+    padding: 0.75rem 1rem;
     font-family: var(--font-comic-body);
-    font-weight: 800;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    border-bottom: 2px solid rgba(255,255,255,0.1);
 }
 
 .comic-table tbody tr:nth-child(even) {
@@ -165,11 +186,12 @@
 }
 
 .comic-table tbody tr:hover {
-    background-color: hsla(205, 55%, 65%, 0.1);
+    background-color: hsla(215, 55%, 22%, 0.03);
+    transition: background-color 150ms ease;
 }
 
 .comic-table td {
-    padding: 0.875rem 1rem;
+    padding: 0.6rem 1rem;
     border-bottom: 1px solid var(--comic-border);
     color: var(--comic-foreground);
     font-family: var(--font-comic-body);
@@ -228,10 +250,10 @@
     font-family: var(--font-comic-mono);
     font-size: 0.85rem;
     background: white;
-    border-radius: 0.75rem;
-    border: 2px solid var(--comic-primary);
+    border-radius: 10px;
+    border: 1px solid var(--comic-border);
     overflow: hidden;
-    box-shadow: var(--comic-shadow-card);
+    box-shadow: var(--shadow-card);
 }
 
 .comic-resumen-table thead th {
@@ -494,4 +516,402 @@
     font-weight: 800;
     color: #b45309;
     /* Darker amber for readability */
+}
+
+/* ── MODAL ── */
+.comic-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.comic-modal-content {
+    background: white;
+    width: 90%;
+    max-width: 500px;
+    border-radius: 1rem;
+    border: 3px solid var(--comic-primary);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    animation: slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.comic-modal-header {
+    background: var(--comic-primary);
+    color: white;
+    padding: 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.comic-modal-header h3 {
+    font-family: var(--font-comic-display);
+    margin: 0;
+    font-size: 1.25rem;
+    letter-spacing: 0.05em;
+}
+
+.comic-modal-body {
+    padding: 1.5rem;
+}
+
+.comic-form-group {
+    margin-bottom: 1rem;
+}
+
+.comic-form-group label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--comic-muted-foreground);
+    margin-bottom: 0.25rem;
+}
+
+.comic-form-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid var(--comic-border);
+    border-radius: 0.5rem;
+    font-family: var(--font-comic-body);
+    font-size: 0.9rem;
+    transition: border-color 0.2s;
+}
+
+.comic-form-input:focus {
+    outline: none;
+    border-color: var(--comic-accent);
+}
+
+.comic-modal-footer {
+    padding: 1rem 1.5rem;
+    background: var(--comic-muted);
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    border-top: 1px solid var(--comic-border);
+}
+
+/* ── HISTORY PANEL (Premium Redesign) ── */
+/* ── HISTORY PANEL (Premium Senior Redesign) ── */
+.comic-history-panel {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+
+.comic-history-panel h3 {
+    color: var(--comic-primary) !important;
+    font-weight: 700;
+    font-size: 1.25rem !important;
+    font-family: var(--font-comic-body);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.comic-history-panel .comic-accent {
+    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.4));
+}
+
+/* History Cards (White Senior) */
+.comic-history-card {
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    margin-bottom: 0.75rem;
+    padding: 1rem !important;
+    border-radius: 10px !important;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-card);
+}
+
+.comic-history-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    border-color: var(--comic-accent);
+}
+
+.comic-history-card .date {
+    background: hsl(215 25% 95%);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    padding: 2px 8px;
+    border-radius: 4px;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 9px;
+    font-family: var(--font-comic-body);
+}
+
+.comic-history-card .title {
+    font-family: var(--font-comic-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--comic-primary);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.02);
+    border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.1);
+    border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--comic-accent);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* ── CHANGE INDICATORS ── */
+.comic-change-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-comic-mono);
+    font-size: 0.65rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 700;
+}
+
+.comic-change-indicator .label {
+    opacity: 0.5;
+    font-size: 0.6rem;
+}
+
+.comic-change-indicator .old {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.comic-change-indicator .arrow {
+    font-weight: 900;
+    color: var(--comic-primary);
+}
+
+.comic-change-indicator .new {
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    background: white;
+}
+
+.comic-change-indicator.price {
+    background-color: hsla(45, 92%, 60%, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+.comic-change-indicator.price .new {
+    color: #b45309;
+}
+
+.comic-change-indicator.ean {
+    background-color: hsla(215, 80%, 60%, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.comic-change-indicator.ean .new {
+    color: #1d4ed8;
+}
+
+.comic-change-indicator.category {
+    background-color: hsla(270, 80%, 60%, 0.1);
+    border: 1px solid rgba(147, 51, 234, 0.3);
+}
+.comic-change-indicator.category .new {
+    color: #7e22ce;
+}
+
+/* ── EXPANDED AUDIT PANEL (Senior UI/UX Redesign) ── */
+.comic-expanded-audit-panel {
+    background-color: white; /* Base para Zebra */
+    padding: 1.5rem 2rem;
+    color: var(--comic-primary);
+    box-shadow: inset 0 4px 12px rgba(0,0,0,0.05);
+    border-bottom: 4px solid var(--comic-accent);
+}
+
+.comic-audit-header {
+    background-color: var(--comic-primary);
+    color: var(--comic-cream);
+    font-family: var(--font-comic-body);
+    font-weight: 700;
+    font-size: 0.9rem;
+    letter-spacing: 0.05em;
+    padding: 0.75rem 1.25rem;
+    text-transform: uppercase;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.comic-audit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 0; /* Colapsado para parecer tabla única */
+    border: 1px solid var(--comic-border);
+    border-top: none;
+}
+
+.comic-audit-section {
+    padding: 0;
+    border-right: 1px solid var(--comic-border);
+}
+
+.comic-audit-section:last-child {
+    border-right: none;
+}
+
+.comic-audit-section-title {
+    background: var(--comic-primary);
+    color: var(--comic-cream);
+    padding: 0.5rem 1rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid var(--comic-accent);
+}
+
+.comic-mini-table {
+    width: 100%;
+}
+
+.comic-mini-table-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.875rem 0.75rem; /* Padding especificado */
+    border-bottom: 1px solid var(--comic-border);
+    transition: all 150ms ease; /* Transición especificada */
+}
+
+.comic-mini-table-row:nth-child(even) {
+    background-color: hsl(45 60% 94%); /* Zebra: Comic Cream */
+}
+
+.comic-mini-table-row:hover {
+    background-color: hsla(28, 90%, 52%, 0.05); /* Sutil hover naranja */
+}
+
+.comic-mini-table-row .title {
+    font-family: var(--font-comic-body);
+    font-weight: 600;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--comic-primary);
+}
+
+.comic-mini-table-row .detail {
+    font-family: var(--font-comic-mono); /* JetBrains Mono */
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.comic-mini-table-row .reason {
+    font-family: var(--font-comic-mono);
+    font-size: 9px;
+    font-weight: 500;
+    opacity: 0.6;
+}
+
+/* Badges y Resaltados */
+.comic-badge-new-v3 {
+    background-color: var(--comic-accent); /* Naranja Comic */
+    color: white;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+.comic-price-tech {
+    background-color: hsla(45, 92%, 60%, 0.35); /* Amarillo al 35% */
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-comic-mono);
+    font-weight: 700;
+    color: var(--comic-primary);
+}
+
+.comic-mini-table {
+    width: 100%;
+    font-size: 11px;
+}
+
+.comic-mini-table-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    transition: background 0.2s;
+}
+
+.comic-mini-table-row:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+.comic-mini-table-row .title {
+    font-weight: 600;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.comic-mini-table-row .detail {
+    font-family: var(--font-comic-mono);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.comic-mini-table-row .reason {
+    font-size: 9px;
+    text-transform: uppercase;
+    font-weight: 800;
+    opacity: 0.4;
+    text-align: right;
+}
+
+/* Specific colors for audit details */
+.text-audit-accent { color: var(--comic-accent); }
+.text-audit-price { color: var(--comic-yellow); }
+.text-audit-ean { color: #60a5fa; }
+.text-audit-destr { color: #f87171; }
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
