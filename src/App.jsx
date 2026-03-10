@@ -73,7 +73,7 @@ function Main() {
     }
 
     return (
-        <div className="min-h-screen bg-background flex text-text font-sans antialiased">
+        <div className="min-h-screen bg-background flex text-text font-sans antialiased min-w-fit">
             {/* Sidebar */}
             <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-[#1a2d42] transition-all duration-300 flex flex-col sticky top-0 h-screen z-50 border-r border-white/5`}>
                 <div className="p-6 flex items-center gap-3 border-b border-white/5">

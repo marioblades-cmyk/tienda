@@ -10,6 +10,7 @@
     color: #1a1a1a;
     @apply antialiased min-h-screen text-[16px];
     font-family: 'DM Sans', sans-serif;
+    touch-action: auto !important;
   }
 
   :root {
