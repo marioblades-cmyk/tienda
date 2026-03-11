@@ -96,7 +96,6 @@ export default function PriceAnalysisTool() {
   const MARG_KEY   = 'mcb_margin_per_ed';
   const MMAY_KEY   = 'mcb_margin_mayor_per_ed';
 
-  const [PVC, setPVC] = useState(() => {
   const [PVC, setPVC] = useState({});
   const [margPorEd, setMargPorEd] = useState({});
   const [margenMayoreoPorEd, setMargenMayoreoPorEd] = useState({});
@@ -141,12 +140,16 @@ export default function PriceAnalysisTool() {
       if (!setErr && settings) {
         const mEd = {};
         const mmEd = {};
+        const dEd = { ...dtosPorEd }; // Empezar con los del Excel
         let globalParams = { ...params };
 
         settings.forEach(s => {
           if (s.editorial && s.editorial !== 'GLOBAL_SETTINGS') {
             mEd[s.editorial] = parseFloat(s.margen_venta);
             mmEd[s.editorial] = parseFloat(s.margen_mayoreo);
+            if (s.descuento_proveedor != null) {
+              dEd[s.editorial] = parseFloat(s.descuento_proveedor);
+            }
           } else if (s.editorial === 'GLOBAL_SETTINGS') {
             // Configuración global
             globalParams = {
@@ -161,6 +164,7 @@ export default function PriceAnalysisTool() {
 
         setMargPorEd(mEd);
         setMargenMayoreoPorEd(mmEd);
+        setDtosPorEd(dEd);
         setParams(globalParams);
       }
 
@@ -289,22 +293,25 @@ export default function PriceAnalysisTool() {
     setSaving(true);
     try {
       // 1. Guardar settings de la editorial actual
-      await supabase.from('price_analysis_settings').upsert({
+      const { error: err1 } = await supabase.from('price_analysis_settings').upsert({
         editorial: curEd,
         margen_venta: margActual,
         margen_mayoreo: margenMayoreoActual,
+        descuento_proveedor: dtosPorEd[curEd],
         updated_at: new Date()
       }, { onConflict: 'editorial' });
+      if (err1) throw err1;
 
       // 2. Guardar settings globales (por si cambiaron flete o TC)
-      await supabase.from('price_analysis_settings').upsert({
+      const { error: err2 } = await supabase.from('price_analysis_settings').upsert({
         editorial: 'GLOBAL_SETTINGS',
         flete: params.flet,
         tcf: params.tcf,
         tca: params.tca,
-        dto_niveles: params.dto_niveles,
+        dto_niveles: params.dtoNiveles,
         updated_at: new Date()
       }, { onConflict: 'editorial' });
+      if (err2) throw err2;
 
       // 3. Guardar ajustes manuales de la editorial actual
       const adjustments = Object.entries(PVC[curEd] || {}).map(([ars, pv]) => ({
@@ -324,12 +331,13 @@ export default function PriceAnalysisTool() {
 
       // 4. Guardar snapshot opcional
       if (semanaInfo) {
-        await supabase.from('price_analysis_results').upsert({
+        const { error: err4 } = await supabase.from('price_analysis_results').upsert({
           semana_id: semanaInfo.id,
           editorial: curEd,
           datos_json: rows,
           created_at: new Date()
         }, { onConflict: 'semana_id,editorial' });
+        if (err4) throw err4;
       }
 
       alert('¡Cambios guardados y sincronizados correctamente!');
