@@ -37,23 +37,8 @@ const ComicAnalysisTool = () => {
     React.useEffect(() => {
         fetchCatalog();
         fetchHistorial();
-        
-        // Auto-cargar última semana si no hay datos
-        const autoLoadLastWeek = async () => {
-            const { data: weeks } = await supabase
-                .from('semanas')
-                .select('*')
-                .not('archivo_url', 'is', null)
-                .order('created_at', { ascending: false })
-                .limit(1);
-            
-            if (weeks?.[0] && Object.keys(sheetsData).length === 0) {
-                console.log('Auto-cargando última semana:', weeks[0].nombre);
-                handleSelectHistorial(weeks[0]);
-            }
-        };
-        
-        autoLoadLastWeek();
+        // No auto-cargamos la última semana para no re-procesar en cada visita
+        // El usuario puede seleccionar desde historial o subir un Excel nuevo
     }, []);
 
     const fetchHistorial = async () => {

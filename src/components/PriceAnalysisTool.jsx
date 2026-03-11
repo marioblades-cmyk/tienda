@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabase';
 import { SHEET_PROCESSORS } from '../utils/excelProcessors';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import './PriceAnalysisTool.css';
 
 // Descuentos por editorial (usados si la hoja Totales no los tiene)
@@ -100,6 +100,13 @@ export default function PriceAnalysisTool() {
   const [margPorEd, setMargPorEd] = useState({});
   const [margenMayoreoPorEd, setMargenMayoreoPorEd] = useState({});
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null); // { msg, type: 'success'|'error' }
+
+  // Mostrar toast y auto-ocultar a los 3 segundos
+  const showToast = useCallback((msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
 
   // ── Valores activos para la editorial seleccionada ────────────────────────
   const descActual          = useMemo(() => curEd ? (dtosPorEd[curEd] || 35) / 100 : 0, [curEd, dtosPorEd]);
@@ -123,6 +130,14 @@ export default function PriceAnalysisTool() {
   // ── Cargar último Excel de semanas ────────────────────────────────────────
   useEffect(() => {
     initTool();
+
+    // Escuchar cuando se sube un nuevo Excel de semana y recargar precios
+    const handleNewWeek = () => {
+      showToast('Nuevo Excel detectado. Actualizando precios...', 'success');
+      setTimeout(() => initTool(), 800);
+    };
+    window.addEventListener('week-file-uploaded', handleNewWeek);
+    return () => window.removeEventListener('week-file-uploaded', handleNewWeek);
   }, []);
 
   const initTool = async () => {
@@ -339,10 +354,10 @@ export default function PriceAnalysisTool() {
         });
       }
 
-      alert('¡Cambios guardados y sincronizados correctamente!');
+      showToast('¡Cambios guardados y sincronizados correctamente!');
     } catch (err) {
       console.error('Error al guardar:', err);
-      alert('Error al sincronizar con la base de datos: ' + err.message);
+      showToast('Error al sincronizar: ' + err.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -409,6 +424,24 @@ export default function PriceAnalysisTool() {
 
   return (
     <div className="mcb-container">
+      {/* ── Toast Notification ── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: '1.5rem', right: '1.5rem',
+          background: toast.type === 'success' ? 'hsl(142 71% 45%)' : 'hsl(0 72% 51%)',
+          color: 'white', borderRadius: 12, padding: '0.75rem 1.25rem',
+          display: 'flex', alignItems: 'center', gap: '0.5rem',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+          fontSize: '0.85rem', fontWeight: 700, zIndex: 9999,
+          animation: 'slideIn 0.3s ease',
+        }}>
+          {toast.type === 'success'
+            ? <CheckCircle2 size={18} />
+            : <XCircle size={18} />}
+          {toast.msg}
+        </div>
+      )}
+
       {/* Banner de semana activa */}
       {semanaInfo && (
         <div style={{ marginBottom: '1rem', padding: '0.5rem 1rem', background: 'var(--mcb-cream)', borderRadius: 8, border: '1px solid var(--mcb-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>

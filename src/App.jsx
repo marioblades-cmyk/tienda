@@ -133,7 +133,7 @@ function Main() {
                                 onClick={() => setActiveTab('entelequia')}
                                 className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'entelequia' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
-                                <Zap size={20} className={hasPendingChanges ? 'text-[#f07d2a] animate-pulse' : ''} />
+                                <Zap size={20} className={hasPendingChanges ? 'text-[#f07d2a] animate-pulse' : 'opacity-50'} />
                                 {sidebarOpen && (
                                     <span className="flex items-center gap-2">
                                         Herramienta Editorial
