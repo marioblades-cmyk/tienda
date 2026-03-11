@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS price_analysis_settings (
 -- Agregar columna si la tabla ya existía sin ella (idempotente)
 ALTER TABLE price_analysis_settings ADD COLUMN IF NOT EXISTS descuento_proveedor NUMERIC;
 
+-- Índice único explícito (necesario para upsert ON CONFLICT en Supabase)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_price_analysis_settings_editorial ON price_analysis_settings(editorial);
+
 -- 2. Ajustes Manuales de Precios
 CREATE TABLE IF NOT EXISTS price_analysis_adjustments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -26,6 +29,9 @@ CREATE TABLE IF NOT EXISTS price_analysis_adjustments (
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(editorial, precio_ars)
 );
+
+-- Índice único explícito para upsert ON CONFLICT
+CREATE UNIQUE INDEX IF NOT EXISTS idx_price_analysis_adjustments_ed_price ON price_analysis_adjustments(editorial, precio_ars);
 
 -- 3. Histórico/Snapshots de Resultados (para consulta rápida)
 CREATE TABLE IF NOT EXISTS price_analysis_results (
