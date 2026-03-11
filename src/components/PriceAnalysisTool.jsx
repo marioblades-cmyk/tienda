@@ -394,7 +394,7 @@ export default function PriceAnalysisTool() {
 
       return { ars, D, E, F, G_PV, pvManual, pvFinal, dtos, gDtos, costoReal, gPV, pMayor, gMayor };
     });
-  }, [curEd, editoriales, params, descActual, PVC]);
+  }, [curEd, editoriales, params, descActual, margActual, margenMayoreoActual, PVC]);
 
   // ── Render de estados de carga ────────────────────────────────────────────
   if (loading) return (
@@ -513,7 +513,7 @@ export default function PriceAnalysisTool() {
                 </div>
               </div>
               <p style={{ fontSize: '0.62rem', color: 'var(--mcb-muted)', marginTop: '0.25rem' }}>
-                Valores por defecto: Margen {(params.marg*100).toFixed(0)}% · Mayor. {(params.margenMayoreo*100).toFixed(0)}%
+                Sin guardar: usa 40% venta · 30% mayor.
               </p>
             </div>
           )}
@@ -654,7 +654,7 @@ export default function PriceAnalysisTool() {
                         )}
                       </td>
                       {row.dtos.map((val, i) => (
-                        <td key={i} className="td-dto">{val.toFixed(1)}</td>
+                        <td key={i} className="td-dto">{val.toFixed(2)}</td>
                       ))}
                       {row.gDtos.map((g, i) => (
                         <td key={`g${i}`}>
