@@ -292,52 +292,51 @@ export default function PriceAnalysisTool() {
     if (!curEd) return;
     setSaving(true);
     try {
-      // 1. Guardar settings de la editorial actual
-      const { error: err1 } = await supabase.from('price_analysis_settings').upsert({
+      // 1. Guardar settings de la editorial actual (delete + insert = upsert manual)
+      await supabase.from('price_analysis_settings').delete().eq('editorial', curEd);
+      const { error: err1 } = await supabase.from('price_analysis_settings').insert({
         editorial: curEd,
         margen_venta: margActual,
         margen_mayoreo: margenMayoreoActual,
         descuento_proveedor: dtosPorEd[curEd],
         updated_at: new Date()
-      }, { onConflict: 'editorial' });
+      });
       if (err1) throw err1;
 
-      // 2. Guardar settings globales (por si cambiaron flete o TC)
-      const { error: err2 } = await supabase.from('price_analysis_settings').upsert({
+      // 2. Guardar settings globales (flete y TC)
+      await supabase.from('price_analysis_settings').delete().eq('editorial', 'GLOBAL_SETTINGS');
+      const { error: err2 } = await supabase.from('price_analysis_settings').insert({
         editorial: 'GLOBAL_SETTINGS',
         flete: params.flet,
         tcf: params.tcf,
         tca: params.tca,
         dto_niveles: params.dtoNiveles,
         updated_at: new Date()
-      }, { onConflict: 'editorial' });
+      });
       if (err2) throw err2;
 
-      // 3. Guardar ajustes manuales de la editorial actual
+      // 3. Guardar ajustes manuales (borrar los de esta editorial y reinsertar)
+      await supabase.from('price_analysis_adjustments').delete().eq('editorial', curEd);
       const adjustments = Object.entries(PVC[curEd] || {}).map(([ars, pv]) => ({
         editorial: curEd,
         precio_ars: parseFloat(ars),
         pv_ajuste: parseFloat(pv)
       }));
-
-      // Primero borramos los anteriores de esta editorial para evitar basura
-      // O usamos upsert masivo. Upsert es mejor.
       if (adjustments.length > 0) {
-        const { error } = await supabase
-          .from('price_analysis_adjustments')
-          .upsert(adjustments, { onConflict: 'editorial,precio_ars' });
-        if (error) throw error;
+        const { error: err3 } = await supabase.from('price_analysis_adjustments').insert(adjustments);
+        if (err3) throw err3;
       }
 
-      // 4. Guardar snapshot opcional
+      // 4. Snapshot opcional
       if (semanaInfo) {
-        const { error: err4 } = await supabase.from('price_analysis_results').upsert({
+        await supabase.from('price_analysis_results').delete()
+          .eq('semana_id', semanaInfo.id).eq('editorial', curEd);
+        await supabase.from('price_analysis_results').insert({
           semana_id: semanaInfo.id,
           editorial: curEd,
           datos_json: rows,
           created_at: new Date()
-        }, { onConflict: 'semana_id,editorial' });
-        if (err4) throw err4;
+        });
       }
 
       alert('¡Cambios guardados y sincronizados correctamente!');
