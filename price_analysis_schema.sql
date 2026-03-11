@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS price_analysis_settings (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Agregar columna si la tabla ya existía sin ella (idempotente)
+ALTER TABLE price_analysis_settings ADD COLUMN IF NOT EXISTS descuento_proveedor NUMERIC;
+
 -- 2. Ajustes Manuales de Precios
 CREATE TABLE IF NOT EXISTS price_analysis_adjustments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
