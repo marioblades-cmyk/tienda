@@ -97,16 +97,10 @@ export default function PriceAnalysisTool() {
   const MMAY_KEY   = 'mcb_margin_mayor_per_ed';
 
   const [PVC, setPVC] = useState(() => {
-    try { const s = localStorage.getItem(PVC_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
-  });
-  // Margen por editorial { 'Ivrea': 0.40, 'Ovnipress': 0.35, … }
-  const [margPorEd, setMargPorEd] = useState(() => {
-    try { const s = localStorage.getItem(MARG_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
-  });
-  // Margen mayoreo por editorial { 'Ivrea': 0.30, … }
-  const [margenMayoreoPorEd, setMargenMayoreoPorEd] = useState(() => {
-    try { const s = localStorage.getItem(MMAY_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
-  });
+  const [PVC, setPVC] = useState({});
+  const [margPorEd, setMargPorEd] = useState({});
+  const [margenMayoreoPorEd, setMargenMayoreoPorEd] = useState({});
+  const [saving, setSaving] = useState(false);
 
   // ── Valores activos para la editorial seleccionada ────────────────────────
   const descActual          = useMemo(() => curEd ? (dtosPorEd[curEd] || 35) / 100 : 0, [curEd, dtosPorEd]);
@@ -129,8 +123,64 @@ export default function PriceAnalysisTool() {
 
   // ── Cargar último Excel de semanas ────────────────────────────────────────
   useEffect(() => {
-    loadLastWeek();
+    initTool();
   }, []);
+
+  const initTool = async () => {
+    await loadLastWeek();
+    await fetchSyncData();
+  };
+
+  const fetchSyncData = async () => {
+    try {
+      // 1. Cargar Configuraciones
+      const { data: settings, error: setErr } = await supabase
+        .from('price_analysis_settings')
+        .select('*');
+      
+      if (!setErr && settings) {
+        const mEd = {};
+        const mmEd = {};
+        let globalParams = { ...params };
+
+        settings.forEach(s => {
+          if (s.editorial && s.editorial !== 'GLOBAL_SETTINGS') {
+            mEd[s.editorial] = parseFloat(s.margen_venta);
+            mmEd[s.editorial] = parseFloat(s.margen_mayoreo);
+          } else if (s.editorial === 'GLOBAL_SETTINGS') {
+            // Configuración global
+            globalParams = {
+              ...globalParams,
+              flet: parseFloat(s.flete),
+              tcf: parseFloat(s.tcf),
+              tca: parseFloat(s.tca),
+              dtoNiveles: s.dto_niveles || [5, 10, 15]
+            };
+          }
+        });
+
+        setMargPorEd(mEd);
+        setMargenMayoreoPorEd(mmEd);
+        setParams(globalParams);
+      }
+
+      // 2. Cargar Ajustes Manuales
+      const { data: adjustments, error: adjErr } = await supabase
+        .from('price_analysis_adjustments')
+        .select('*');
+      
+      if (!adjErr && adjustments) {
+        const nextPVC = {};
+        adjustments.forEach(a => {
+          if (!nextPVC[a.editorial]) nextPVC[a.editorial] = {};
+          nextPVC[a.editorial][a.precio_ars] = parseFloat(a.pv_ajuste);
+        });
+        setPVC(nextPVC);
+      }
+    } catch (err) {
+      console.warn('Error sincronizando con BD, usando valores por defecto:', err);
+    }
+  };
 
   const loadLastWeek = async () => {
     setLoading(true);
@@ -230,9 +280,65 @@ export default function PriceAnalysisTool() {
         delete edCopy[ars];
         next[curEd] = edCopy;
       }
-      try { localStorage.setItem(PVC_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
+  };
+
+  const handleSave = async () => {
+    if (!curEd) return;
+    setSaving(true);
+    try {
+      // 1. Guardar settings de la editorial actual
+      await supabase.from('price_analysis_settings').upsert({
+        editorial: curEd,
+        margen_venta: margActual,
+        margen_mayoreo: margenMayoreoActual,
+        updated_at: new Date()
+      }, { onConflict: 'editorial' });
+
+      // 2. Guardar settings globales (por si cambiaron flete o TC)
+      await supabase.from('price_analysis_settings').upsert({
+        editorial: 'GLOBAL_SETTINGS',
+        flete: params.flet,
+        tcf: params.tcf,
+        tca: params.tca,
+        dto_niveles: params.dto_niveles,
+        updated_at: new Date()
+      }, { onConflict: 'editorial' });
+
+      // 3. Guardar ajustes manuales de la editorial actual
+      const adjustments = Object.entries(PVC[curEd] || {}).map(([ars, pv]) => ({
+        editorial: curEd,
+        precio_ars: parseFloat(ars),
+        pv_ajuste: parseFloat(pv)
+      }));
+
+      // Primero borramos los anteriores de esta editorial para evitar basura
+      // O usamos upsert masivo. Upsert es mejor.
+      if (adjustments.length > 0) {
+        const { error } = await supabase
+          .from('price_analysis_adjustments')
+          .upsert(adjustments, { onConflict: 'editorial,precio_ars' });
+        if (error) throw error;
+      }
+
+      // 4. Guardar snapshot opcional
+      if (semanaInfo) {
+        await supabase.from('price_analysis_results').upsert({
+          semana_id: semanaInfo.id,
+          editorial: curEd,
+          datos_json: rows,
+          created_at: new Date()
+        }, { onConflict: 'semana_id,editorial' });
+      }
+
+      alert('¡Cambios guardados y sincronizados correctamente!');
+    } catch (err) {
+      console.error('Error al guardar:', err);
+      alert('Error al sincronizar con la base de datos: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Cálculos por fila ────────────────────────────────────────────────────
@@ -426,8 +532,14 @@ export default function PriceAnalysisTool() {
               {rows.length} precios · <strong>{curEd}</strong> · Dto. {((descActual || 0) * 100).toFixed(0)}%
               &nbsp;·&nbsp; Marg. {(margActual * 100).toFixed(0)}% · Mayor. {(margenMayoreoActual * 100).toFixed(0)}%
             </div>
-            <button className="btn-mcb-primary" style={{ fontSize: '0.8rem', padding: '0.4rem 1.1rem' }}>
-              💾 Guardar Cambios
+            <button 
+              className="btn-mcb-primary" 
+              style={{ fontSize: '0.8rem', padding: '0.4rem 1.1rem', opacity: saving ? 0.7 : 1 }}
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? <RefreshCw size={14} className="spin" style={{ marginRight: 6, display: 'inline' }} /> : '💾 '}
+              {saving ? 'Guardando...' : 'Guardar Cambios'}
             </button>
           </div>
 
@@ -638,7 +750,13 @@ export default function PriceAnalysisTool() {
             <span style={{ fontSize: '0.7rem', color: 'var(--mcb-muted)', alignSelf: 'center' }}>
               {rows.length} precios · {curEd} · Dto. {((descActual || 0) * 100).toFixed(0)}%
             </span>
-            <button className="btn-mcb-primary">Guardar Cambios</button>
+            <button 
+              className="btn-mcb-primary"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? 'Guardando...' : 'Guardar Cambios'}
+            </button>
           </div>
         </section>
       </div>
