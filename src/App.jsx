@@ -9,11 +9,14 @@ import SellerDashboard from './components/SellerDashboard';
 import RemitosManagement from './components/RemitosManagement';
 import AdminMasterView from './components/AdminMasterView';
 import ComicAnalysisTool from './components/ComicAnalysisTool';
+import PriceAnalysisTool from './components/PriceAnalysisTool';
 import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2, Zap } from 'lucide-react';
 import { supabase } from './services/supabase';
+import { useCatalogStatus } from './hooks/useCatalogStatus';
 
 function Main() {
     const { user, profile, loading, isAdmin, isSocio } = useAuth();
+    const { hasPendingChanges } = useCatalogStatus();
     const [showRegister, setShowRegister] = useState(false);
     const [activeTab, setActiveTab] = useState('pedidos');
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -130,8 +133,22 @@ function Main() {
                                 onClick={() => setActiveTab('entelequia')}
                                 className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'entelequia' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
                             >
-                                <Zap size={20} />
-                                {sidebarOpen && <span>Herramienta Editorial</span>}
+                                <Zap size={20} className={hasPendingChanges ? 'text-[#f07d2a] animate-pulse' : ''} />
+                                {sidebarOpen && (
+                                    <span className="flex items-center gap-2">
+                                        Herramienta Editorial
+                                        {hasPendingChanges && (
+                                            <span className="w-2 h-2 bg-[#f07d2a] rounded-full shadow-[0_0_8px_#f07d2a]"></span>
+                                        )}
+                                    </span>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('precios')}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'precios' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
+                            >
+                                <Database size={20} />
+                                {sidebarOpen && <span>Análisis de Precios</span>}
                             </button>
                         </>
                     ) : (
@@ -202,7 +219,8 @@ function Main() {
                                         activeTab === 'confirmaciones' ? 'Base Master' :
                                             activeTab === 'mis-pedidos' ? 'Mis Pedidos como Vendedor' :
                                                 activeTab === 'usuarios' ? 'Gestión de Vendedores' :
-                                                    'Herramienta Editorial (Mangas Comics Bolivia)')
+                                                    activeTab === 'precios' ? 'Análisis de Precios' :
+                                                        'Herramienta Editorial (Mangas Comics Bolivia)')
                             : 'Mis Pedidos Semanales'
                         }
                     </h2>
@@ -217,7 +235,8 @@ function Main() {
                                     activeTab === 'confirmaciones' ? <AdminMasterView /> :
                                         activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
                                             activeTab === 'usuarios' ? <AdminUserManagement /> :
-                                                <ComicAnalysisTool />
+                                                activeTab === 'precios' ? <PriceAnalysisTool /> :
+                                                    <ComicAnalysisTool />
                     ) : (
                         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
                             <SellerDashboard isAdmin={isAdmin} />

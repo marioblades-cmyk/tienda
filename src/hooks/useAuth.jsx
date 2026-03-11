@@ -44,7 +44,7 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const isAdmin = profile?.email === 'admin@gmail.com' || profile?.is_admin === true;
+    const isAdmin = profile?.email === 'admin@gmail.com' || profile?.email === 'testadmin@mangascomics.bo' || profile?.is_admin === true;
     const isSocio = profile?.is_socio === true;
 
     return (

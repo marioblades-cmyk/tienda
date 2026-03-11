@@ -1,0 +1,280 @@
+/* ═══════════════════════════════════════════════════════
+   PRICE ANALYSIS TOOL — Guía de Diseño Mangas Comics Bolivia
+   ═══════════════════════════════════════════════════════ */
+
+/* Variables según la Guía */
+:root {
+  --mcb-primary:    hsl(215 55% 22%);  /* Navy Profundo */
+  --mcb-accent:     hsl(28 90% 52%);   /* Naranja Comic */
+  --mcb-sky:        hsl(205 55% 65%);  /* Azul Cielo */
+  --mcb-yellow:     hsl(45 92% 60%);   /* Amarillo Destacado */
+  --mcb-cream:      hsl(45 60% 94%);   /* Comic-Cream */
+  --mcb-background: hsl(220 20% 97%);  /* Gris Claro */
+  --mcb-foreground: hsl(220 30% 12%);  /* Casi Negro */
+  --mcb-muted:      hsl(215 15% 48%);  /* Gris Medio */
+  --mcb-border:     hsl(215 25% 85%);  /* Borde Default */
+  --mcb-error:      hsl(0 72% 51%);    /* Rojo Error */
+
+  --mcb-font-body:    'Nunito', sans-serif;
+  --mcb-font-mono:    'JetBrains Mono', monospace;
+  --mcb-font-display: 'Bangers', cursive;
+
+  --mcb-radius-sm: 0.375rem;  /* 6px  — badges */
+  --mcb-radius-md: 0.5rem;    /* 8px  — botones, inputs */
+  --mcb-radius-lg: 0.625rem;  /* 10px — tarjetas, contenedores */
+}
+
+/* Container principal */
+.mcb-container {
+  padding: 1.5rem;
+  background: var(--mcb-background);
+  min-height: 100vh;
+  font-family: var(--mcb-font-body);
+}
+
+/* ─── BOTÓN PRIMARY ─── */
+.btn-mcb-primary {
+  background: var(--mcb-accent);
+  color: white;
+  border: none;
+  border-radius: var(--mcb-radius-md);
+  padding: 0.625rem 1.5rem;
+  font-family: var(--mcb-font-body);
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  box-shadow: 0 2px 6px -1px hsla(28, 90%, 52%, 0.3);
+  transition: all 0.2s;
+}
+.btn-mcb-primary:hover {
+  filter: brightness(0.9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -1px hsla(28, 90%, 52%, 0.4);
+}
+
+/* ─── TABLA: CONTENEDOR ─── */
+.mcb-table-wrapper {
+  overflow-x: auto;
+  border-radius: var(--mcb-radius-lg); /* 10px */
+  border: 1px solid var(--mcb-border);
+  box-shadow: 0 2px 8px -2px rgba(21, 37, 54, 0.08),
+              0 4px 16px -4px rgba(21, 37, 54, 0.06);
+}
+
+/* ─── TABLA: ESTRUCTURA ─── */
+.mcb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mcb-font-body);
+  font-size: 0.75rem;
+  background: white;
+}
+
+/* Sticky headers */
+.mcb-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--mcb-primary); /* Navy Profundo */
+  color: var(--mcb-cream);         /* Crema */
+  font-weight: 700;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.6rem 0.5rem;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+/* Fila 1 de encabezado: bloques con borde inferior thick (3px) */
+.mcb-table thead tr:first-child th {
+  font-size: 0.7rem;
+  border-bottom: 3px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Fila 2 de encabezado: sub-columnas ligeramente más oscuras */
+.mcb-table thead tr:last-child th {
+  background: hsl(215 55% 17%);
+  font-size: 0.6rem;
+  color: hsla(45, 60%, 94%, 0.8);
+}
+
+/* Colores de bloque en encabezados */
+.mcb-table thead th.bg-ars      { background: hsl(215 55% 22%); }
+.mcb-table thead th.bg-pv       { background: hsl(28 70% 38%); }
+.mcb-table thead th.bg-auto     { background: hsl(210 60% 40%); }
+.mcb-table thead th.bg-dtos     { background: hsl(38 80% 42%); }
+.mcb-table thead th.bg-cost     { background: hsl(0 60% 38%); }
+.mcb-table thead th.bg-gain     { background: hsl(145 50% 32%); }
+.mcb-table thead th.bg-mayor    { background: hsl(175 45% 30%); }
+
+/* Sub-headers (fila 2) heredan color pero más oscuro */
+.mcb-table thead tr:last-child th.bg-auto  { background: hsl(210 60% 32%); }
+.mcb-table thead tr:last-child th.bg-dtos  { background: hsl(38 80% 35%); }
+.mcb-table thead tr:last-child th.bg-cost  { background: hsl(0 60% 32%); }
+.mcb-table thead tr:last-child th.bg-gain  { background: hsl(145 50% 26%); }
+.mcb-table thead tr:last-child th.bg-mayor { background: hsl(175 45% 25%); }
+
+/* ─── TABLA: CUERPO ─── */
+.mcb-table tbody tr {
+  transition: background 150ms; /* rowHover [cite: 111] */
+}
+.mcb-table tbody tr:nth-child(even) {
+  background: var(--mcb-cream); /* Fila par: Comic-Cream [cite: 110] */
+}
+.mcb-table tbody tr:hover {
+  background: hsla(205, 55%, 65%, 0.2); /* Azul Cielo hover [cite: 111] */
+}
+
+.mcb-table tbody td {
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid var(--mcb-border);
+  text-align: center;
+  vertical-align: middle;
+  color: var(--mcb-foreground);
+  font-family: var(--mcb-font-body);
+}
+
+/* Celdas con valores numéricos usan JetBrains Mono */
+.td-mono {
+  font-family: var(--mcb-font-mono);
+  font-size: 0.7rem;
+}
+.td-ars {
+  font-family: var(--mcb-font-mono);
+  font-weight: 600;
+  color: var(--mcb-foreground);
+  text-align: left;
+  padding-left: 0.75rem;
+  white-space: nowrap;
+}
+.td-muted {
+  font-family: var(--mcb-font-mono);
+  color: var(--mcb-muted);
+  font-size: 0.68rem;
+}
+.td-dto {
+  font-family: var(--mcb-font-mono);
+  font-size: 0.68rem;
+  color: var(--mcb-muted);
+}
+.td-navy {
+  font-family: var(--mcb-font-mono);
+  font-weight: 800;
+  color: var(--mcb-primary);
+}
+.td-costo {
+  font-family: var(--mcb-font-mono);
+  font-weight: 800;
+  color: hsl(0 60% 38%);
+}
+.td-accent {
+  font-family: var(--mcb-font-mono);
+  font-weight: 800;
+  color: var(--mcb-accent);
+}
+
+/* ─── INPUT EN TABLA ─── */
+.mcb-input {
+  width: 68px;
+  border: 1px solid var(--mcb-border);
+  border-radius: var(--mcb-radius-md); /* 8px */
+  padding: 0.3rem 0.4rem;
+  font-family: var(--mcb-font-mono);
+  font-size: 0.7rem;
+  text-align: right;
+  transition: all 0.2s;
+  background: white;
+  color: var(--mcb-foreground);
+}
+.mcb-input:focus {
+  border-color: var(--mcb-accent);
+  outline: none;
+  box-shadow: 0 0 0 2px hsla(28, 90%, 52%, 0.2);
+  background: var(--mcb-cream);
+}
+
+/* ─── BADGES ─── */
+.mcb-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--mcb-radius-sm); /* 6px [cite: 91] */
+  font-family: var(--mcb-font-body);
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-align: center;
+  min-width: 55px;
+  color: white;
+}
+.badge-success { background: #2d7a4f; }
+.badge-warning { background: var(--mcb-yellow); color: var(--mcb-foreground); }
+.badge-danger  { background: var(--mcb-error); }
+
+/* ─── SIDEBAR ─── */
+.mcb-sidebar-group {
+  background: white;
+  border-radius: var(--mcb-radius-lg);
+  border: 1px solid var(--mcb-border);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 3px rgba(21, 37, 54, 0.05);
+}
+.mcb-sidebar-group-title {
+  font-family: var(--mcb-font-display);
+  font-size: 1.1rem;
+  color: var(--mcb-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 2px solid var(--mcb-accent);
+  padding-bottom: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+.mcb-sidebar-btn {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--mcb-foreground);
+  font-family: var(--mcb-font-body);
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.mcb-sidebar-btn:hover  { background: var(--mcb-cream); color: var(--mcb-accent); }
+.mcb-sidebar-btn.active { background: var(--mcb-primary); color: white; font-weight: 700; }
+
+.mcb-param-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.mcb-param-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--mcb-foreground);
+}
+.mcb-param-input-wrap { display: flex; align-items: center; gap: 0.25rem; }
+.mcb-param-input {
+  width: 5.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--mcb-border);
+  border-radius: 6px;
+  font-family: var(--mcb-font-mono);
+  font-size: 0.75rem;
+  text-align: right;
+  transition: border-color 0.15s;
+}
+.mcb-param-input:focus { border-color: var(--mcb-accent); outline: none; }
+.mcb-param-unit {
+  font-size: 0.65rem;
+  color: var(--mcb-muted);
+  width: 1.5rem;
+}

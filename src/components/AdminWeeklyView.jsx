@@ -106,7 +106,11 @@ export default function AdminWeeklyView() {
             .eq('id', id);
 
         if (updateError) alert(updateError.message);
-        else fetchSemanas();
+        else {
+            fetchSemanas();
+            // Notificar que se subió un archivo para actualizar el indicador del Sidebar
+            window.dispatchEvent(new CustomEvent('week-file-uploaded'));
+        }
     };
 
     const removeBaseFile = async (id, fileName) => {

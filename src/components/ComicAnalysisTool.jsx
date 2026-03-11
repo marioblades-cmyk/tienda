@@ -37,6 +37,23 @@ const ComicAnalysisTool = () => {
     React.useEffect(() => {
         fetchCatalog();
         fetchHistorial();
+        
+        // Auto-cargar última semana si no hay datos
+        const autoLoadLastWeek = async () => {
+            const { data: weeks } = await supabase
+                .from('semanas')
+                .select('*')
+                .not('archivo_url', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(1);
+            
+            if (weeks?.[0] && Object.keys(sheetsData).length === 0) {
+                console.log('Auto-cargando última semana:', weeks[0].nombre);
+                handleSelectHistorial(weeks[0]);
+            }
+        };
+        
+        autoLoadLastWeek();
     }, []);
 
     const fetchHistorial = async () => {
@@ -213,6 +230,7 @@ const ComicAnalysisTool = () => {
                             categorias: (result.items || []).filter(i => i.comparison === 'cambio_categoria').length
                         };
 
+                        result.filename = file.name;
                         newSheetsData[sheetName] = result;
                     }
 
@@ -324,12 +342,15 @@ const ComicAnalysisTool = () => {
 
             if (syncErr) throw syncErr;
 
-            // Log de la sincronización
+            // Log de la sincronización (Guardamos el nombre del archivo para seguimiento)
+            const activeFileName = activeTab && sheetsData[activeTab]?.filename ? sheetsData[activeTab].filename : null;
+
             await supabase.from('catalogo_sync_logs').insert([{
                 vendedor_id: user.id,
                 total_procesados: totalProcesados,
                 nuevos_detectados: nuevosDetectados,
-                precios_actualizados: preciosActualizados
+                precios_actualizados: preciosActualizados,
+                filename: activeFileName
             }]);
 
             await fetchCatalog(); // Recargar base local
@@ -341,6 +362,9 @@ const ComicAnalysisTool = () => {
                 updatedSheets[k].report.cambios = { nuevos: 0, precios: 0, eans: 0, categorias: 0 };
             });
             setSheetsData(updatedSheets);
+
+            // Notificar que se sincronizó el catálogo para actualizar el indicador del Sidebar
+            window.dispatchEvent(new CustomEvent('catalog-status-changed'));
 
             alert('Catálogo sincronizado exitosamente.');
         } catch (err) {
@@ -577,9 +601,7 @@ const ComicAnalysisTool = () => {
                             ↩ VOLVER AL RESUMEN
                         </button>
                     )}
-                    <div style={{ opacity: 0.6, fontSize: '0.8rem', fontFamily: 'var(--font-comic-mono)' }}>
-                        v2.1 · Multi-Editorial
-                    </div>
+
                 </div>
             </header>
 
@@ -847,7 +869,7 @@ const ComicAnalysisTool = () => {
                     <div className="mb-4 flex items-center gap-3 bg-[#1a2d42] p-3 rounded-t-lg border-b border-white/10 shadow-lg">
                         <Database size={20} className="text-[#f07d2a]" />
                         <h2 className="text-xl font-bold tracking-widest text-[#f5f1e4] m-0 uppercase flex-1">RESUMEN DE LIMPIEZA</h2>
-                        <span className="text-[10px] font-mono text-white/40 uppercase tracking-tighter">Editorial Analysis Tool v3.0</span>
+
                     </div>
                     <div className="comic-summary-section">
                         <table className="comic-resumen-table high-fidelity">
@@ -995,10 +1017,7 @@ const ComicAnalysisTool = () => {
                                                                 )}
                                                             </div>
 
-                                                            <div className="mt-4 pt-3 border-t border-comic-border/30 flex justify-between items-center">
-                                                                <span className="text-[9px] font-comic-mono opacity-50 uppercase tracking-widest">SR. AUDIT REPORT v3.0 • {new Date().toLocaleDateString()}</span>
-                                                                <span className="text-[10px] italic opacity-50">SISTEMA DE DISEÑO SENIOR UI/UX • REPORTE DETALLADO</span>
-                                                            </div>
+
                                                         </div>
                                                     </td>
                                                 </tr>
