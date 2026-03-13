@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useMemo } from 'react';
 import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
