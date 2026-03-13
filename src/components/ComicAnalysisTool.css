@@ -804,6 +804,10 @@
 .comic-mini-table {
     width: 100%;
 }
+.comic-mini-table.scrollable {
+    max-height: 350px;
+    overflow-y: auto;
+}
 
 .comic-mini-table-row {
     display: flex;

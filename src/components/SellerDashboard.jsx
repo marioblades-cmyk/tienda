@@ -121,7 +121,7 @@ export default function SellerDashboard({ isAdmin }) {
                     tipo: tipo
                 }, { onConflict: 'semana_id, vendedor_id, tipo' })
                 .select()
-                .single();
+                .maybeSingle();
 
             if (pedidoError) throw pedidoError;
 

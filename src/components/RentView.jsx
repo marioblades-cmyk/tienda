@@ -25,7 +25,7 @@ export default function RentView() {
 
     const fetchData = async () => {
         setLoading(true);
-        const { data: cfg } = await supabase.from('alquiler_config').select('*').single();
+        const { data: cfg } = await supabase.from('alquiler_config').select('*').maybeSingle();
         const { data: m } = await supabase.from('alquiler_meses').select('*').order('ym', { ascending: false });
 
         if (cfg) setConfig(cfg);

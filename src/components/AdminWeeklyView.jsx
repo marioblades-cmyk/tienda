@@ -138,6 +138,7 @@ export default function AdminWeeklyView() {
                             filename: file.name,
                             source: 'cloud' // Indicamos que debe bajarse de la nube
                         }));
+                        localStorage.setItem('mcb_last_filename', file.name); // Sincronización crucial
                         console.log('✅ Reporte guardado en la nube y puntero local actualizado.');
                     } catch (storageErr) {
                         console.error('❌ Error guardando puntero local (incluso tras limpieza):', storageErr);

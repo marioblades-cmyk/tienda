@@ -73,7 +73,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
         const [itemsResult, masterResult] = await Promise.all([
             query,
-            supabase.from('master_confirmaciones').select('*').eq('semana_id', selectedSemana).single()
+            supabase.from('master_confirmaciones').select('*').eq('semana_id', selectedSemana).maybeSingle()
         ]);
 
         if (itemsResult.error) console.error(itemsResult.error);
@@ -116,6 +116,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         });
 
         items.forEach(item => {
+            if (!item || !item.pedido) return; // Protección contra item malformado
             const vName = item.pedido.vendedor_nombre || 'Desconocido';
             const isTienda = item.pedido.tipo === 'tienda';
             const editorial = item.editorial || 'Otras';
@@ -217,7 +218,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             let vTotal = 0;
             let vItems = 0;
             items.forEach(item => {
-                if (item.pedido.vendedor_nombre === v && item.pedido.tipo !== 'tienda') {
+                if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo !== 'tienda') {
                     const amount = (item.precio || 0) * (item.cantidad || 0);
                     const editorial = item.editorial || 'Otras';
                     const dto = EDITORIAL_DTOS[editorial] || 35;
@@ -233,7 +234,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             let tiendaTotal = 0;
             let tiendaItems = 0;
             items.forEach(item => {
-                if (item.pedido.vendedor_nombre === v && item.pedido.tipo === 'tienda') {
+                if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo === 'tienda') {
                     const amount = (item.precio || 0) * (item.cantidad || 0);
                     const editorial = item.editorial || 'Otras';
                     const dto = EDITORIAL_DTOS[editorial] || 35;

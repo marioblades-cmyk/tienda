@@ -28,6 +28,9 @@ export function useCatalogStatus() {
             setLatestWeek(currentWeek);
 
             // 2. Buscar si hay algún log de sincronización para este archivo exacto
+            // Extraemos el nombre base si viene con parámetros de cache o ruta completa
+            const cleanFileName = currentWeek.archivo_nombre ? currentWeek.archivo_nombre.split('?')[0] : null;
+
             const { data: logs, error: logError } = await supabase
                 .from('catalogo_sync_logs')
                 .select('*')
@@ -38,16 +41,20 @@ export function useCatalogStatus() {
             if (logError) throw logError;
 
             // 3. Decidir si está pendiente
-            // Si no hay log, o si el log es más antiguo que la semana (por si se re-subió el archivo)
-            if (!logs || logs.length === 0) {
+            // Caso A: No hay archivo en la semana
+            if (!currentWeek.archivo_nombre) {
+                setHasPendingChanges(false);
+            } 
+            // Caso B: No hay ningún log para este archivo
+            else if (!logs || logs.length === 0) {
                 setHasPendingChanges(true);
-            } else {
-                // Heurística: Si la semana se creó/actualizó después del último log exitoso
+            } 
+            // Caso C: Comparar fechas
+            else {
                 const lastSync = new Date(logs[0].created_at);
-                const weekUpdated = new Date(currentWeek.created_at); // Idealmente tendríamos updated_at
+                const weekUpdated = new Date(currentWeek.created_at);
                 
                 // Si el log es más viejo que la carga del archivo, consideramos que hay cambios
-                // (Sumamos un pequeño margen por latencias de red)
                 setHasPendingChanges(lastSync.getTime() < weekUpdated.getTime());
             }
         } catch (err) {

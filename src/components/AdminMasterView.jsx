@@ -46,7 +46,7 @@ export default function AdminMasterView() {
             .from('master_confirmaciones')
             .select('*')
             .eq('semana_id', semanaId)
-            .single();
+            .maybeSingle();
 
         setExistingMaster(data || null);
         if (data) setPreviewData(null); // Clear preview if we load an existing one
@@ -199,7 +199,7 @@ export default function AdminMasterView() {
                 .from('app_state')
                 .select('data')
                 .eq('id', 'distribuidor')
-                .single();
+                .maybeSingle();
 
             if (stateFetchError && stateFetchError.code !== 'PGRST116') {
                 console.error("Error fetching distribuidor state:", stateFetchError);
@@ -248,7 +248,7 @@ export default function AdminMasterView() {
                 .from('app_state')
                 .select('data')
                 .eq('id', 'distribuidor')
-                .single();
+                .maybeSingle();
 
             if (appStateData && appStateData.data) {
                 let distData = appStateData.data;

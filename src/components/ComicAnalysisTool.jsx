@@ -1,11 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Download, RefreshCw, CheckCircle, AlertTriangle, XCircle, Database, ArrowUpCircle, Trash2, FileUp, Clock, FileSpreadsheet } from 'lucide-react';
+import { Download, RefreshCw, CheckCircle, AlertTriangle, XCircle, Database, ArrowUpCircle, Trash2, FileUp, Clock, FileSpreadsheet, Zap } from 'lucide-react';
 import { SHEET_PROCESSORS } from '../utils/excelProcessors';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
 import './ComicAnalysisTool.css';
+
+const ComparisonBadge = ({ status }) => {
+    const config = {
+        sin_cambios: { label: 'SIN CAMBIOS', color: 'bg-white/10 text-white/40 border-white/5' },
+        nuevo: { label: 'NUEVO', color: 'bg-green-500/20 text-green-500 border-green-500/30' },
+        cambio_precio: { label: 'Δ PRECIO', color: 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30' },
+        cambio_ean: { label: 'Δ EAN', color: 'bg-blue-500/20 text-blue-500 border-blue-500/30' },
+        cambio_categoria: { label: 'Δ CAT', color: 'bg-purple-500/20 text-purple-600 border-purple-500/30' }
+    };
+    const { label, color } = config[status] || config.sin_cambios;
+    return <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${color}`}>{label}</span>;
+};
 
 const ComicAnalysisTool = () => {
     const { user, profile, isAdmin } = useAuth();
@@ -32,12 +44,37 @@ const ComicAnalysisTool = () => {
     const [itemsAusentes, setItemsAusentes] = useState({}); // { editorialName: [items] }
     const [selectedItem, setSelectedItem] = useState(null);
     const [isIdModalOpen, setIsIdModalOpen] = useState(false);
+    const [lastFileName, setLastFileName] = useState(() => localStorage.getItem('mcb_last_filename') || '');
+    const [isViewingHistory, setIsViewingHistory] = useState(false);
+    const [historyReportName, setHistoryReportName] = useState('');
     const fileInputRef = useRef(null);
+    const hasInitialized = useRef(false);
 
     // ── FUNCIONES DE CARGA INICIAL ──
     const fetchCatalog = async () => {
         setCatalogReady(false);
+        
+        // 1. Intentar cargar desde Caché Local (Velocidad instantánea)
+        const cached = localStorage.getItem('mcb_catalog_cache');
+        if (cached) {
+            try {
+                const parsed = JSON.parse(cached);
+                const isFresh = Date.now() - parsed.timestamp < 1000 * 60 * 60; // 1 hora de frescura
+                if (isFresh && parsed.indexed && Object.keys(parsed.indexed).length > 0) {
+                    console.log('⚡ Catálogo cargado desde caché local');
+                    setDbCatalog(parsed.indexed);
+                    setDbEanIndex(parsed.eanIndex);
+                    setCatalogReady(true);
+                    return { indexed: parsed.indexed, eanIndex: parsed.eanIndex };
+                }
+            } catch (e) {
+                console.warn('Error en caché de catálogo:', e);
+            }
+        }
+
+        // 2. Si no hay caché o expiró, descargar de Supabase
         try {
+            console.log('☁️ Descargando catálogo maestro desde la nube...');
             let allData = [];
             let from = 0;
             const step = 1000;
@@ -102,12 +139,14 @@ const ComicAnalysisTool = () => {
     const calculateMissingItems = (data, currentCatalog) => {
         const allProcessedEans = new Set();
         Object.values(data).forEach(sheet => {
-            sheet.items.forEach(item => {
-                if (item.ean_final) allProcessedEans.add(item.ean_final);
-                if (item.ean_oficial) allProcessedEans.add(item.ean_oficial);
-                if (item.ean_interno) allProcessedEans.add(item.ean_interno);
-                if (item.product_id) allProcessedEans.add(item.product_id);
-            });
+            if (sheet && Array.isArray(sheet.items)) {
+                sheet.items.forEach(item => {
+                    if (item.ean_final) allProcessedEans.add(item.ean_final);
+                    if (item.ean_oficial) allProcessedEans.add(item.ean_oficial);
+                    if (item.ean_interno) allProcessedEans.add(item.ean_interno);
+                    if (item.product_id) allProcessedEans.add(item.product_id);
+                });
+            }
         });
 
         const newItemsAusentes = {};
@@ -138,10 +177,29 @@ const ComicAnalysisTool = () => {
             let semanaId = null;
             let source = null;
 
-            // 1. Intentar desde localStorage (Puntero rápido)
-            const stored = localStorage.getItem('mcb_last_processed_report');
-            if (stored) {
-                const parsed = JSON.parse(stored);
+            // 1. Intentar desde localStorage (Reporte completo persistido)
+            const storedFull = localStorage.getItem('mcb_stored_report');
+            if (storedFull) {
+                try {
+                    const parsed = JSON.parse(storedFull);
+                    // Si el reporte tiene menos de 24h, cargarlo directamente
+                    if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 24) {
+                        console.log('🚀 Reporte persistido hallado. Esperando elección del usuario...');
+                        setSheetsData(parsed.data);
+                        if (parsed.filename) setLastFileName(parsed.filename);
+                        // QUITAMOS: setViewMode('results') -> Para que el usuario elija
+                        calculateMissingItems(parsed.data, currentCatalog);
+                        return; 
+                    }
+                } catch (e) {
+                    console.warn('Error leyendo reporte persistido:', e);
+                }
+            }
+
+            // 2. Intentar desde localStorage (Puntero a semana)
+            const storedPointer = localStorage.getItem('mcb_last_processed_report');
+            if (storedPointer) {
+                const parsed = JSON.parse(storedPointer);
                 if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 24) {
                     semanaId = parsed.semanaId;
                     source = parsed.source;
@@ -169,7 +227,7 @@ const ComicAnalysisTool = () => {
                 let reportData = null;
 
                 // Descargar siempre si es cloud o si no tenemos data local
-                if (source === 'cloud' || !stored) {
+                if (source === 'cloud' || !storedFull) {
                     console.log('☁️ Iniciando descarga del reporte desde la nube para ID: ' + semanaId);
                     setIsProcessing(true);
                     try {
@@ -184,15 +242,16 @@ const ComicAnalysisTool = () => {
                     } finally {
                         setIsProcessing(false);
                     }
-                } else if (stored) {
-                    reportData = JSON.parse(stored).data;
+                } else if (storedFull) {
+                    reportData = JSON.parse(storedFull).data;
                 }
 
-                if (reportData) {
+                if (reportData && typeof reportData === 'object') {
                     console.log('✅ Cargando datos al visor...');
                     setSheetsData(reportData);
-                    const firstAvailable = Object.keys(reportData)[0];
-                    setActiveTab(firstAvailable);
+                    const tabs = Object.keys(reportData).filter(k => !k.startsWith('_'));
+                    const firstAvailable = tabs.length > 0 ? tabs[0] : null;
+                    setActiveTab(firstAvailable || 'TODOS_RESUMEN');
                     setViewMode('results');
                     calculateMissingItems(reportData, currentCatalog);
                 } else {
@@ -208,10 +267,31 @@ const ComicAnalysisTool = () => {
 
     // ── EFFECT PRINCIPAL ──
     useEffect(() => {
+        if (hasInitialized.current) return;
+        hasInitialized.current = true;
+
         const init = async () => {
-            const result = await fetchCatalog();
-            await fetchHistorial();
-            checkForAutoReport(result.indexed);
+            try {
+                // Ejecutar en paralelo para mayor velocidad
+                const results = await Promise.all([
+                    fetchCatalog().catch(e => { console.error("Catalog fetch failed:", e); return null; }),
+                    fetchHistorial().catch(e => { console.error("Historial fetch failed:", e); return null; })
+                ]);
+                
+                const catalogResult = results[0];
+                
+                // Sincronizar lastFileName manualmente al cargar
+                const storedName = localStorage.getItem('mcb_last_filename');
+                if (storedName) {
+                    setLastFileName(storedName);
+                }
+                
+                // Protección: checkForAutoReport ya maneja null, pero lo pasamos con seguridad
+                checkForAutoReport(catalogResult?.indexed || null);
+            } catch (err) {
+                console.error('Crash in tool init:', err);
+                setError('Error al inicializar la herramienta. Inténtalo de nuevo.');
+            }
         };
         init();
 
@@ -233,23 +313,46 @@ const ComicAnalysisTool = () => {
         setError(null);
 
         try {
-            const response = await fetch(semana.archivo_url);
-            if (!response.ok) throw new Error('No se pudo descargar el archivo del servidor.');
+            // Intentamos bajar el reporte JSON procesado primero
+            console.log('☁️ Intentando descargar reporte JSON de historial...');
+            const reportData = await catalogService.downloadAnalysisReport(semana.id);
             
-            const blob = await response.blob();
-            const file = new File([blob], semana.archivo_nombre || 'historial.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-            
-            handleFileUpload(file);
+            if (reportData) {
+                setSheetsData(reportData);
+                setIsViewingHistory(true);
+                setHistoryReportName(semana.nombre);
+                const firstAvailable = Object.keys(reportData).filter(k => !k.startsWith('_'))[0];
+                setActiveTab(firstAvailable);
+                setViewMode('results');
+                calculateMissingItems(reportData, dbCatalog);
+            } else {
+                // Si no hay JSON, procesamos el Excel original
+                console.log('📄 No hay JSON, procesando Excel original...');
+                const response = await fetch(semana.archivo_url);
+                if (!response.ok) throw new Error('No se pudo descargar el archivo del servidor.');
+                const blob = await response.blob();
+                const file = new File([blob], semana.archivo_nombre || 'historial.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                
+                // Marcamos como historial ANTES de procesar
+                setIsViewingHistory(true);
+                setHistoryReportName(semana.nombre);
+                handleFileUpload(file, true);
+            }
         } catch (err) {
             setError('Error al cargar archivo histórico: ' + err.message);
+        } finally {
             setIsProcessing(false);
         }
     };
 
-    const handleFileUpload = async (file) => {
+    const handleFileUpload = async (file, fromHistory = false) => {
         if (!file) return;
         setIsProcessing(true);
         setError(null);
+        if (!fromHistory) {
+            setIsViewingHistory(false);
+            setHistoryReportName('');
+        }
 
         // GUARDA DE SEGURIDAD: Asegurar que el catálogo esté cargado
         let currentCatalog = dbCatalog;
@@ -340,38 +443,17 @@ const ComicAnalysisTool = () => {
                         newSheetsData[sheetName] = result;
                     }
 
-                    // DETECTAR AUSENCIAS (Items en catálogo que no están en el Excel actual)
-                    const allProcessedEans = new Set();
-                    Object.values(newSheetsData).forEach(sheet => {
-                        sheet.items.forEach(item => {
-                            if (item.ean_final) allProcessedEans.add(item.ean_final);
-                            if (item.ean_oficial) allProcessedEans.add(item.ean_oficial);
-                            if (item.ean_interno) allProcessedEans.add(item.ean_interno);
-                            if (item.product_id) allProcessedEans.add(item.product_id); // Also check product_id
-                        });
-                    });
-
-                    const newItemsAusentes = {};
-                    const activeEditoriales = new Set(Object.keys(newSheetsData));
-
-                    if (dbCatalog && Object.keys(dbCatalog).length > 0) {
-                        Object.values(dbCatalog).forEach(dbItem => {
-                            if (!dbItem) return;
-                            // Solo comparamos ausentes de las editoriales que SÍ vienen en el excel actual
-                            if (activeEditoriales.has(dbItem.editorial)) {
-                                const itemIdentifiers = [dbItem.ean_oficial, dbItem.ean_interno, dbItem.product_id].filter(Boolean);
-                                const isPresent = itemIdentifiers.some(id => allProcessedEans.has(id));
-
-                                if (!isPresent) {
-                                    if (!newItemsAusentes[dbItem.editorial]) newItemsAusentes[dbItem.editorial] = [];
-                                    newItemsAusentes[dbItem.editorial].push(dbItem);
-                                }
-                            }
-                        });
-                    }
-
-                    setItemsAusentes(newItemsAusentes);
+                    calculateMissingItems(newSheetsData, currentCatalog);
                     setSheetsData(newSheetsData);
+                    setLastFileName(file.name);
+                    
+                    localStorage.setItem('mcb_stored_report', JSON.stringify({
+                        data: newSheetsData,
+                        filename: file.name,
+                        timestamp: Date.now()
+                    }));
+                    localStorage.setItem('mcb_last_filename', file.name);
+
                     const firstAvailable = Object.keys(newSheetsData)[0];
                     setActiveTab(firstAvailable);
                     setPage(1);
@@ -390,6 +472,7 @@ const ComicAnalysisTool = () => {
         };
         reader.readAsArrayBuffer(file);
     };
+
 
     const handleSync = async () => {
         if (!isAdmin) {
@@ -520,6 +603,36 @@ const ComicAnalysisTool = () => {
         setFilterCatEditorial('TODOS');
         setFilterCatCategory('TODOS');
         setItemsAusentes({});
+        setIsViewingHistory(false);
+        setHistoryReportName('');
+        // Al resetear, mantenemos lastFileName para que aparezca la opción de "Continuar"
+        const storedName = localStorage.getItem('mcb_last_filename');
+        if (storedName) setLastFileName(storedName);
+    };
+
+    const handleManualSync = async () => {
+        if (!sheetsData || Object.keys(sheetsData).length === 0) return;
+        
+        const confirmMsg = isViewingHistory 
+            ? `¿Estás seguro de APLICAR este reporte HISTÓRICO (${historyReportName}) al catálogo actual? Esto actualizará precios y datos permanentemente.`
+            : `¿Sincronizar estos cambios con el Catálogo Maestro?`;
+
+        if (!confirm(confirmMsg)) return;
+
+        setIsSyncing(true);
+        try {
+            const result = await catalogService.syncWithMaster(sheetsData, user.id, isViewingHistory ? historyReportName : lastFileName);
+            if (result.success) {
+                alert(`✅ Sincronización exitosa. Se actualizaron ${result.count} productos.`);
+                // Recargar catálogo para ver reflejados los cambios
+                await fetchCatalog(true); 
+            }
+        } catch (err) {
+            console.error('Error en sincronización manual:', err);
+            alert('Error al sincronizar: ' + err.message);
+        } finally {
+            setIsSyncing(false);
+        }
     };
 
     const exportCSV = () => {
@@ -599,10 +712,12 @@ const ComicAnalysisTool = () => {
     const getFilteredItems = () => {
         let pool = [];
         if (activeTab === 'TODOS_RESUMEN') {
-            Object.values(sheetsData).forEach(d => {
-                pool = [...pool, ...d.items];
+            Object.entries(sheetsData).forEach(([sheetName, d]) => {
+                if (!sheetName.startsWith('_') && d && Array.isArray(d.items)) {
+                    pool = [...pool, ...d.items];
+                }
             });
-        } else if (activeTab && sheetsData[activeTab]) {
+        } else if (activeTab && sheetsData[activeTab] && Array.isArray(sheetsData[activeTab].items)) {
             pool = sheetsData[activeTab].items;
         }
 
@@ -627,10 +742,10 @@ const ComicAnalysisTool = () => {
     const displayItems = React.useMemo(() => allFilteredItems.slice((page - 1) * itemsPerPage, page * itemsPerPage), [allFilteredItems, page, itemsPerPage]);
     const totalPages = Math.ceil(allFilteredItems.length / itemsPerPage);
 
-    // Obtener categorías únicas del pool actual
+    // Obtener categorías únicas del pool actual (Robustez máxima)
     const availableCategories = activeTab === 'TODOS_RESUMEN'
-        ? [...new Set(Object.values(sheetsData).flatMap(d => (d?.items || []).map(i => i.categoria_principal)))]
-        : (currentSheet?.items ? [...new Set(currentSheet.items.map(i => i.categoria_principal))] : []);
+        ? [...new Set(Object.values(sheetsData || {}).flatMap(d => (d?.items || []).filter(Boolean).map(i => i.categoria_principal)))]
+        : (currentSheet?.items ? [...new Set(currentSheet.items.filter(Boolean).map(i => i.categoria_principal))] : []);
 
     return (
         <div className="comic-tool-container animate-in fade-in duration-500">
@@ -728,9 +843,14 @@ const ComicAnalysisTool = () => {
                                 }}
                             >
                                 <option value="TODOS">Todas las Editoriales</option>
-                                {[...new Set(Object.values(dbCatalog).map(i => i.editorial))].filter(Boolean).sort().map(ed => (
-                                    <option key={ed} value={ed}>{ed}</option>
-                                ))}
+                                {(Object.values(dbCatalog || {})
+                                    .filter(Boolean)
+                                    .map(i => i.editorial)
+                                    .filter(Boolean)
+                                    .sort()
+                                    .map(ed => (
+                                        <option key={ed} value={ed}>{ed}</option>
+                                    )))}
                             </select>
                         </div>
                         <div className="flex flex-col gap-1">
@@ -741,12 +861,15 @@ const ComicAnalysisTool = () => {
                                 onChange={(e) => setFilterCatCategory(e.target.value)}
                             >
                                 <option value="TODOS">Todas las Categorías</option>
-                                {[...new Set(Object.values(dbCatalog)
+                                {(Object.values(dbCatalog || {})
+                                    .filter(Boolean)
                                     .filter(item => filterCatEditorial === 'TODOS' || item.editorial === filterCatEditorial)
-                                    .map(i => i.categoria))]
-                                    .filter(Boolean).sort().map(cat => (
+                                    .map(i => i.categoria)
+                                    .filter(Boolean)
+                                    .sort()
+                                    .map(cat => (
                                         <option key={cat} value={cat}>{cat}</option>
-                                    ))}
+                                    )))}
                             </select>
                         </div>
                     </div>
@@ -785,8 +908,8 @@ const ComicAnalysisTool = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {displayItems.map((item) => (
-                                                <tr key={item.product_id}>
+                                            {displayItems.map((item, idx) => (
+                                                <tr key={`${item.product_id}-${idx}`}>
                                                     <td style={{ fontSize: '0.7rem', fontWeight: '800', opacity: 0.6 }}>{item.editorial}</td>
                                                     <td style={{ fontWeight: '700' }}>{item.titulo}</td>
                                                     <td className="font-mono">{item.ean_oficial || item.ean_interno}</td>
@@ -826,10 +949,55 @@ const ComicAnalysisTool = () => {
                 <div className="animate-in slide-in-from-bottom-4 duration-500">
                     {/* ── SUMMARY BAR (Global) ── */}
                     {/* ── SUMMARY BAR (Global Redesigned) ── */}
+                    {isViewingHistory && (
+                        <div className="bg-comic-accent/20 border-2 border-comic-accent p-6 rounded-2xl mb-8 animate-in slide-in-from-top-4 duration-500 shadow-lg">
+                            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-comic-accent rounded-full flex items-center justify-center text-white shadow-md">
+                                        <Clock size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-comic-accent font-comic-display text-lg uppercase tracking-tight m-0">MODO PREVISUALIZACIÓN HISTÓRICA</h3>
+                                        <p className="text-xs font-comic-mono text-comic-primary opacity-80 mt-1">
+                                            Viendo reporte de: <span className="font-bold underline">{historyReportName}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button 
+                                        className="comic-btn-primary bg-comic-accent hover:bg-comic-accent/80 flex items-center gap-2 py-3 px-6 shadow-xl"
+                                        onClick={handleManualSync}
+                                        disabled={isSyncing}
+                                    >
+                                        <Zap size={20} className={isSyncing ? 'animate-spin' : ''} /> 
+                                        {isSyncing ? 'SINCRONIZANDO...' : 'APLICAR ESTE REPORTE AL CATÁLOGO'}
+                                    </button>
+                                    <button 
+                                        className="comic-btn-ghost border-comic-accent/40 text-comic-accent py-3 px-6"
+                                        onClick={reset}
+                                    >
+                                        SALIR DE PREVISUALIZACIÓN
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="mb-4 flex items-center gap-3 bg-[#1a2d42] p-3 rounded-t-lg border-b border-white/10 shadow-lg">
                         <Database size={20} className="text-[#f07d2a]" />
-                        <h2 className="text-xl font-bold tracking-widest text-[#f5f1e4] m-0 uppercase flex-1">RESUMEN DE LIMPIEZA</h2>
-
+                        <h2 className="text-xl font-bold tracking-widest text-[#f5f1e4] m-0 uppercase flex-1">
+                            {isViewingHistory ? `HISTORIAL: ${historyReportName}` : 'RESUMEN DE LIMPIEZA'}
+                        </h2>
+                        {!isViewingHistory && (
+                            <button 
+                                className="comic-btn-primary flex items-center gap-2 py-2 px-4 text-xs"
+                                onClick={handleManualSync}
+                                disabled={isSyncing}
+                            >
+                                <Zap size={14} className={isSyncing ? 'animate-spin' : ''} /> 
+                                {isSyncing ? 'SINCRONIZANDO...' : 'SINCRONIZAR AHORA'}
+                            </button>
+                        )}
                     </div>
                     <div className="comic-summary-section">
                         <table className="comic-resumen-table high-fidelity">
@@ -846,7 +1014,7 @@ const ComicAnalysisTool = () => {
                             </thead>
                             <tbody>
                                 {Object.entries(sheetsData).map(([name, d]) => {
-                                    if (!d || !d.report) return null;
+                                    if (!d || !d.report || name.startsWith('_')) return null;
                                     const r = d.report;
                                     const isExpanded = expandedSheets[name];
                                     const eanValidos = (r.titulos_unicos || 0) - (r.ean_creados_total || 0);
@@ -908,8 +1076,8 @@ const ComicAnalysisTool = () => {
                                                                         <div className="comic-audit-section-title flex items-center gap-2">
                                                                             <ArrowUpCircle size={12} /> NOVEDADES DETECTADAS ({d.items.filter(i => i.comparison === 'nuevo').length})
                                                                         </div>
-                                                                        <div className="comic-mini-table">
-                                                                            {d.items.filter(i => i.comparison === 'nuevo').slice(0, 10).map((i, idx) => (
+                                                                        <div className="comic-mini-table scrollable">
+                                                                            {d.items.filter(i => i.comparison === 'nuevo').map((i, idx) => (
                                                                                 <div key={idx} className="comic-mini-table-row">
                                                                                     <span className="title" title={i.titulo}>{i.titulo}</span>
                                                                                     <span className="comic-badge-new-v3">NUEVO</span>
@@ -926,8 +1094,8 @@ const ComicAnalysisTool = () => {
                                                                         <div className="comic-audit-section-title flex items-center gap-2">
                                                                             <RefreshCw size={12} /> ACTUALIZACIÓN DE PRECIOS ({d.items.filter(i => i.comparison === 'cambio_precio').length})
                                                                         </div>
-                                                                        <div className="comic-mini-table">
-                                                                            {d.items.filter(i => i.comparison === 'cambio_precio').slice(0, 10).map((i, idx) => (
+                                                                        <div className="comic-mini-table scrollable">
+                                                                            {d.items.filter(i => i.comparison === 'cambio_precio').map((i, idx) => (
                                                                                 <div key={idx} className="comic-mini-table-row">
                                                                                     <span className="title" title={i.titulo}>{i.titulo}</span>
                                                                                     <span className="detail comic-price-tech">${i.db_price} ➔ ${i.precio_tapa}</span>
@@ -943,8 +1111,8 @@ const ComicAnalysisTool = () => {
                                                                         <div className="comic-audit-section-title flex items-center gap-2">
                                                                             <Database size={12} /> ISBN/EAN ACTUALIZADOS ({d.items.filter(i => i.comparison === 'cambio_ean').length})
                                                                         </div>
-                                                                        <div className="comic-mini-table">
-                                                                            {d.items.filter(i => i.comparison === 'cambio_ean').slice(0, 10).map((i, idx) => (
+                                                                        <div className="comic-mini-table scrollable">
+                                                                            {d.items.filter(i => i.comparison === 'cambio_ean').map((i, idx) => (
                                                                                 <div key={idx} className="comic-mini-table-row">
                                                                                     <span className="title" title={i.titulo}>{i.titulo}</span>
                                                                                     <span className="detail" style={{ fontSize: '11px', fontFamily: 'var(--font-comic-mono)', fontWeight: 700 }}>
@@ -962,8 +1130,8 @@ const ComicAnalysisTool = () => {
                                                                         <div className="comic-audit-section-title flex items-center gap-2">
                                                                             <XCircle size={12} /> FILTRADOS POR LIMPIEZA ({r.eliminados.length})
                                                                         </div>
-                                                                        <div className="comic-mini-table">
-                                                                            {r.eliminados.slice(0, 15).map((e, idx) => (
+                                                                        <div className="comic-mini-table scrollable">
+                                                                            {r.eliminados.map((e, idx) => (
                                                                                 <div key={idx} className="comic-mini-table-row">
                                                                                     <div className="flex flex-col max-w-[200px]">
                                                                                         <span className="title" title={e.titulo}>{e.titulo}</span>
@@ -989,32 +1157,94 @@ const ComicAnalysisTool = () => {
                             {/* TOTAL ROW */}
                             <tfoot className="bg-comic-primary/10 font-bold border-t-2 border-comic-border">
                                 <tr>
-                                    <td>TOTAL ({Object.keys(sheetsData).length})</td>
+                                    <td>TOTAL ({Object.keys(sheetsData).filter(k => !k.startsWith('_')).length})</td>
                                     <td className="num">
-                                        {Object.values(sheetsData).reduce((sum, d) => sum + (d.report?.total_filas_crudas || 0), 0).toLocaleString()}
+                                        {Object.entries(sheetsData)
+                                            .filter(([k, d]) => !k.startsWith('_') && d?.report)
+                                            .reduce((sum, [_, d]) => sum + (d.report?.total_filas_crudas || 0), 0).toLocaleString()}
                                     </td>
                                     <td className="num">
-                                        {Object.values(sheetsData).reduce((sum, d) => sum + (d.report?.titulos_unicos || 0), 0).toLocaleString()}
+                                        {Object.entries(sheetsData)
+                                            .filter(([k, d]) => !k.startsWith('_') && d?.report)
+                                            .reduce((sum, [_, d]) => sum + (d.report?.titulos_unicos || 0), 0).toLocaleString()}
                                     </td>
                                     <td className="num text-comic-destructive">
-                                        -{Object.values(sheetsData).reduce((sum, d) => sum + (d.report?.eliminados?.length || 0), 0).toLocaleString()}
+                                        -{Object.entries(sheetsData)
+                                            .filter(([k, d]) => !k.startsWith('_') && d?.report)
+                                            .reduce((sum, [_, d]) => sum + (d.report?.eliminados?.length || 0), 0).toLocaleString()}
                                     </td>
                                     <td className="num text-comic-green">
-                                        {Object.values(sheetsData).reduce((sum, d) => {
-                                            const r = d.report;
-                                            return sum + ((r?.titulos_unicos || 0) - (r?.ean_creados_total || 0));
-                                        }, 0).toLocaleString()}
+                                        {Object.entries(sheetsData)
+                                            .filter(([k, d]) => !k.startsWith('_') && d?.report)
+                                            .reduce((sum, [_, d]) => {
+                                                const r = d.report;
+                                                return sum + ((r?.titulos_unicos || 0) - (r?.ean_creados_total || 0));
+                                            }, 0).toLocaleString()}
                                     </td>
                                     <td className="num text-comic-yellow">
-                                        {Object.values(sheetsData).reduce((sum, d) => sum + (d.report?.ean_creados_total || 0), 0).toLocaleString()}
+                                        {Object.entries(sheetsData)
+                                            .filter(([k, d]) => !k.startsWith('_') && d?.report)
+                                            .reduce((sum, [_, d]) => sum + (d.report?.ean_creados_total || 0), 0).toLocaleString()}
                                     </td>
                                     <td className="num">
-                                        {Object.values(sheetsData).reduce((sum, d) => sum + (d.report?.cambios?.nuevos || 0) + (d.report?.cambios?.precios || 0) + (d.report?.cambios?.eans || 0) + (d.report?.cambios?.categorias || 0), 0)} cambios
+                                        {Object.entries(sheetsData)
+                                            .filter(([k, d]) => !k.startsWith('_') && d?.report)
+                                            .reduce((sum, [_, d]) => sum + (d.report?.cambios?.nuevos || 0) + (d.report?.cambios?.precios || 0) + (d.report?.cambios?.eans || 0) + (d.report?.cambios?.categorias || 0), 0)} cambios
                                     </td>
                                 </tr>
                             </tfoot>
                         </table>
                     </div>
+
+                    {/* ALERTAS DE CATÁLOGO (Items Ausentes) */}
+                    {Object.keys(itemsAusentes).some(ed => itemsAusentes[ed]?.length > 0) && (
+                        <div className="mt-8 animate-in fade-in slide-in-from-top-4 duration-700">
+                            <div className="flex items-center gap-3 mb-4 p-3 bg-comic-destructive/10 border-l-4 border-comic-destructive rounded-r-lg">
+                                <AlertTriangle size={24} className="text-comic-destructive" />
+                                <div>
+                                    <h3 className="font-comic-display text-lg text-comic-destructive uppercase leading-none">Alertas de Catálogo Maestro</h3>
+                                    <p className="text-xs font-bold opacity-60">Estos ítems están en tu base de datos pero NO aparecen en el Excel actual de la editorial.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {Object.entries(itemsAusentes).map(([ed, items]) => items.length > 0 && (
+                                    <div key={ed} className="bg-white border-2 border-comic-border rounded-xl overflow-hidden shadow-sm">
+                                        <div className="bg-comic-muted p-2 px-4 border-b-2 border-comic-border flex justify-between items-center">
+                                            <span className="font-bold text-xs uppercase">{ed}</span>
+                                            <span className="comic-badge bg-comic-destructive/20 text-comic-destructive border-none">{items.length} AUSENTES</span>
+                                        </div>
+                                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                                            <table className="w-full text-[11px]">
+                                                <tbody className="divide-y divide-comic-border">
+                                                    {items.slice(0, 20).map(it => (
+                                                        <tr key={it.product_id} className="hover:bg-comic-muted/30">
+                                                            <td className="p-2 font-bold">{it.titulo}</td>
+                                                            <td className="p-2 font-comic-mono opacity-50">{it.product_id}</td>
+                                                            <td className="p-2 text-right">
+                                                                <button
+                                                                    onClick={() => handleDeleteFromMaster(it.product_id, ed)}
+                                                                    className="text-comic-destructive hover:scale-110 transition-transform p-1"
+                                                                    title="Borrar del Catálogo Maestro"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                            {items.length > 20 && (
+                                                <div className="p-3 text-center bg-comic-muted/10 border-t border-comic-border text-[10px] uppercase font-bold text-muted">
+                                                    Y {items.length - 20} productos más...
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* STATS SUMMARY (Current Tab) */}
                     <div className="comic-report-grid">
@@ -1059,7 +1289,7 @@ const ComicAnalysisTool = () => {
                         >
                             🌎 TODOS
                         </button>
-                        {Object.keys(sheetsData).map(sheetName => (
+                        {Object.keys(sheetsData).filter(sheetName => !sheetName.startsWith('_')).map(sheetName => (
                             <button
                                 key={sheetName}
                                 className={`comic-tab-btn ${activeTab === sheetName ? 'active' : ''}`}
@@ -1194,12 +1424,12 @@ const ComicAnalysisTool = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {displayItems.map((item, idx) => (
-                                    <tr key={item.product_id + idx}>
+                                {displayItems.filter(Boolean).map((item, idx) => (
+                                    <tr key={(item.product_id || 'new') + idx}>
                                         <td>
                                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                    <span style={{ fontWeight: '700' }}>{item.titulo}</span>
+                                                    <span style={{ fontWeight: '700' }}>{item.titulo || 'Sin Título'}</span>
                                                     {item.comparison === 'nuevo' && <span className="comic-badge comic-badge-new">NUEVO</span>}
                                                     {item.comparison === 'cambio_precio' && <span className="comic-badge comic-badge-price">Δ PRECIO</span>}
                                                     {item.comparison === 'cambio_ean' && <span className="comic-badge bg-comic-blue/20 text-comic-blue border-comic-blue/30" title="Cambio de código EAN detectado">Δ EAN</span>}
@@ -1298,97 +1528,116 @@ const ComicAnalysisTool = () => {
                         </div>
                     )}
 
-                    {/* ALERTAS DE CATÁLOGO (Items Ausentes) */}
-                    {Object.keys(itemsAusentes).some(ed => itemsAusentes[ed]?.length > 0) && (
-                        <div className="mt-8 animate-in fade-in slide-in-from-top-4 duration-700">
-                            <div className="flex items-center gap-3 mb-4 p-3 bg-comic-destructive/10 border-l-4 border-comic-destructive rounded-r-lg">
-                                <AlertTriangle size={24} className="text-comic-destructive" />
-                                <div>
-                                    <h3 className="font-comic-display text-lg text-comic-destructive uppercase leading-none">Alertas de Catálogo Maestro</h3>
-                                    <p className="text-xs font-bold opacity-60">Estos ítems están en tu base de datos pero NO aparecen en el Excel actual de la editorial.</p>
-                                </div>
-                            </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {Object.entries(itemsAusentes).map(([ed, items]) => items.length > 0 && (
-                                    <div key={ed} className="bg-white border-2 border-comic-border rounded-xl overflow-hidden shadow-sm">
-                                        <div className="bg-comic-muted p-2 px-4 border-b-2 border-comic-border flex justify-between items-center">
-                                            <span className="font-bold text-xs uppercase">{ed}</span>
-                                            <span className="comic-badge bg-comic-destructive/20 text-comic-destructive border-none">{items.length} AUSENTES</span>
-                                        </div>
-                                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
-                                            <table className="w-full text-[11px]">
-                                                <tbody className="divide-y divide-comic-border">
-                                                    {items.slice(0, 20).map(it => (
-                                                        <tr key={it.product_id} className="hover:bg-comic-muted/30">
-                                                            <td className="p-2 font-bold">{it.titulo}</td>
-                                                            <td className="p-2 font-comic-mono opacity-50">{it.product_id}</td>
-                                                            <td className="p-2 text-right">
-                                                                <button
-                                                                    onClick={() => handleDeleteFromMaster(it.product_id, ed)}
-                                                                    className="text-comic-destructive hover:scale-110 transition-transform p-1"
-                                                                    title="Borrar del Catálogo Maestro"
-                                                                >
-                                                                    <Trash2 size={16} />
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                            {items.length > 20 && (
-                                                <div className="p-3 text-center bg-comic-muted/10 border-t border-comic-border text-[10px] uppercase font-bold text-muted">
-                                                    Y {items.length - 20} productos más...
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'center' }}>
+                    <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
                         <button
                             className="comic-btn-ghost"
                             onClick={reset}
                         >
-                            ↩ PROCESAR OTRO ARCHIVO
+                            ↩ VOLVER A LA SELECCIÓN
                         </button>
+                        {!isViewingHistory && (
+                            <button 
+                                className="comic-btn-primary flex items-center gap-2"
+                                onClick={handleManualSync}
+                                disabled={isSyncing}
+                            >
+                                <Zap size={18} className={isSyncing ? 'animate-spin' : ''} /> 
+                                {isSyncing ? 'APLICAR CAMBIOS AL MAESTRO' : 'APLICAR CAMBIOS AL MAESTRO'}
+                            </button>
+                        )}
                     </div>
                 </div>
             ) : (
-                /* ── ESTADO DE ESPERA SIMPLIFICADO (FALLBACK) ── */
+                /* ── ESTADO DE ESPERA MEJORADO (CON MEMORIA) ── */
                 <div className="space-y-8 animate-in fade-in duration-500">
                     <div className="comic-empty-state card py-20 text-center border-dashed border-2 border-comic-border bg-white/50 rounded-2xl shadow-xl">
                         <div className="mb-6 relative inline-block">
                             <Clock size={80} className="text-comic-primary opacity-20" />
                             <div className="absolute inset-0 flex items-center justify-center">
-                                <FileUp size={32} className="text-comic-primary opacity-40" />
+                                <FileSpreadsheet size={32} className="text-comic-primary opacity-40" />
                             </div>
                         </div>
-                        <h3 className="text-2xl font-display text-comic-primary mb-3 uppercase tracking-tight">Reporte No Detectado</h3>
-                        <p className="text-sm text-comic-muted max-w-md mx-auto font-medium">
-                            Sube un archivo Excel en la pestaña de <span className="text-comic-accent font-bold">Semanas</span>. El reporte aparecerá aquí automáticamente.
-                        </p>
-                        <div className="mt-10 flex justify-center gap-4">
+                        
+                        {lastFileName ? (
+                            <>
+                                <h3 className="text-2xl font-display text-comic-primary mb-3 uppercase tracking-tight">Último Reporte Procesado</h3>
+                                <p className="text-sm text-comic-muted max-w-md mx-auto font-medium">
+                                    Puedes continuar trabajando con el archivo previo o iniciar uno desde el historial: <br/>
+                                    <span className="text-comic-accent font-comic-mono font-bold text-base block mt-2 p-2 bg-comic-muted/20 rounded-lg">
+                                        {lastFileName}
+                                    </span>
+                                </p>
+                                <div className="mt-10 flex flex-col sm:flex-row justify-center gap-4 px-6">
+                                    <button
+                                        className="comic-btn-primary flex items-center justify-center gap-2 py-4 px-8"
+                                        onClick={async () => {
+                                            const result = await fetchCatalog();
+                                            checkForAutoReport(result.indexed);
+                                        }}
+                                    >
+                                        <RefreshCw size={20} /> CONTINUAR CON ESTE ARCHIVO
+                                    </button>
+                                    <button
+                                        className="comic-btn-ghost flex items-center justify-center gap-2 border-2 border-comic-border"
+                                        onClick={() => {
+                                            localStorage.removeItem('mcb_stored_report');
+                                            localStorage.removeItem('mcb_last_filename');
+                                            setLastFileName('');
+                                            if (fileInputRef.current) fileInputRef.current.click();
+                                        }}
+                                    >
+                                        <FileUp size={20} /> PROCESAR NUEVO EXCEL
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <h3 className="text-2xl font-display text-comic-primary mb-3 uppercase tracking-tight">Gestión de Reportes</h3>
+                                <p className="text-sm text-comic-muted max-w-md mx-auto font-medium">
+                                    Selecciona un reporte del historial de la nube o sube un archivo nuevo en la pestaña de <span className="text-comic-accent font-bold">Semanas</span>.
+                                </p>
+                                <div className="mt-10 flex justify-center gap-4">
+                                    <button
+                                        className="comic-btn-primary flex items-center gap-2"
+                                        onClick={() => { if (fileInputRef.current) fileInputRef.current.click(); }}
+                                    >
+                                        <FileUp size={18} /> SUBIR NUEVO EXCEL AHORA
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                        
+                        <div className="mt-8 pt-8 border-t border-comic-border/30">
                             <button
-                                className="comic-btn-primary flex items-center gap-2"
-                                onClick={async () => {
-                                    const result = await fetchCatalog();
-                                    checkForAutoReport(result.indexed);
-                                }}
-                            >
-                                <RefreshCw size={18} /> BUSCAR REPORTE AHORA
-                            </button>
-                            <button
-                                className="comic-btn-secondary flex items-center gap-2"
+                                className="comic-btn-secondary flex items-center gap-2 mx-auto"
                                 onClick={() => { setViewMode('catalog'); fetchCatalog(); }}
                             >
                                 <Database size={18} /> VER CATÁLOGO MAESTRO
                             </button>
                         </div>
                     </div>
+
+                    {/* HISTORIAL RECIENTE */}
+                    {historialSemanas.length > 0 && (
+                        <div className="bg-white border-2 border-comic-border rounded-xl p-6">
+                            <h4 className="font-comic-display text-lg mb-4 flex items-center gap-2 uppercase">
+                                <Clock size={20} className="text-comic-accent" /> Historial de la Nube
+                            </h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {historialSemanas.map(sem => (
+                                    <div 
+                                        key={sem.id} 
+                                        className="p-3 bg-comic-muted/30 border border-comic-border rounded-lg hover:border-comic-accent cursor-pointer transition-all group"
+                                        onClick={() => handleSelectHistorial(sem)}
+                                    >
+                                        <p className="text-xs font-bold leading-tight group-hover:text-comic-accent">{sem.nombre}</p>
+                                        <p className="text-[10px] opacity-50 mt-1">{new Date(sem.created_at).toLocaleDateString()}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

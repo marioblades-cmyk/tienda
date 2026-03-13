@@ -209,11 +209,11 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             try {
                 // Cargar datos de Supabase en paralelo
                 const [resRemitos, resDist, resPlans, resCta, resAlq] = await Promise.all([
-                    supabase.from('app_state').select('data').eq('id', 'remitos').single(),
-                    supabase.from('app_state').select('data').eq('id', 'distribuidor').single(),
-                    supabase.from('app_state').select('data').eq('id', 'planes_socio').single(),
-                    supabase.from('app_state').select('data').eq('id', 'cuenta_corriente').single(),
-                    supabase.from('app_state').select('data').eq('id', 'alquiler').single()
+                    supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle(),
+                    supabase.from('app_state').select('data').eq('id', 'distribuidor').maybeSingle(),
+                    supabase.from('app_state').select('data').eq('id', 'planes_socio').maybeSingle(),
+                    supabase.from('app_state').select('data').eq('id', 'cuenta_corriente').maybeSingle(),
+                    supabase.from('app_state').select('data').eq('id', 'alquiler').maybeSingle()
                 ]);
 
                 // Compatibilidad de data structures {rows, nid} vs simple array

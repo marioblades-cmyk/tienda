@@ -80,7 +80,7 @@ export default function PartnerView() {
         const { data: plan, error: pError } = await supabase.from('remitos_planes').insert([{
             fecha: new Date().toISOString().split('T')[0],
             collapsed: true
-        }]).select().single();
+        }]).select().maybeSingle();
 
         if (!pError && plan) {
             const itemsToInsert = selectedItems.map(it => ({

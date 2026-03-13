@@ -38,7 +38,7 @@ export default function DistributorView() {
         const { data: p } = await supabase.from('dist_pedidos').select('*').order('orden', { ascending: true });
         const { data: pg } = await supabase.from('dist_pagos').select('*').order('fecha', { ascending: true });
         const { data: aj } = await supabase.from('dist_ajustes').select('*').order('created_at', { ascending: true });
-        const { data: si } = await supabase.from('dist_saldo_inicial').select('*').single();
+        const { data: si } = await supabase.from('dist_saldo_inicial').select('*').maybeSingle();
 
         setPedidos(p || []);
         setPagos(pg || []);

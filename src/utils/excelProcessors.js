@@ -733,6 +733,7 @@ export function processVR(rows) {
 export function processOtras(rows) {
     const rawItems = [];
     let started = true;
+    let currentSection = 'GENERAL';
     const eliminados = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -741,6 +742,16 @@ export function processOtras(rows) {
 
         const nn = row.filter(v => v != null && String(v).trim() !== '');
         if (!nn.length) continue;
+
+        // Detectar cambio de sección (Subcategoría)
+        // Buscamos filas con un solo valor que no sea autor/nombre/subtotal/total
+        if (nn.length === 1 && typeof nn[0] === 'string') {
+            const val = nn[0].trim().toUpperCase();
+            if (val !== 'SUBTOTAL' && val !== 'TOTAL' && val !== 'AUTOR' && val !== 'NOMBRE' && val !== 'PRODUCTO') {
+                currentSection = val;
+                continue;
+            }
+        }
 
         // PARADA: SUBTOTAL o TOTAL
         const firstStr = nn.find(v => typeof v === 'string');
@@ -776,7 +787,7 @@ export function processOtras(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: 'GENERAL'
+            categoria: currentSection
         });
     }
 
