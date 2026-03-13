@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
-import { Plus, FileUp, Lock, Unlock, Download, Trash2, XCircle, Calendar } from 'lucide-react';
+import { Plus, FileUp, Lock, Unlock, Download, Trash2, XCircle, Calendar, RefreshCw } from 'lucide-react';
+import { catalogService } from '../services/catalogService';
 
 export default function AdminWeeklyView() {
     const [semanas, setSemanas] = useState([]);
@@ -10,6 +11,7 @@ export default function AdminWeeklyView() {
     const [draggingId, setDraggingId] = useState(null);
     const [editingDateId, setEditingDateId] = useState(null);
     const [tempDate, setTempDate] = useState('');
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
 
     useEffect(() => {
         fetchSemanas();
@@ -89,7 +91,7 @@ export default function AdminWeeklyView() {
             .upload(filePath, file, { upsert: true });
 
         if (uploadError) {
-            alert('Error en storage: ' + uploadError.message);
+            console.error('❌ Error en storage:', uploadError);
             return;
         }
 
@@ -105,11 +107,56 @@ export default function AdminWeeklyView() {
             })
             .eq('id', id);
 
-        if (updateError) alert(updateError.message);
-        else {
-            fetchSemanas();
-            // Notificar que se subió un archivo para actualizar el indicador del Sidebar
-            window.dispatchEvent(new CustomEvent('week-file-uploaded'));
+        if (updateError) {
+            console.error('❌ Error actualizando base de datos:', updateError);
+        } else {
+            // PROCESAMIENTO AUTOMÁTICO (FASE 2)
+            setIsAnalyzing(true);
+            try {
+                console.log('⚡ Iniciando procesamiento automático...');
+                const analysis = await catalogService.processAndAnalyze(file);
+                
+                if (!analysis || Object.keys(analysis).length === 0) {
+                    console.warn('⚠️ El análisis no devolvió ninguna pestaña válida.');
+                } else {
+                    console.log('⚡ PROCESAMIENTO EXITOSO. Subiendo a la nube...');
+
+                    // 1. Subir el reporte completo a la nube (Supabase Storage)
+                    console.log('☁️ Subiendo reporte a la nube...');
+                    await catalogService.uploadAnalysisReport(id, analysis);
+                    
+                    // 2. Hacer espacio en localStorage si es necesario
+                    catalogService.ensureStorageSpace();
+
+                    // 3. Guardamos solo un PUNTERO mínimo en localStorage para avisar a la otra pestaña
+                    try {
+                        localStorage.setItem('mcb_last_processed_report', JSON.stringify({
+                            semanaId: id,
+                            timestamp: Date.now(),
+                            filename: file.name,
+                            source: 'cloud' // Indicamos que debe bajarse de la nube
+                        }));
+                        console.log('✅ Reporte guardado en la nube y puntero local actualizado.');
+                    } catch (storageErr) {
+                        console.error('❌ Error guardando puntero local (incluso tras limpieza):', storageErr);
+                    }
+
+                    // 4. SINCRONIZACIÓN INTELIGENTE (FASE 3)
+                    console.log('🚀 Iniciando sincronización automática con el Maestro...');
+                    const syncResult = await catalogService.syncWithMaster(analysis, user.id);
+                    if (syncResult && syncResult.count > 0) {
+                        alert(`📖 CATÁLOGO ACTUALIZADO\nSe sincronizaron ${syncResult.count} productos con sus nuevos precios sugeridos.`);
+                    }
+                }
+            } catch (err) {
+                console.error('❌ Error en análisis automático:', err);
+                alert('Error al procesar el reporte de limpieza: ' + err.message);
+            } finally {
+                setIsAnalyzing(false);
+                fetchSemanas();
+                // Notificar que se subió un archivo para actualizar el indicador del Sidebar
+                window.dispatchEvent(new CustomEvent('week-file-uploaded'));
+            }
         }
     };
 
@@ -244,16 +291,23 @@ export default function AdminWeeklyView() {
                             </div>
 
                             <div className="flex items-center gap-2">
-                                <label className="cursor-pointer flex items-center gap-2 bg-surface border-2 border-dashed border-sky/30 px-3 py-2 rounded text-[10px] font-bold hover:border-accent transition-colors">
-                                    <FileUp size={14} />
-                                    {s.archivo_url ? 'ACTUALIZAR' : 'SUBIR BASE'}
-                                    <input
-                                        type="file"
-                                        className="hidden"
-                                        accept=".xlsx,.xls"
-                                        onChange={(e) => e.target.files[0] && handleFileUpload(s.id, e.target.files[0])}
-                                    />
-                                </label>
+                                {isAnalyzing ? (
+                                    <div className="flex items-center gap-2 bg-accent/20 border-2 border-accent px-3 py-2 rounded text-[10px] font-bold text-accent">
+                                        <RefreshCw size={14} className="animate-spin" /> PROCESANDO...
+                                    </div>
+                                ) : (
+                                    <label className="cursor-pointer flex items-center gap-2 bg-surface border-2 border-dashed border-sky/30 px-3 py-2 rounded text-[10px] font-bold hover:border-accent transition-colors">
+                                        <FileUp size={14} />
+                                        {s.archivo_url ? 'ACTUALIZAR' : 'SUBIR BASE'}
+                                        <input
+                                            type="file"
+                                            className="hidden"
+                                            accept=".xlsx,.xls"
+                                            onClick={(e) => e.target.value = null}
+                                            onChange={(e) => e.target.files[0] && handleFileUpload(s.id, e.target.files[0])}
+                                        />
+                                    </label>
+                                )}
 
                                 <button
                                     onClick={() => toggleSemanaStatus(s.id, s.abierta)}

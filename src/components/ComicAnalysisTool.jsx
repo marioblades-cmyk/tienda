@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, RefreshCw, CheckCircle, AlertTriangle, XCircle, Database, ArrowUpCircle, Trash2, FileUp, Clock, FileSpreadsheet } from 'lucide-react';
 import { SHEET_PROCESSORS } from '../utils/excelProcessors';
 import { supabase } from '../services/supabase';
+import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
 import './ComicAnalysisTool.css';
 
@@ -33,33 +34,7 @@ const ComicAnalysisTool = () => {
     const [isIdModalOpen, setIsIdModalOpen] = useState(false);
     const fileInputRef = useRef(null);
 
-    // Cargar catálogo y historial al iniciar
-    React.useEffect(() => {
-        fetchCatalog();
-        fetchHistorial();
-        // No auto-cargamos la última semana para no re-procesar en cada visita
-        // El usuario puede seleccionar desde historial o subir un Excel nuevo
-    }, []);
-
-    const fetchHistorial = async () => {
-        setLoadingHistorial(true);
-        try {
-            const { data, error } = await supabase
-                .from('semanas')
-                .select('*')
-                .not('archivo_url', 'is', null)
-                .order('created_at', { ascending: false })
-                .limit(5);
-
-            if (error) throw error;
-            setHistorialSemanas(data || []);
-        } catch (err) {
-            console.error('Error cargando historial:', err);
-        } finally {
-            setLoadingHistorial(false);
-        }
-    };
-
+    // ── FUNCIONES DE CARGA INICIAL ──
     const fetchCatalog = async () => {
         setCatalogReady(false);
         try {
@@ -104,6 +79,152 @@ const ComicAnalysisTool = () => {
             throw err;
         }
     };
+
+    const fetchHistorial = async () => {
+        setLoadingHistorial(true);
+        try {
+            const { data, error } = await supabase
+                .from('semanas')
+                .select('*')
+                .not('archivo_url', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(5);
+
+            if (error) throw error;
+            setHistorialSemanas(data || []);
+        } catch (err) {
+            console.error('Error cargando historial:', err);
+        } finally {
+            setLoadingHistorial(false);
+        }
+    };
+
+    const calculateMissingItems = (data, currentCatalog) => {
+        const allProcessedEans = new Set();
+        Object.values(data).forEach(sheet => {
+            sheet.items.forEach(item => {
+                if (item.ean_final) allProcessedEans.add(item.ean_final);
+                if (item.ean_oficial) allProcessedEans.add(item.ean_oficial);
+                if (item.ean_interno) allProcessedEans.add(item.ean_interno);
+                if (item.product_id) allProcessedEans.add(item.product_id);
+            });
+        });
+
+        const newItemsAusentes = {};
+        const activeEditoriales = new Set(Object.keys(data));
+
+        const catalogToUse = currentCatalog || dbCatalog;
+
+        if (catalogToUse && Object.keys(catalogToUse).length > 0) {
+            Object.values(catalogToUse).forEach(dbItem => {
+                if (!dbItem) return;
+                if (activeEditoriales.has(dbItem.editorial)) {
+                    const itemIdentifiers = [dbItem.ean_oficial, dbItem.ean_interno, dbItem.product_id].filter(Boolean);
+                    const isPresent = itemIdentifiers.some(id => allProcessedEans.has(id));
+
+                    if (!isPresent) {
+                        if (!newItemsAusentes[dbItem.editorial]) newItemsAusentes[dbItem.editorial] = [];
+                        newItemsAusentes[dbItem.editorial].push(dbItem);
+                    }
+                }
+            });
+        }
+        setItemsAusentes(newItemsAusentes);
+    };
+
+    const checkForAutoReport = async (currentCatalog) => {
+        try {
+            console.log('🔍 Buscando reporte automático...');
+            let semanaId = null;
+            let source = null;
+
+            // 1. Intentar desde localStorage (Puntero rápido)
+            const stored = localStorage.getItem('mcb_last_processed_report');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 24) {
+                    semanaId = parsed.semanaId;
+                    source = parsed.source;
+                    console.log(`📄 Puntero local hallado para semana: ${semanaId}`);
+                }
+            }
+
+            // 2. Si no hay puntero, buscar la semana más reciente en la DB (Abierta o Cerrada)
+            if (!semanaId) {
+                console.log('☁️ Buscando última semana en la base de datos...');
+                const { data: weeks, error } = await supabase
+                    .from('semanas')
+                    .select('id, nombre')
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                if (weeks?.[0]) {
+                    semanaId = weeks[0].id;
+                    source = 'cloud';
+                    console.log(`📌 Seleccionada automáticamente semana: ${weeks[0].nombre}`);
+                }
+            }
+
+            if (semanaId) {
+                let reportData = null;
+
+                // Descargar siempre si es cloud o si no tenemos data local
+                if (source === 'cloud' || !stored) {
+                    console.log('☁️ Iniciando descarga del reporte desde la nube para ID: ' + semanaId);
+                    setIsProcessing(true);
+                    try {
+                        reportData = await catalogService.downloadAnalysisReport(semanaId);
+                        if (reportData) {
+                            console.log('✅ Descarga exitosa. ' + Object.keys(reportData).length + ' pestañas recuperadas.');
+                        } else {
+                            console.log('⚠️ El archivo existe en la nube pero es nulo o no se pudo leer.');
+                        }
+                    } catch (err) {
+                        console.error('❌ Error fatal en descarga: ' + err.message);
+                    } finally {
+                        setIsProcessing(false);
+                    }
+                } else if (stored) {
+                    reportData = JSON.parse(stored).data;
+                }
+
+                if (reportData) {
+                    console.log('✅ Cargando datos al visor...');
+                    setSheetsData(reportData);
+                    const firstAvailable = Object.keys(reportData)[0];
+                    setActiveTab(firstAvailable);
+                    setViewMode('results');
+                    calculateMissingItems(reportData, currentCatalog);
+                } else {
+                    console.log('⚠️ No hay reporte guardado en la nube para esta semana.');
+                }
+            } else {
+                console.log('❌ No hay semanas activas ni reportes locales.');
+            }
+        } catch (e) {
+            console.warn('⚠️ Error en búsqueda automática de reporte:', e);
+        }
+    };
+
+    // ── EFFECT PRINCIPAL ──
+    useEffect(() => {
+        const init = async () => {
+            const result = await fetchCatalog();
+            await fetchHistorial();
+            checkForAutoReport(result.indexed);
+        };
+        init();
+
+        // Escuchar evento de subida en la sección de Semanas
+        const handleWeekUpload = async () => {
+            console.log('🔄 Detectada nueva subida en Semanas. Recargando reporte...');
+            const result = await fetchCatalog();
+            checkForAutoReport(result.indexed);
+        };
+        
+        window.addEventListener('week-file-uploaded', handleWeekUpload);
+        return () => window.removeEventListener('week-file-uploaded', handleWeekUpload);
+    }, []);
 
     const handleSelectHistorial = async (semana) => {
         if (!semana.archivo_url) return;
@@ -278,80 +399,30 @@ const ComicAnalysisTool = () => {
 
         setIsSyncing(true);
         try {
-            // Consolidar todos los items que tienen cambios (nuevos o precio distinto)
-            const itemsToSync = [];
-            const seenIds = new Set();
-            let totalProcesados = 0;
-            let nuevosDetectados = 0;
-            let preciosActualizados = 0;
-            let eansActualizados = 0;
-
-            Object.entries(sheetsData).forEach(([sheetName, data]) => {
-                totalProcesados += data.items.length;
-                data.items.forEach(item => {
-                    if (item.comparison === 'nuevo') nuevosDetectados++;
-                    if (item.comparison === 'cambio_precio') preciosActualizados++;
-                    if (item.comparison === 'cambio_ean') eansActualizados++;
-
-                    if (item.comparison !== 'sin_cambios' && !seenIds.has(item.product_id)) {
-                        seenIds.add(item.product_id);
-                        itemsToSync.push({
-                            ...item,
-                            editorial: item.editorial || sheetName
-                        });
-                    }
-                });
-            });
-
-            if (itemsToSync.length === 0) {
+            // Usar la nueva sincronización inteligente que calcula precios automáticos
+            const result = await catalogService.syncWithMaster(sheetsData, user.id);
+            
+            if (result.count === 0) {
                 alert('No hay cambios pendientes para sincronizar.');
                 return;
             }
 
-            // Mapear al formato de la tabla SQL
-            const payload = itemsToSync.map(i => ({
-                product_id: i.product_id,
-                titulo: i.titulo,
-                ean_oficial: i.ean_oficial,
-                ean_interno: i.ean_interno,
-                precio_tapa: i.precio_tapa || 0,
-                editorial: i.editorial,
-                categoria: i.categoria_principal,
-                updated_at: new Date().toISOString()
-            }));
-
-            // Supabase upsert por product_id
-            const { error: syncErr } = await supabase
-                .from('catalogo_productos')
-                .upsert(payload, { onConflict: 'product_id' });
-
-            if (syncErr) throw syncErr;
-
-            // Log de la sincronización (Guardamos el nombre del archivo para seguimiento)
-            const activeFileName = activeTab && sheetsData[activeTab]?.filename ? sheetsData[activeTab].filename : null;
-
-            await supabase.from('catalogo_sync_logs').insert([{
-                vendedor_id: user.id,
-                total_procesados: totalProcesados,
-                nuevos_detectados: nuevosDetectados,
-                precios_actualizados: preciosActualizados,
-                filename: activeFileName
-            }]);
-
             await fetchCatalog(); // Recargar base local
 
-            // Marcar items como sincronizados localmente
+            // Marcar items como sincronizados localmente para limpiar los badges de la UI
             const updatedSheets = { ...sheetsData };
             Object.keys(updatedSheets).forEach(k => {
                 updatedSheets[k].items = updatedSheets[k].items.map(i => ({ ...i, comparison: 'sin_cambios' }));
-                updatedSheets[k].report.cambios = { nuevos: 0, precios: 0, eans: 0, categorias: 0 };
+                if (updatedSheets[k].report) {
+                    updatedSheets[k].report.cambios = { nuevos: 0, precios: 0, eans: 0, categorias: 0 };
+                }
             });
             setSheetsData(updatedSheets);
 
             // Notificar que se sincronizó el catálogo para actualizar el indicador del Sidebar
             window.dispatchEvent(new CustomEvent('catalog-status-changed'));
 
-            alert('Catálogo sincronizado exitosamente.');
+            alert(`Catálogo sincronizado exitosamente (${result.count} productos actualizados con precios inteligentes).`);
         } catch (err) {
             console.error('Error sincronizando:', err);
             alert('Error al sincronizar: ' + err.message);
@@ -709,7 +780,8 @@ const ComicAnalysisTool = () => {
                                                 <th>EDITORIAL</th>
                                                 <th>TÍTULO / MANGA</th>
                                                 <th>EAN FINAL</th>
-                                                <th style={{ textAlign: 'right' }}>PRECIO MASTER</th>
+                                                <th style={{ textAlign: 'right' }}>MASTER</th>
+                                                <th style={{ textAlign: 'right' }}>N2 (-10%)</th>
                                                 <th style={{ textAlign: 'right' }}>ACCIONES</th>
                                             </tr>
                                         </thead>
@@ -721,6 +793,9 @@ const ComicAnalysisTool = () => {
                                                     <td className="font-mono">{item.ean_oficial || item.ean_interno}</td>
                                                     <td className="font-mono" style={{ textAlign: 'right', fontWeight: '800', color: 'var(--comic-accent)' }}>
                                                         ${item.precio_tapa?.toLocaleString()}
+                                                    </td>
+                                                    <td className="font-mono" style={{ textAlign: 'right', fontWeight: '700', color: 'var(--comic-primary)' }}>
+                                                        ${item.precio_n2_bs ? item.precio_n2_bs.toLocaleString() : '-'}
                                                     </td>
                                                     <td style={{ textAlign: 'right' }}>
                                                         <button
@@ -750,104 +825,8 @@ const ComicAnalysisTool = () => {
                         })()}
                     </div>
                 </div>
-            ) : viewMode === 'upload' || !Object.keys(sheetsData).length ? (
-                /* ── DROP ZONE ── */
-                <>
-                    {error && (
-                        <div className="mb-6 p-4 bg-comic-destructive/10 border border-comic-destructive text-comic-destructive rounded-lg font-comic-body font-bold flex items-center gap-3">
-                            <XCircle size={20} /> {error}
-                        </div>
-                    )}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                        {/* Panel de Carga Principal */}
-                        <div
-                            className="comic-drop-zone h-full"
-                            style={{ minHeight: '400px' }}
-                            onDrop={handleDrop}
-                            onDragOver={handleDragOver}
-                            onClick={() => fileInputRef.current?.click()}
-                        >
-                            <span className="comic-drop-icon">📂</span>
-                            <h2>Subí el Excel del distribuidor</h2>
-                            <p>Arrastrá el archivo acá o hacé clic para buscarlo</p>
-                            <div style={{ marginTop: '1.5rem' }}>
-                                <span className="highlight-word">Procesa 10+ editoriales en segundos</span>
-                            </div>
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={(e) => handleFileUpload(e.target.files[0])}
-                                accept=".xlsx, .xls"
-                                className="hidden"
-                            />
-                            <div className="flex justify-center gap-4" style={{ marginTop: '2rem' }}>
-                                <button className="comic-btn-primary" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
-                                    📁 SELECCIONAR ARCHIVO
-                                </button>
-                                <button
-                                    className="comic-btn-ghost"
-                                    style={{ borderColor: 'var(--comic-primary)', color: 'var(--comic-primary)' }}
-                                    onClick={(e) => { e.stopPropagation(); setViewMode('catalog'); fetchCatalog(); }}
-                                >
-                                    <Database size={18} className="inline mr-2" /> CATÁLOGO
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Panel de Historial Reciente */}
-                        <div className="comic-history-panel p-8 rounded-2xl flex flex-col h-full min-h-[400px]">
-                            <div className="flex items-center gap-3 mb-6">
-                                <Clock size={24} className="text-comic-accent" />
-                                <h3 className="text-xl font-display uppercase tracking-widest">Archivos Recientes</h3>
-                            </div>
-
-                            <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
-                                {loadingHistorial ? (
-                                    <div className="flex flex-col items-center justify-center py-12 gap-3 opacity-30 h-full">
-                                        <div className="w-8 h-8 border-2 border-comic-accent border-t-transparent rounded-full animate-spin"></div>
-                                        <span className="text-xs font-mono uppercase tracking-widest">Cargando historial...</span>
-                                    </div>
-                                ) : historialSemanas.length > 0 ? (
-                                    historialSemanas.map((s) => (
-                                        <div 
-                                            key={s.id}
-                                            onClick={(e) => { e.stopPropagation(); handleSelectHistorial(s); }}
-                                            className="comic-history-card group p-5 rounded-xl cursor-pointer"
-                                        >
-                                            <div className="flex justify-between items-start mb-2">
-                                                <span className="text-sm font-bold text-comic-primary group-hover:text-comic-accent transition-colors truncate pr-4">
-                                                    {s.nombre}
-                                                </span>
-                                                <span className="date whitespace-nowrap">
-                                                    {new Date(s.created_at).toLocaleDateString()}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-xs text-slate-500 font-medium italic">
-                                                <FileSpreadsheet size={14} className="text-comic-accent" />
-                                                <span className="truncate">{s.archivo_nombre}</span>
-                                            </div>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center py-12 gap-4 opacity-30 border-2 border-dashed border-white/5 rounded-xl h-full">
-                                        <Database size={32} />
-                                        <span className="text-xs font-mono uppercase tracking-widest text-center px-4 leading-relaxed">
-                                            No hay archivos en el historial de semanas anteriores
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="mt-6 pt-6 border-t border-white/5">
-                                <p className="text-[11px] italic opacity-40 leading-relaxed text-center px-4">
-                                    Estos archivos fueron subidos en la sección "Semanas" y están disponibles para análisis rápido.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </>
-            ) : (
-                /* ── RESULTS VIEW ── */
+            ) : Object.keys(sheetsData).length > 0 ? (
+                /* ── RESULTS VIEW (Prioritaria si hay datos) ── */
                 <div className="animate-in slide-in-from-bottom-4 duration-500">
                     {/* ── SUMMARY BAR (Global) ── */}
                     {/* ── SUMMARY BAR (Global Redesigned) ── */}
@@ -1382,6 +1361,39 @@ const ComicAnalysisTool = () => {
                         </button>
                     </div>
                 </div>
+            ) : (
+                /* ── ESTADO DE ESPERA SIMPLIFICADO (FALLBACK) ── */
+                <div className="space-y-8 animate-in fade-in duration-500">
+                    <div className="comic-empty-state card py-20 text-center border-dashed border-2 border-comic-border bg-white/50 rounded-2xl shadow-xl">
+                        <div className="mb-6 relative inline-block">
+                            <Clock size={80} className="text-comic-primary opacity-20" />
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <FileUp size={32} className="text-comic-primary opacity-40" />
+                            </div>
+                        </div>
+                        <h3 className="text-2xl font-display text-comic-primary mb-3 uppercase tracking-tight">Reporte No Detectado</h3>
+                        <p className="text-sm text-comic-muted max-w-md mx-auto font-medium">
+                            Sube un archivo Excel en la pestaña de <span className="text-comic-accent font-bold">Semanas</span>. El reporte aparecerá aquí automáticamente.
+                        </p>
+                        <div className="mt-10 flex justify-center gap-4">
+                            <button
+                                className="comic-btn-primary flex items-center gap-2"
+                                onClick={async () => {
+                                    const result = await fetchCatalog();
+                                    checkForAutoReport(result.indexed);
+                                }}
+                            >
+                                <RefreshCw size={18} /> BUSCAR REPORTE AHORA
+                            </button>
+                            <button
+                                className="comic-btn-secondary flex items-center gap-2"
+                                onClick={() => { setViewMode('catalog'); fetchCatalog(); }}
+                            >
+                                <Database size={18} /> VER CATÁLOGO MAESTRO
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* ── MODAL DE FICHA / EDICIÓN ── */}
@@ -1433,9 +1445,15 @@ const ComicAnalysisTool = () => {
                                     onChange={e => setSelectedItem({ ...selectedItem, categoria: e.target.value })}
                                 />
                             </div>
-                            <div className="mt-4 p-3 bg-comic-primary/5 rounded-lg border border-comic-primary/10">
-                                <p className="text-[10px] uppercase font-bold text-comic-primary opacity-60 mb-1">Información de Editorial</p>
-                                <p className="text-xs font-bold">{selectedItem.editorial || 'No especificada'}</p>
+                            <div className="mt-4 p-3 bg-comic-primary/5 rounded-lg border border-comic-primary/10 grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-[10px] uppercase font-bold text-comic-primary opacity-60 mb-1">Editorial</p>
+                                    <p className="text-xs font-bold">{selectedItem.editorial || 'No especificada'}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[10px] uppercase font-bold text-comic-primary opacity-60 mb-1">Precio N2 (-10%)</p>
+                                    <p className="text-xs font-bold text-comic-accent">BS {selectedItem.precio_n2_bs?.toLocaleString() || '-'}</p>
+                                </div>
                             </div>
                         </div>
                         <div className="comic-modal-footer">

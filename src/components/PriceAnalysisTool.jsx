@@ -247,16 +247,25 @@ export default function PriceAnalysisTool() {
         const result = SHEET_PROCESSORS[sheetName](rows);
 
         if (result?.items?.length) {
-          // Extraer precios únicos distintos de cero, ordenados
-          const preciosUnicos = [...new Set(
-            result.items
-              .map(it => it.precio_tapa)
-              .filter(p => p != null && !isNaN(p) && p > 0)
-          )].sort((a, b) => a - b);
-
-          if (preciosUnicos.length) {
-            edData[sheetName] = preciosUnicos;
-          }
+          // Extraer precios únicos y marcar si tienen alguna reimpresión
+          const priceMap = {}; // ars -> { isReprint: bool }
+          result.items.forEach(item => {
+            const p = parseFloat(item.precio_tapa);
+            if (!p) return;
+            const cat = (item.categoria_principal || item.categoria || '').toLowerCase();
+            const tit = (item.titulo || '').toLowerCase();
+            // Búsqueda más agresiva para reimpresiones
+            const reprintTerm = /reimp|reimpresi[óo]n/i;
+            const isReprint = reprintTerm.test(cat) || reprintTerm.test(tit);
+            
+            if (!priceMap[p]) {
+              priceMap[p] = { ars: p, isReprint };
+            } else if (isReprint) {
+              priceMap[p].isReprint = true;
+            }
+          });
+          
+          edData[sheetName] = Object.values(priceMap).sort((a, b) => a.ars - b.ars);
         }
       }
 
@@ -303,11 +312,12 @@ export default function PriceAnalysisTool() {
     });
   };
 
-  const handleSave = async () => {
+  const handleSaveAndApply = async () => {
     if (!curEd) return;
     setSaving(true);
     try {
-      // 1. Guardar settings de la editorial actual (delete + insert = upsert manual)
+      // 1. GUARDAR CONFIGURACIÓN (Settings y Ajustes Manuales)
+      // 1.1 Guardar settings de la editorial actual
       await supabase.from('price_analysis_settings').delete().eq('editorial', curEd);
       const { error: err1 } = await supabase.from('price_analysis_settings').insert({
         editorial: curEd,
@@ -318,7 +328,7 @@ export default function PriceAnalysisTool() {
       });
       if (err1) throw err1;
 
-      // 2. Guardar settings globales (flete y TC)
+      // 1.2 Guardar settings globales (flete y TC)
       await supabase.from('price_analysis_settings').delete().eq('editorial', 'GLOBAL_SETTINGS');
       const { error: err2 } = await supabase.from('price_analysis_settings').insert({
         editorial: 'GLOBAL_SETTINGS',
@@ -330,7 +340,7 @@ export default function PriceAnalysisTool() {
       });
       if (err2) throw err2;
 
-      // 3. Guardar ajustes manuales (borrar los de esta editorial y reinsertar)
+      // 1.3 Guardar ajustes manuales
       await supabase.from('price_analysis_adjustments').delete().eq('editorial', curEd);
       const adjustments = Object.entries(PVC[curEd] || {}).map(([ars, pv]) => ({
         editorial: curEd,
@@ -342,22 +352,74 @@ export default function PriceAnalysisTool() {
         if (err3) throw err3;
       }
 
-      // 4. Snapshot opcional
-      if (semanaInfo) {
-        await supabase.from('price_analysis_results').delete()
-          .eq('semana_id', semanaInfo.id).eq('editorial', curEd);
-        await supabase.from('price_analysis_results').insert({
-          semana_id: semanaInfo.id,
-          editorial: curEd,
-          datos_json: rows,
-          created_at: new Date()
-        });
+      // 2. SINCRONIZAR CON EL CATÁLOGO MAESTRO (Aplicar cambios a productos)
+      if (rows.length > 0) {
+        let catalogItems = [];
+        let from = 0;
+        let to = 999;
+        let hasMore = true;
+
+        while (hasMore) {
+          const { data, error: fetchErr } = await supabase
+            .from('catalogo_productos')
+            .select('id, product_id, titulo, precio_tapa, editorial')
+            .eq('editorial', curEd)
+            .range(from, to);
+
+          if (fetchErr) throw fetchErr;
+          
+          if (data && data.length > 0) {
+            catalogItems = [...catalogItems, ...data];
+            if (data.length < 1000) hasMore = false;
+            else { from += 1000; to += 1000; }
+          } else {
+            hasMore = false;
+          }
+        }
+
+        if (catalogItems.length > 0) {
+          const resultsMap = {};
+          rows.forEach(r => {
+            const arsKey = Math.round(Number(r.ars));
+            resultsMap[arsKey] = { pv: r.pvFinal, n3: r.dtos[2], pm: r.pMayor };
+          });
+
+          const payload = [];
+          catalogItems.forEach(item => {
+            const itemArs = Math.round(Number(item.precio_tapa));
+            const calc = resultsMap[itemArs];
+            if (calc) {
+              payload.push({
+                id: item.id,
+                product_id: item.product_id,
+                titulo: item.titulo,
+                editorial: item.editorial,
+                precio_tapa: item.precio_tapa,
+                precio_venta_bs: Number(calc.pv.toFixed(2)),
+                precio_n3_bs: Number(calc.n3.toFixed(2)),
+                precio_mayoreo_bs: Number(calc.pm.toFixed(2)),
+                updated_at: new Date()
+              });
+            }
+          });
+
+          if (payload.length > 0) {
+            const chunkSize = 500;
+            for (let i = 0; i < payload.length; i += chunkSize) {
+              const chunk = payload.slice(i, i + chunkSize);
+              const { error: syncErr } = await supabase
+                .from('catalogo_productos')
+                .upsert(chunk, { onConflict: 'id' });
+              if (syncErr) throw syncErr;
+            }
+          }
+        }
       }
 
-      showToast('¡Cambios guardados y sincronizados correctamente!');
+      showToast(`¡Cambios aplicados! Configuración guardada y productos actualizados.`);
     } catch (err) {
-      console.error('Error al guardar:', err);
-      showToast('Error al sincronizar: ' + err.message, 'error');
+      console.error('Error al guardar y aplicar:', err);
+      showToast('Error al guardar y aplicar: ' + err.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -366,7 +428,12 @@ export default function PriceAnalysisTool() {
   // ── Cálculos por fila ────────────────────────────────────────────────────
   const rows = useMemo(() => {
     if (!curEd || !editoriales[curEd]) return [];
-    return editoriales[curEd].map(ars => {
+    
+    // Base ARS de la editorial
+    const baseArs = editoriales[curEd];
+
+    return baseArs.map(item => {
+      const ars = item.ars;
       const desc  = descActual;
       const marg  = margActual;
       const mmayo = margenMayoreoActual;
@@ -380,19 +447,25 @@ export default function PriceAnalysisTool() {
       const pvManual = PVC[curEd]?.[ars] || 0;
       const pvFinal  = pvManual || G_PV;
 
+      const precioN2 = pvFinal * 0.90;
+      const costoReal = ars * (1 - desc) * params.tca + params.flet;
+      const gN2 = (precioN2 - costoReal) / costoReal;
+
       // Descuentos sobre PV
-      const dtos = params.dtoNiveles.map(pct => pvFinal * (1 - pct / 100));
+      const dtos = params.dtoNiveles.map(lvl => pvFinal * (1 - lvl / 100));
 
       // Rentabilidad
-      const costoReal = ars * (1 - desc) * params.tca + params.flet;
       const gPV       = costoReal > 0 ? (pvFinal - costoReal) / costoReal : 0;
       const pMayor    = costoReal * (1 + mmayo);
       const gMayor    = costoReal > 0 ? (pMayor - costoReal) / costoReal : 0;
 
       // G% para cada nivel de descuento  =  (PV_Nivel - Costo) / Costo
-      const gDtos = dtos.map(dvp => costoReal > 0 ? (dvp - costoReal) / costoReal : 0);
+      const gDtos = dtos.map(dVal => (dVal - costoReal) / costoReal);
 
-      return { ars, D, E, F, G_PV, pvManual, pvFinal, dtos, gDtos, costoReal, gPV, pMayor, gMayor };
+      return {
+        ars, D, E, F, G_PV, pvManual, pvFinal, dtos, gDtos,
+        costoReal, gPV, pMayor, gMayor, precioN2, gN2
+      };
     });
   }, [curEd, editoriales, params, descActual, margActual, margenMayoreoActual, PVC]);
 
@@ -566,21 +639,43 @@ export default function PriceAnalysisTool() {
 
         {/* ════  TABLA PRINCIPAL  ════ */}
         <section>
-          {/* Botón Guardar — parte superior */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--mcb-muted)' }}>
-              {rows.length} precios · <strong>{curEd}</strong> · Dto. {((descActual || 0) * 100).toFixed(0)}%
-              &nbsp;·&nbsp; Marg. {(margActual * 100).toFixed(0)}% · Mayor. {(margenMayoreoActual * 100).toFixed(0)}%
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: '1.25rem',
+            background: 'white',
+            padding: '1rem',
+            borderRadius: '12px',
+            border: '1px solid var(--mcb-border)',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+          }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', alignItems: 'center' }}>
+              <div style={{ fontSize: '0.9rem', color: 'var(--mcb-primary)', fontWeight: 700 }}>
+                {rows.length} precios · <span style={{ color: 'var(--mcb-accent)' }}>{curEd}</span>
+              </div>
             </div>
-            <button 
-              className="btn-mcb-primary" 
-              style={{ fontSize: '0.8rem', padding: '0.4rem 1.1rem', opacity: saving ? 0.7 : 1 }}
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? <RefreshCw size={14} className="spin" style={{ marginRight: 6, display: 'inline' }} /> : '💾 '}
-              {saving ? 'Guardando...' : 'Guardar Cambios'}
-            </button>
+
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button 
+                className="btn-mcb-primary" 
+                style={{ 
+                  fontSize: '0.82rem', 
+                  padding: '0.6rem 1.4rem', 
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  boxShadow: '0 10px 15px -3px rgba(240, 125, 42, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.6rem'
+                }}
+                onClick={handleSaveAndApply}
+                disabled={saving}
+              >
+                {saving ? <RefreshCw size={14} className="spin" /> : '🚀'}
+                {saving ? 'Aplicando...' : 'Guardar y Aplicar al Catálogo'}
+              </button>
+            </div>
           </div>
 
           {rows.length === 0 ? (
@@ -604,10 +699,11 @@ export default function PriceAnalysisTool() {
                     <th className="bg-auto">E RDND</th>
                     <th className="bg-auto">F ×0.65</th>
                     <th className="bg-auto">G PV</th>
-                    {params.dtoNiveles.map((dto, i) => (
-                      <th key={i} className="bg-dtos">N{i + 1} (-{dto}%)</th>
+                    {params.dtoNiveles.map((_, i) => (
+                      <th key={`n${i}`} className="bg-dto" style={{ minWidth: 60 }}>N{i + 1} BS</th>
                     ))}
-                    {params.dtoNiveles.map((dto, i) => (
+                    <th className="bg-gain">G% N2</th>
+                    {params.dtoNiveles.map((_, i) => (
                       <th key={`g${i}`} className="bg-gain">G% N{i + 1}</th>
                     ))}
                     <th className="bg-cost">COSTO REAL BS</th>
@@ -656,6 +752,11 @@ export default function PriceAnalysisTool() {
                       {row.dtos.map((val, i) => (
                         <td key={i} className="td-dto">{val.toFixed(2)}</td>
                       ))}
+                      <td>
+                        <span className={`mcb-badge ${getBadgeClass(row.gN2)}`}>
+                          {(row.gN2 * 100).toFixed(1)}%
+                        </span>
+                      </td>
                       {row.gDtos.map((g, i) => (
                         <td key={`g${i}`}>
                           <span className={`mcb-badge ${getBadgeClass(g)}`}>
@@ -726,6 +827,8 @@ export default function PriceAnalysisTool() {
                       { col: 'E RDND',     formula: 'Math.round(D / 5) × 5' },
                       { col: 'F ×0.65',   formula: 'E × 0.65' },
                       { col: 'G PV',       formula: 'Math.round(F / 5) × 5  ← precio sugerido' },
+                      { col: 'N2 (-10%)',   formula: 'PV_Final × 0.90' },
+                      { col: 'N3 (-15%)',   formula: 'PV_Final × 0.85' },
                       { col: 'Descuentos', formula: 'PV_Final × (1 − Nivel%)' },
                       { col: 'COSTO REAL', formula: 'ARS × (1−Desc) × TC_Actual + Flete' },
                       { col: 'G% PV',      formula: '(PV_Final − Costo) / Costo' },
@@ -753,14 +856,15 @@ export default function PriceAnalysisTool() {
                     </p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.5rem' }}>
                       {[
-                        { col: 'D BASE',     expr: `(${activeRow.ars} × (1−${(descActual*100).toFixed(0)}%) × ${params.tcf} + ${params.flet}) × (1+${(params.marg*100).toFixed(0)}%)`, val: activeRow.D.toFixed(4) },
+                        { col: 'D BASE',     expr: `(${activeRow.ars} × (1−${(descActual*100).toFixed(0)}%) × ${params.tcf} + ${params.flet}) × (1+${(margActual*100).toFixed(0)}%)`, val: activeRow.D.toFixed(4) },
                         { col: 'E RDND',     expr: `round(${activeRow.D.toFixed(2)} / 5) × 5`, val: activeRow.E },
                         { col: 'F ×0.65',   expr: `${activeRow.E} × 0.65`, val: activeRow.F.toFixed(4) },
                         { col: 'G PV',       expr: `round(${activeRow.F.toFixed(2)} / 5) × 5`, val: `BS ${activeRow.G_PV}` },
+                        { col: 'N2 (-10%)',   expr: `${activeRow.pvFinal} × 0.90`, val: `BS ${activeRow.precioN2.toFixed(2)}` },
                         { col: 'PV Final',   expr: activeRow.pvManual ? `Manual: BS ${activeRow.pvManual}` : `Auto (G PV): BS ${activeRow.G_PV}`, val: `BS ${activeRow.pvFinal}` },
                         { col: 'COSTO REAL', expr: `${activeRow.ars} × (1−${(descActual*100).toFixed(0)}%) × ${params.tca} + ${params.flet}`, val: `BS ${activeRow.costoReal.toFixed(4)}` },
                         { col: 'G% PV',      expr: `(${activeRow.pvFinal} − ${activeRow.costoReal.toFixed(2)}) / ${activeRow.costoReal.toFixed(2)}`, val: `${(activeRow.gPV*100).toFixed(2)}%` },
-                        { col: 'P. MAYOR',   expr: `${activeRow.costoReal.toFixed(2)} × (1 + ${(params.margenMayoreo*100).toFixed(0)}%)`, val: `BS ${activeRow.pMayor.toFixed(2)}` },
+                        { col: 'P. MAYOR',   expr: `${activeRow.costoReal.toFixed(2)} × (1 + ${(margenMayoreoActual*100).toFixed(0)}%)`, val: `BS ${activeRow.pMayor.toFixed(2)}` },
                         { col: 'G% MAYOR',   expr: `(${activeRow.pMayor.toFixed(2)} − ${activeRow.costoReal.toFixed(2)}) / ${activeRow.costoReal.toFixed(2)}`, val: `${(activeRow.gMayor*100).toFixed(2)}%` },
                       ].map(({ col, expr, val }) => (
                         <div key={col} style={{
@@ -786,17 +890,11 @@ export default function PriceAnalysisTool() {
             )}
           </div>
 
+          {/* Estadísticas finales */}
           <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--mcb-muted)', alignSelf: 'center' }}>
               {rows.length} precios · {curEd} · Dto. {((descActual || 0) * 100).toFixed(0)}%
             </span>
-            <button 
-              className="btn-mcb-primary"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? 'Guardando...' : 'Guardar Cambios'}
-            </button>
           </div>
         </section>
       </div>

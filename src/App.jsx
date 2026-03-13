@@ -13,6 +13,7 @@ import PriceAnalysisTool from './components/PriceAnalysisTool';
 import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2, Zap } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
+import CatalogUpdatedView from './components/CatalogUpdatedView';
 
 function Main() {
     const { user, profile, loading, isAdmin, isSocio } = useAuth();
@@ -150,6 +151,13 @@ function Main() {
                                 <Database size={20} />
                                 {sidebarOpen && <span>Análisis de Precios</span>}
                             </button>
+                            <button
+                                onClick={() => setActiveTab('catalogo-actualizado')}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'catalogo-actualizado' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
+                            >
+                                <CheckCircle2 size={20} />
+                                {sidebarOpen && <span>Catálogo Actualizado</span>}
+                            </button>
                         </>
                     ) : (
                         <>
@@ -220,7 +228,8 @@ function Main() {
                                             activeTab === 'mis-pedidos' ? 'Mis Pedidos como Vendedor' :
                                                 activeTab === 'usuarios' ? 'Gestión de Vendedores' :
                                                     activeTab === 'precios' ? 'Análisis de Precios' :
-                                                        'Herramienta Editorial (Mangas Comics Bolivia)')
+                                                        activeTab === 'catalogo-actualizado' ? 'Catálogo Maestro Actualizado' :
+                                                            'Herramienta Editorial (Mangas Comics Bolivia)')
                             : 'Mis Pedidos Semanales'
                         }
                     </h2>
@@ -236,7 +245,8 @@ function Main() {
                                         activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
                                             activeTab === 'usuarios' ? <AdminUserManagement /> :
                                                 activeTab === 'precios' ? <PriceAnalysisTool /> :
-                                                    <ComicAnalysisTool />
+                                                    activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
+                                                        <ComicAnalysisTool />
                     ) : (
                         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
                             <SellerDashboard isAdmin={isAdmin} />
