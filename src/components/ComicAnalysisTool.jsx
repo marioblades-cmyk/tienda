@@ -781,7 +781,6 @@ const ComicAnalysisTool = () => {
                                                 <th>TÍTULO / MANGA</th>
                                                 <th>EAN FINAL</th>
                                                 <th style={{ textAlign: 'right' }}>MASTER</th>
-                                                <th style={{ textAlign: 'right' }}>N2 (-10%)</th>
                                                 <th style={{ textAlign: 'right' }}>ACCIONES</th>
                                             </tr>
                                         </thead>
@@ -793,9 +792,6 @@ const ComicAnalysisTool = () => {
                                                     <td className="font-mono">{item.ean_oficial || item.ean_interno}</td>
                                                     <td className="font-mono" style={{ textAlign: 'right', fontWeight: '800', color: 'var(--comic-accent)' }}>
                                                         ${item.precio_tapa?.toLocaleString()}
-                                                    </td>
-                                                    <td className="font-mono" style={{ textAlign: 'right', fontWeight: '700', color: 'var(--comic-primary)' }}>
-                                                        ${item.precio_n2_bs ? item.precio_n2_bs.toLocaleString() : '-'}
                                                     </td>
                                                     <td style={{ textAlign: 'right' }}>
                                                         <button
