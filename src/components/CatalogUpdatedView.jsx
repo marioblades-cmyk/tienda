@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
 import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
+import { useAuth } from '../hooks/useAuth';
 
 const CatalogUpdatedView = () => {
+    const { isAdmin } = useAuth();
     // ESTADOS
     const [catalogData, setCatalogData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -149,30 +150,32 @@ const CatalogUpdatedView = () => {
                             Refrescar
                         </button>
 
-                        <button 
-                            onClick={() => loadCatalog(true)}
-                            disabled={isLoading}
-                            title="Forzar descarga completa desde el servidor"
-                            style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '0.5rem', 
-                                padding: '0.625rem 1rem', 
-                                borderRadius: '12px', 
-                                border: '1px solid #fee2e2', 
-                                background: '#fef2f2', 
-                                cursor: 'pointer', 
-                                fontWeight: 700, 
-                                fontSize: '0.875rem',
-                                transition: 'all 0.2s ease',
-                                color: '#ef4444'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = '#fee2e2'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = '#fef2f2'}
-                        >
-                            <RotateCcw size={16} className={isLoading ? 'animate-spin' : ''} />
-                            Forzar Recarga
-                        </button>
+                        {isAdmin && (
+                            <button 
+                                onClick={() => loadCatalog(true)}
+                                disabled={isLoading}
+                                title="Forzar descarga completa desde el servidor"
+                                style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.5rem', 
+                                    padding: '0.625rem 1rem', 
+                                    borderRadius: '12px', 
+                                    border: '1px solid #fee2e2', 
+                                    background: '#fef2f2', 
+                                    cursor: 'pointer', 
+                                    fontWeight: 700, 
+                                    fontSize: '0.875rem',
+                                    transition: 'all 0.2s ease',
+                                    color: '#ef4444'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#fee2e2'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#fef2f2'}
+                            >
+                                <RotateCcw size={16} className={isLoading ? 'animate-spin' : ''} />
+                                Forzar Recarga
+                            </button>
+                        )}
                     </div>
                 </div>
 

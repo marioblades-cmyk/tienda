@@ -177,6 +177,13 @@ function Main() {
                                     {sidebarOpen && <span>Gestión Integral</span>}
                                 </button>
                             )}
+                            <button
+                                onClick={() => setActiveTab('catalogo-actualizado')}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'catalogo-actualizado' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
+                            >
+                                <CheckCircle2 size={20} />
+                                {sidebarOpen && <span>Catálogo Actualizado</span>}
+                            </button>
                         </>
                     )}
                 </nav>
@@ -249,7 +256,8 @@ function Main() {
                                                         <ComicAnalysisTool />
                     ) : (
                         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
-                            <SellerDashboard isAdmin={isAdmin} />
+                            activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
+                                <SellerDashboard isAdmin={isAdmin} />
                     )}
                 </main>
 
