@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { Plus, FileUp, Lock, Unlock, Download, Trash2, XCircle, Calendar, RefreshCw } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
+import { useAuth } from '../hooks/useAuth';
 
 export default function AdminWeeklyView() {
+    const { user } = useAuth();
     const [semanas, setSemanas] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
@@ -143,7 +145,7 @@ export default function AdminWeeklyView() {
 
                     // 4. SINCRONIZACIÓN INTELIGENTE (FASE 3)
                     console.log('🚀 Iniciando sincronización automática con el Maestro...');
-                    const syncResult = await catalogService.syncWithMaster(analysis, user.id);
+                    const syncResult = await catalogService.syncWithMaster(analysis, user.id, file.name);
                     if (syncResult && syncResult.count > 0) {
                         alert(`📖 CATÁLOGO ACTUALIZADO\nSe sincronizaron ${syncResult.count} productos con sus nuevos precios sugeridos.`);
                     }

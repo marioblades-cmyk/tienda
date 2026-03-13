@@ -205,6 +205,7 @@ export const catalogService = {
                     }
 
                     console.log('🏁 Resultado final del análisis:', Object.keys(analysisResult));
+                    analysisResult._filename = file.name; // GUARDAR REFERENCIA
                     resolve(analysisResult);
                 } catch (err) {
                     console.error('❌ ERROR CRÍTICO EN PROCESAMIENTO:', err);
@@ -254,7 +255,8 @@ export const catalogService = {
         // Añadimos metadata al reporte para asegurar que sabemos cuándo se generó
         const reportWithMeta = {
             ...analysis,
-            _mcb_generated_at: Date.now()
+            _mcb_generated_at: Date.now(),
+            _filename: analysis._filename // Persistir nombre original
         };
 
         const blob = new Blob([JSON.stringify(reportWithMeta)], { type: 'application/json' });
@@ -425,8 +427,11 @@ export const catalogService = {
     /**
      * Realiza la sincronización inteligente del análisis con el Catálogo Maestro
      */
-    async syncWithMaster(analysis, userId) {
+    async syncWithMaster(analysis, userId, filename = null) {
         console.log('🔄 Iniciando Sincronización Inteligente...');
+        
+        // Determinar filename: prioridad al parámetro, luego a la metadata del análisis, luego fallback
+        const finalFilename = filename || analysis?._filename || 'AUTO_SYNC';
         
         // 1. Obtener configuraciones de precios
         const settings = await this.fetchPricingSettings();
@@ -495,7 +500,7 @@ export const catalogService = {
                 total_procesados: totalStats.procesados,
                 nuevos_detectados: totalStats.nuevos,
                 precios_actualizados: totalStats.precios,
-                filename: 'AUTO_SYNC'
+                filename: finalFilename
             }]);
         } catch (logErr) {
             console.warn('⚠️ No se pudo registrar el log de sincronización:', logErr);
