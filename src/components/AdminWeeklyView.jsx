@@ -146,7 +146,7 @@ export default function AdminWeeklyView() {
 
                     // 4. SINCRONIZACIÓN INTELIGENTE (FASE 3)
                     console.log('🚀 Iniciando sincronización automática con el Maestro...');
-                    const syncResult = await catalogService.syncWithMaster(analysis, user.id, file.name);
+                    const syncResult = await catalogService.syncWithMaster(analysis, user.id, file.name, id);
                     if (syncResult && syncResult.count > 0) {
                         alert(`📖 CATÁLOGO ACTUALIZADO\nSe sincronizaron ${syncResult.count} productos con sus nuevos precios sugeridos.`);
                     }

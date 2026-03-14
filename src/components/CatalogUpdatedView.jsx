@@ -35,6 +35,22 @@ const CatalogUpdatedView = () => {
         }
     };
 
+    const handleClearReprints = async () => {
+        if (!window.confirm('¿Estás seguro de que deseas limpiar TODAS las etiquetas de reimpresión del catálogo maestro? Esta acción no se puede deshacer.')) return;
+        
+        setIsLoading(true);
+        try {
+            await catalogService.clearAllReprintLabels();
+            alert('✅ Etiquetas de reimpresión limpiadas correctamente.');
+            await loadCatalog(true); // Forzar recarga tras limpiar
+        } catch (err) {
+            console.error('Error al limpiar etiquetas:', err);
+            alert('❌ No se pudieron limpiar las etiquetas. Verifica tu conexión o permisos.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     // CATEGORÍAS SEGÚN EDITORIAL
     const dynamicCategories = useMemo(() => {
         const edMatch = editorialFilter.trim().toUpperCase();
@@ -175,6 +191,33 @@ const CatalogUpdatedView = () => {
                             >
                                 <RotateCcw size={16} className={isLoading ? 'animate-spin' : ''} />
                                 Forzar Recarga
+                            </button>
+                        )}
+
+                        {isAdmin && (
+                            <button 
+                                onClick={handleClearReprints}
+                                disabled={isLoading}
+                                title="Borrar todas las marcas de reimpresión del catálogo"
+                                style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.5rem', 
+                                    padding: '0.625rem 1rem', 
+                                    borderRadius: '12px', 
+                                    border: '1px solid #ddd', 
+                                    background: '#f8fafc', 
+                                    cursor: 'pointer', 
+                                    fontWeight: 700, 
+                                    fontSize: '0.875rem',
+                                    transition: 'all 0.2s ease',
+                                    color: '#64748b'
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#1e293b'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+                            >
+                                <RotateCcw size={16} />
+                                Limpiar Filtro Semanal
                             </button>
                         )}
                     </div>

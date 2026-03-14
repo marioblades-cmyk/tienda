@@ -223,8 +223,42 @@ export default function AdminMasterView() {
                 .upsert({ id: 'distribuidor', data: distData });
 
             if (stateUpdateError) console.error("Error agregando deuda al Distribuidor:", stateUpdateError);
+            
+            // 3. SECRETO: Inject a placeholder row into 'remitos' if it doesn't exist for this pedido
+            const { data: remDataRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
+            let remRows = Array.isArray(remDataRes?.data) ? remDataRes.data : (remDataRes?.data?.rows || []);
+            
+            // Check if this pedido already has a row (by name)
+            const existsInRemitos = remRows.some(r => r.pedido === pedidoName || r.pedido === previewData.titulo);
+            
+            if (!existsInRemitos) {
+                const newId = remRows.length > 0 ? Math.max(...remRows.map(r => r.id || 0)) + 1 : 1;
+                const newRow = {
+                    id: newId,
+                    nro: `${newId}`,
+                    fecha: new Date().toISOString().split('T')[0],
+                    cajas: '0',
+                    kg: '0',
+                    precio_remito: '0',
+                    compre: '0',
+                    cambio: '0',
+                    cg: '0',
+                    cm: '0',
+                    cp: '0',
+                    skg: '0',
+                    scaj: '0',
+                    smonto: '0',
+                    pedido: pedidoName,
+                    pago_aprox: previewData.totalArs,
+                    pagos_dist: '0',
+                    tc_dist: '0',
+                    selected: false
+                };
+                const updatedRemRows = [...remRows, newRow];
+                await supabase.from('app_state').upsert({ id: 'remitos', data: updatedRemRows });
+            }
 
-            setSuccess("Base Maestra guardada y deuda creada en Gestión Integral (Distribuidor).");
+            setSuccess("Base Maestra guardada, deuda creada y fila de remito inyectada en Gestión Integral.");
             setPreviewData(null);
             checkExistingMaster(selectedSemana);
 

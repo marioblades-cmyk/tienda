@@ -26,6 +26,7 @@ export const catalogService = {
             precio_n2_bs: 'pn2',
             precio_n3_bs: 'pn3',
             precio_mayoreo_bs: 'pmb',
+            es_reimpresion: 'er',
             updated_at: 'u'
         };
         const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
@@ -60,7 +61,7 @@ export const catalogService = {
 
         // 2. Si no hay caché o expiró, descargar de Supabase (SOLO COLUMNAS NECESARIAS)
         console.log('🚀 Descargando catálogo optimizado desde Supabase...');
-        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,updated_at';
+        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at';
         
         let allItems = [];
         let from = 0;
@@ -427,8 +428,43 @@ export const catalogService = {
     /**
      * Realiza la sincronización inteligente del análisis con el Catálogo Maestro
      */
-    async syncWithMaster(analysis, userId, filename = null) {
+    async syncWithMaster(analysis, userId, filename = null, semanaId = null) {
         console.log('🔄 Iniciando Sincronización Inteligente...');
+        
+        // --- LÓGICA DE LIMPIEZA SEMANAL ---
+        if (semanaId) {
+            try {
+                // 1. Obtener última semana sincronizada
+                const { data: lastSyncData } = await supabase
+                    .from('app_state')
+                    .select('data')
+                    .eq('id', 'last_catalog_sync_week')
+                    .maybeSingle();
+                
+                const lastWeekId = lastSyncData?.data?.semanaId;
+                
+                if (lastWeekId !== semanaId) {
+                    console.log(`📅 Cambio de semana detectado (${lastWeekId} -> ${semanaId}). Limpiando etiquetas antiguas...`);
+                    
+                    await this.clearAllReprintLabels();
+
+                    // Actualizar app_state
+                    const { error: upsertError } = await supabase
+                        .from('app_state')
+                        .upsert({ id: 'last_catalog_sync_week', data: { semanaId, updatedAt: new Date().toISOString() } });
+                    
+                    if (upsertError) console.error('❌ Error al actualizar app_state:', upsertError);
+                    
+                    console.log('✅ Etiquetas antiguas limpiadas.');
+                } else {
+                    console.log(`ℹ️ Misma semana (${semanaId}), no se requiere limpieza.`);
+                }
+            } catch (err) {
+                console.error('❌ ERROR CRÍTICO EN LIMPIEZA SEMANAL:', err);
+            }
+        } else {
+            console.warn('⚠️ No se proporcionó semanaId en syncWithMaster. No se limpiarán etiquetas.');
+        }
         
         // Determinar filename: prioridad al parámetro, luego a la metadata del análisis, luego fallback
         const finalFilename = filename || analysis?._filename || 'AUTO_SYNC';
@@ -469,7 +505,6 @@ export const catalogService = {
                         titulo: item.titulo,
                         ean_oficial: item.ean_oficial,
                         ean_interno: item.ean_interno,
-                        precio_tapa: item.precio_tapa || 0,
                         editorial: item.editorial || edName,
                         categoria: item.categoria_principal,
                         es_reimpresion: esReimpresion || false,
@@ -508,5 +543,24 @@ export const catalogService = {
 
         console.log('✅ Sincronización Inteligente finalizada con éxito.');
         return { success: true, count: itemsToSync.length };
+    },
+
+    /**
+     * Limpia todas las etiquetas de reimpresión de la base de datos y la caché
+     */
+    async clearAllReprintLabels() {
+        console.log('🧹 Limpiando todas las etiquetas de reimpresión...');
+        const { error } = await supabase
+            .from('catalogo_productos')
+            .update({ es_reimpresion: false })
+            .neq('es_reimpresion', false); // Selecciona todos los que NO son false (true o null)
+
+        if (error) {
+            console.error('❌ Error al limpiar etiquetas:', error);
+            throw error;
+        }
+
+        this.clearCache();
+        console.log('✅ Etiquetas y caché limpiadas.');
     }
 };

@@ -265,6 +265,9 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 setNplan(loadedNplan);
                 setCta(loadedCta);
                 setAlq(loadedAlq);
+
+                // TRICK: Sync on mount to ensure all pedidos have rows
+                await syncDistToRows(loadedDist, loadedRows);
             } catch (error) {
                 console.error('Error al inicializar la app desde Supabase:', error);
                 // Fallback a array vacío por si falla la conexión
@@ -439,17 +442,44 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     // ----------------------------------------------------
 
     // Función para inyectar los datos del Distribuidor en los Remitos (Adaptado a React State)
-    const syncDistToRows = async (latestDist = dist) => {
+    const syncDistToRows = async (latestDist = dist, currentRows = rows) => {
         try {
             // 1. Sincronizar los pedidos del distribuidor a las filas en orden de creación
-            let pedIdx = 0;
-            const updatedRows1 = rows.map(r => {
-                if (pedIdx < latestDist.pedidos.length) {
-                    let ped = latestDist.pedidos[pedIdx];
-                    pedIdx++;
-                    return { ...r, pedido: ped.nombre || '', pago_aprox: ped.monto ? String(ped.monto) : '' };
+            let updatedRows1 = [...currentRows];
+            
+            latestDist.pedidos.forEach((ped, idx) => {
+                if (idx < updatedRows1.length) {
+                    // Update existing row
+                    updatedRows1[idx] = { 
+                        ...updatedRows1[idx], 
+                        pedido: ped.nombre || '', 
+                        pago_aprox: ped.monto ? String(ped.monto) : '' 
+                    };
+                } else {
+                    // CREATE new row if we have more pedidos than rows
+                    const newId = updatedRows1.length > 0 ? Math.max(...updatedRows1.map(r => r.id || 0)) + 1 : 1;
+                    updatedRows1.push({
+                        id: newId,
+                        nro: `${newId}`,
+                        fecha: new Date().toISOString().split('T')[0],
+                        cajas: '0',
+                        kg: '0',
+                        precio_remito: '0',
+                        compre: '0',
+                        cambio: '0',
+                        cg: '0',
+                        cm: '0',
+                        cp: '0',
+                        skg: '0',
+                        scaj: '0',
+                        smonto: '0',
+                        pedido: ped.nombre || '',
+                        pago_aprox: ped.monto ? String(ped.monto) : '',
+                        pagos_dist: '0',
+                        tc_dist: '0',
+                        selected: false
+                    });
                 }
-                return r;
             });
 
             // 2. Recalcular el FIFO con las filas asignadas
@@ -464,7 +494,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 return r;
             });
 
-            // 4. Actualizar estado (React recalculará automáticamente la DOM y la Summary Bar en el siguiente render)
+            // 4. Actualizar estado
             setRows(finalRows);
             await saveRemitos(finalRows);
         } catch (e) {
