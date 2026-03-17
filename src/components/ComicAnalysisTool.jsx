@@ -21,12 +21,13 @@ const ComparisonBadge = ({ status }) => {
 
 const ComicAnalysisTool = () => {
     const { user, profile, isAdmin } = useAuth();
-    const [viewMode, setViewMode] = useState('upload'); // 'upload', 'results', 'catalog'
+    const [viewMode, setViewMode] = useState('upload'); 
     const [sheetsData, setSheetsData] = useState({});
     const [dbCatalog, setDbCatalog] = useState({}); // Indexed by product_id
     const [dbEanIndex, setDbEanIndex] = useState({}); // Indexed by EAN for fast lookup
     const [activeTab, setActiveTab] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [processingMessage, setProcessingMessage] = useState('CARGANDO...');
     const [isSyncing, setIsSyncing] = useState(false);
     const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -173,22 +174,26 @@ const ComicAnalysisTool = () => {
 
     const checkForAutoReport = async (currentCatalog) => {
         try {
-            console.log('🔍 Buscando reporte automático...');
+            console.log('🔍 Buscando actualizaciones de reporte...');
             let semanaId = null;
             let source = null;
 
-            // 1. Intentar desde localStorage (Reporte completo persistido)
+            // 1. Intentar desde localStorage (Prioridad: Datos locales frescos)
             const storedFull = localStorage.getItem('mcb_stored_report');
+            const hasDataNow = Object.keys(sheetsData).length > 0 || (storedFull !== null);
+
             if (storedFull) {
                 try {
                     const parsed = JSON.parse(storedFull);
-                    // Si el reporte tiene menos de 24h, cargarlo directamente
                     if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 24) {
-                        console.log('🚀 Reporte persistido hallado. Esperando elección del usuario...');
+                        console.log('🚀 Reporte persistido fresco hallado.');
                         setSheetsData(parsed.data);
                         if (parsed.filename) setLastFileName(parsed.filename);
-                        // QUITAMOS: setViewMode('results') -> Para que el usuario elija
-                        calculateMissingItems(parsed.data, currentCatalog);
+                        setViewMode('results');
+                        const tabs = Object.keys(parsed.data).filter(k => !k.startsWith('_'));
+                        if (tabs.length > 0) setActiveTab(tabs[0]);
+                        // Cargamos lo que tenemos, la comparación se hará cuando el catálogo esté listo
+                        if (currentCatalog) calculateMissingItems(parsed.data, currentCatalog);
                         return; 
                     }
                 } catch (e) {
@@ -228,19 +233,31 @@ const ComicAnalysisTool = () => {
 
                 // Descargar siempre si es cloud o si no tenemos data local
                 if (source === 'cloud' || !storedFull) {
-                    console.log('☁️ Iniciando descarga del reporte desde la nube para ID: ' + semanaId);
-                    setIsProcessing(true);
+                    console.log('☁️ Descarga de reporte desde nube...');
+                    
+                    // Solo bloqueamos si no hay data visible
+                    const shouldBlock = !hasDataNow;
+                    if (shouldBlock) setIsProcessing(true);
+                    
                     try {
                         reportData = await catalogService.downloadAnalysisReport(semanaId);
                         if (reportData) {
-                            console.log('✅ Descarga exitosa. ' + Object.keys(reportData).length + ' pestañas recuperadas.');
-                        } else {
-                            console.log('⚠️ El archivo existe en la nube pero es nulo o no se pudo leer.');
+                            console.log('✅ Reporte descargado. Sincronizando cache local...');
+                            // Guardar en cache local para que la próxima entrada sea instantánea
+                            try {
+                                localStorage.setItem('mcb_stored_report', JSON.stringify({
+                                    data: reportData,
+                                    filename: reportData._filename || 'Reporte de la Nube',
+                                    timestamp: Date.now()
+                                }));
+                            } catch (e) {
+                                console.warn('No se pudo cachear en localStorage (posiblemente muy grande)');
+                            }
                         }
                     } catch (err) {
-                        console.error('❌ Error fatal en descarga: ' + err.message);
+                        console.error('❌ Error en descarga:', err);
                     } finally {
-                        setIsProcessing(false);
+                        if (shouldBlock) setIsProcessing(false);
                     }
                 } else if (storedFull) {
                     reportData = JSON.parse(storedFull).data;
@@ -253,7 +270,12 @@ const ComicAnalysisTool = () => {
                     const firstAvailable = tabs.length > 0 ? tabs[0] : null;
                     setActiveTab(firstAvailable || 'TODOS_RESUMEN');
                     setViewMode('results');
-                    calculateMissingItems(reportData, currentCatalog);
+                    setIsProcessing(false); 
+
+                    // Si ya tenemos el catálogo disponible, calcular ausentes
+                    if (currentCatalog) {
+                        calculateMissingItems(reportData, currentCatalog);
+                    }
                 } else {
                     console.log('⚠️ No hay reporte guardado en la nube para esta semana.');
                 }
@@ -270,27 +292,82 @@ const ComicAnalysisTool = () => {
         if (hasInitialized.current) return;
         hasInitialized.current = true;
 
-        const init = async () => {
+        // 1. CARGA RÁPIDA (Fast Track): Si hay algo en localStorage, lo mostramos YA sin esperar al catálogo
+        const storedFull = localStorage.getItem('mcb_stored_report');
+        if (storedFull) {
             try {
-                // Ejecutar en paralelo para mayor velocidad
-                const results = await Promise.all([
-                    fetchCatalog().catch(e => { console.error("Catalog fetch failed:", e); return null; }),
-                    fetchHistorial().catch(e => { console.error("Historial fetch failed:", e); return null; })
-                ]);
-                
-                const catalogResult = results[0];
-                
-                // Sincronizar lastFileName manualmente al cargar
-                const storedName = localStorage.getItem('mcb_last_filename');
-                if (storedName) {
-                    setLastFileName(storedName);
+                const parsed = JSON.parse(storedFull);
+                if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 24) {
+                    console.log('⚡ Carga ultra-rápida desde caché local');
+                    setSheetsData(parsed.data);
+                    if (parsed.filename) setLastFileName(parsed.filename);
+                    setViewMode('results');
+                    const tabs = Object.keys(parsed.data).filter(k => !k.startsWith('_'));
+                    if (tabs.length > 0) setActiveTab(tabs[0]);
                 }
-                
-                // Protección: checkForAutoReport ya maneja null, pero lo pasamos con seguridad
-                checkForAutoReport(catalogResult?.indexed || null);
+            } catch (e) {
+                console.warn('Error en carga rápida:', e);
+            }
+        }
+
+        const init = async () => {
+            // 1. CARGA RÁPIDA (Sin esperas)
+            const storedFull = localStorage.getItem('mcb_stored_report');
+            const hasLocalCache = storedFull !== null;
+            
+            // Si hay cache, lo intentamos montar de inmediato para que el usuario no vea "Procesando"
+            if (hasLocalCache) {
+                try {
+                    const parsed = JSON.parse(storedFull);
+                    if (Date.now() - parsed.timestamp < 1000 * 60 * 60 * 24) {
+                        setSheetsData(parsed.data);
+                        if (parsed.filename) setLastFileName(parsed.filename);
+                        setViewMode('results');
+                        const tabs = Object.keys(parsed.data).filter(k => !k.startsWith('_'));
+                        if (tabs.length > 0) setActiveTab(tabs[0]);
+                    }
+                } catch (e) {}
+            }
+
+            // 2. TAREAS PESADAS EN FONDO (Totalmente en paralelo)
+            try {
+                // 1. Iniciar fetch del catálogo (No bloquea el reporte)
+                const catalogPromise = fetchCatalog().catch(e => {
+                    console.error("Catalog fetch failed:", e);
+                    return null;
+                });
+
+                // 2. Iniciar búsqueda de reporte (No espera al catálogo)
+                // Usamos null como catálogo inicial; se re-calculará al terminar el catalogPromise
+                const autoReportPromise = checkForAutoReport(null);
+
+                // 3. Iniciar historial
+                const historyPromise = fetchHistorial().catch(e => null);
+
+                // Solo bloqueamos la UI si NO tenemos data local (Fast Track falló)
+                if (!hasLocalCache) {
+                    setIsProcessing(true);
+                    console.log('⏳ Esperando primer reporte (Sin cache local)...');
+                    await Promise.all([autoReportPromise, historyPromise]);
+                    setIsProcessing(false);
+                } else {
+                    console.log('🚀 Cache local activo. El resto cargará en background.');
+                    // Dejamos que corran en background y sincronicen cuando terminen
+                    catalogPromise.then(catData => {
+                        if (catData && catData.indexed) {
+                            console.log('⚡ Catálogo de fondo listo. Sincronizando comparaciones...');
+                            // Obtenemos los datos actuales (usando la referencia o el estado fresco)
+                            setSheetsData(currentData => {
+                                calculateMissingItems(currentData, catData.indexed);
+                                return currentData;
+                            });
+                        }
+                    });
+                    Promise.all([historyPromise, autoReportPromise]);
+                }
             } catch (err) {
                 console.error('Crash in tool init:', err);
-                setError('Error al inicializar la herramienta. Inténtalo de nuevo.');
+                setIsProcessing(false);
             }
         };
         init();
@@ -777,9 +854,11 @@ const ComicAnalysisTool = () => {
             </header>
 
             {isProcessing ? (
-                <div className="flex flex-col items-center justify-center py-20">
-                    <div className="w-12 h-12 border-4 border-comic-primary border-t-comic-accent rounded-full animate-spin"></div>
-                    <p className="mt-4 font-comic-body font-bold text-comic-primary">PROCESANDO EXCEL...</p>
+                <div className="flex flex-col items-center justify-center py-20 animate-pulse">
+                    <div className="w-16 h-16 border-4 border-[#f07d2a] border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(240,125,42,0.3)]"></div>
+                    <p className="mt-8 font-comic-display text-xl tracking-widest text-[#f5f1e4] uppercase opacity-80">
+                        {processingMessage}
+                    </p>
                 </div>
             ) : viewMode === 'catalog' ? (
                 /* ── CATALOG VIEWER ── */
@@ -983,20 +1062,56 @@ const ComicAnalysisTool = () => {
                         </div>
                     )}
 
-                    <div className="mb-4 flex items-center gap-3 bg-[#1a2d42] p-3 rounded-t-lg border-b border-white/10 shadow-lg">
-                        <Database size={20} className="text-[#f07d2a]" />
-                        <h2 className="text-xl font-bold tracking-widest text-[#f5f1e4] m-0 uppercase flex-1">
-                            {isViewingHistory ? `HISTORIAL: ${historyReportName}` : 'RESUMEN DE LIMPIEZA'}
-                        </h2>
-                        {!isViewingHistory && (
-                            <button 
-                                className="comic-btn-primary flex items-center gap-2 py-2 px-4 text-xs"
-                                onClick={handleManualSync}
-                                disabled={isSyncing}
-                            >
-                                <Zap size={14} className={isSyncing ? 'animate-spin' : ''} /> 
-                                {isSyncing ? 'SINCRONIZANDO...' : 'SINCRONIZAR AHORA'}
-                            </button>
+                    <div className="mb-4 flex flex-col gap-2 bg-[#1a2d42] p-3 rounded-xl border border-white/10 shadow-lg">
+                        <div className="flex items-center gap-3">
+                            <Database size={20} className="text-[#f07d2a]" />
+                            <h2 className="text-xl font-bold tracking-widest text-[#f5f1e4] m-0 uppercase flex-1">
+                                {isViewingHistory ? `HISTORIAL: ${historyReportName}` : 'RESUMEN DE LIMPIEZA'}
+                            </h2>
+                            <div className="flex gap-2">
+                                {!isViewingHistory && (
+                                    <button 
+                                        className="comic-btn-primary flex items-center gap-2 py-2 px-4 text-xs"
+                                        onClick={handleManualSync}
+                                        disabled={isSyncing}
+                                    >
+                                        <Zap size={14} className={isSyncing ? 'animate-spin' : ''} /> 
+                                        {isSyncing ? 'SINCRONIZANDO...' : 'SINCRONIZAR AHORA'}
+                                    </button>
+                                )}
+                                <button 
+                                    className="comic-btn-ghost flex items-center gap-2 py-2 px-4 text-xs"
+                                    onClick={() => setViewMode('catalog')}
+                                >
+                                    <Database size={14} /> CATÁLOGO
+                                </button>
+                                <button 
+                                    className="comic-btn-ghost border-white/20 text-white py-2 px-4 text-xs hover:bg-white/10"
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <FileUp size={14} /> SUBIR NUEVO
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {/* Selector de Historial Integrado */}
+                        {historialSemanas.length > 0 && (
+                            <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/5 overflow-x-auto no-scrollbar">
+                                <span className="text-[10px] font-bold text-[#f07d2a] flex-shrink-0">CAMBIAR REPORTE:</span>
+                                {historialSemanas.map(sem => (
+                                    <button 
+                                        key={sem.id}
+                                        onClick={() => handleSelectHistorial(sem)}
+                                        className={`text-[10px] px-3 py-1 rounded-full border transition-all flex-shrink-0 whitespace-nowrap ${
+                                            historyReportName === sem.nombre 
+                                            ? 'bg-[#f07d2a] border-[#f07d2a] text-white font-bold' 
+                                            : 'bg-white/5 border-white/10 text-white/60 hover:border-white/40'
+                                        }`}
+                                    >
+                                        {sem.nombre}
+                                    </button>
+                                ))}
+                            </div>
                         )}
                     </div>
                     <div className="comic-summary-section">
@@ -1563,7 +1678,6 @@ const ComicAnalysisTool = () => {
                             <>
                                 <h3 className="text-2xl font-display text-comic-primary mb-3 uppercase tracking-tight">Último Reporte Procesado</h3>
                                 <p className="text-sm text-comic-muted max-w-md mx-auto font-medium">
-                                    Puedes continuar trabajando con el archivo previo o iniciar uno desde el historial: <br/>
                                     <span className="text-comic-accent font-comic-mono font-bold text-base block mt-2 p-2 bg-comic-muted/20 rounded-lg">
                                         {lastFileName}
                                     </span>
@@ -1571,12 +1685,9 @@ const ComicAnalysisTool = () => {
                                 <div className="mt-10 flex flex-col sm:flex-row justify-center gap-4 px-6">
                                     <button
                                         className="comic-btn-primary flex items-center justify-center gap-2 py-4 px-8"
-                                        onClick={async () => {
-                                            const result = await fetchCatalog();
-                                            checkForAutoReport(result.indexed);
-                                        }}
+                                        onClick={() => { if (fileInputRef.current) fileInputRef.current.click(); }}
                                     >
-                                        <RefreshCw size={20} /> CONTINUAR CON ESTE ARCHIVO
+                                        <FileUp size={20} /> SUBIR NUEVO EXCEL
                                     </button>
                                     <button
                                         className="comic-btn-ghost flex items-center justify-center gap-2 border-2 border-comic-border"
@@ -1587,7 +1698,7 @@ const ComicAnalysisTool = () => {
                                             if (fileInputRef.current) fileInputRef.current.click();
                                         }}
                                     >
-                                        <FileUp size={20} /> PROCESAR NUEVO EXCEL
+                                        <Trash2 size={20} /> LIMPIAR TODO
                                     </button>
                                 </div>
                             </>

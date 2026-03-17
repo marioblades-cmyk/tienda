@@ -109,7 +109,7 @@ export default function PriceAnalysisTool() {
   }, []);
 
   // ── Valores activos para la editorial seleccionada ────────────────────────
-  const descActual          = useMemo(() => curEd ? (dtosPorEd[curEd] || 35) / 100 : 0, [curEd, dtosPorEd]);
+  const descActual          = useMemo(() => curEd ? (dtosPorEd[curEd] ?? 35) / 100 : 0, [curEd, dtosPorEd]);
   const margActual          = useMemo(() => curEd ? (margPorEd[curEd] ?? 0.40) : 0.40, [curEd, margPorEd]);
   const margenMayoreoActual = useMemo(() => curEd ? (margenMayoreoPorEd[curEd] ?? 0.30) : 0.30, [curEd, margenMayoreoPorEd]);
 
@@ -556,7 +556,7 @@ export default function PriceAnalysisTool() {
                 <span className="mcb-param-label">Dto. proveedor</span>
                 <div className="mcb-param-input-wrap">
                   <input type="number" className="mcb-param-input"
-                    value={dtosPorEd[curEd] || 35}
+                    value={dtosPorEd[curEd] ?? 35}
                     onChange={e => {
                       const v = parseFloat(e.target.value) || 0;
                       setDtosPorEd(prev => ({ ...prev, [curEd]: v }));

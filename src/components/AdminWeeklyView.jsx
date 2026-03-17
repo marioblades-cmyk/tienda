@@ -144,6 +144,17 @@ export default function AdminWeeklyView() {
                         console.error('❌ Error guardando puntero local (incluso tras limpieza):', storageErr);
                     }
 
+                    // 3b. Guardar también el reporte completo para carga instantánea en Herramienta Editorial
+                    try {
+                        localStorage.setItem('mcb_stored_report', JSON.stringify({
+                            data: analysis,
+                            filename: file.name,
+                            timestamp: Date.now()
+                        }));
+                    } catch (e) {
+                        console.warn('⚠️ No se pudo guardar reporte completo en localStorage (excede 5MB). Se usará descarga desde nube.');
+                    }
+
                     // 4. SINCRONIZACIÓN INTELIGENTE (FASE 3)
                     console.log('🚀 Iniciando sincronización automática con el Maestro...');
                     const syncResult = await catalogService.syncWithMaster(analysis, user.id, file.name, id);

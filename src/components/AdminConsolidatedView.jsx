@@ -112,7 +112,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
         // Initialize summary
         EDITORIALES.forEach(ed => {
-            editorialSummary[ed] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[ed] || 35, total: 0 };
+            editorialSummary[ed] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[ed] ?? 35, total: 0 };
         });
 
         items.forEach(item => {
@@ -126,7 +126,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             else vendorsSet.add(vName);
 
             // Aggregating for Summary Table
-            if (!editorialSummary[editorial]) editorialSummary[editorial] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: 35, total: 0 };
+            if (!editorialSummary[editorial]) editorialSummary[editorial] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[editorial] ?? 35, total: 0 };
 
             if (isTienda) {
                 editorialSummary[editorial].tiendaVendors[vName] = (editorialSummary[editorial].tiendaVendors[vName] || 0) + amount;
@@ -200,7 +200,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     };
 
                     // Asegurarnos que la editorial exista en summary
-                    if (!editorialSummary[defaultEd]) editorialSummary[defaultEd] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[defaultEd] || 35, total: 0 };
+                    if (!editorialSummary[defaultEd]) editorialSummary[defaultEd] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[defaultEd] ?? 35, total: 0 };
                 }
             });
         }
@@ -221,7 +221,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo !== 'tienda') {
                     const amount = (item.precio || 0) * (item.cantidad || 0);
                     const editorial = item.editorial || 'Otras';
-                    const dto = EDITORIAL_DTOS[editorial] || 35;
+                    const dto = EDITORIAL_DTOS[editorial] ?? 35;
                     vTotal += amount * (1 - (dto / 100));
                     vItems += item.cantidad || 0;
                 }
@@ -237,7 +237,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo === 'tienda') {
                     const amount = (item.precio || 0) * (item.cantidad || 0);
                     const editorial = item.editorial || 'Otras';
-                    const dto = EDITORIAL_DTOS[editorial] || 35;
+                    const dto = EDITORIAL_DTOS[editorial] ?? 35;
                     tiendaTotal += amount * (1 - (dto / 100));
                     tiendaItems += item.cantidad || 0;
                 }
