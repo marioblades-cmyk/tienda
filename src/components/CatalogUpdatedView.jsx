@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
 
@@ -15,6 +15,7 @@ const CatalogUpdatedView = () => {
     const [editorialesList, setEditorialesList] = useState([]);
     const [itemsToShow, setItemsToShow] = useState(50);
     const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [selectedForQuote, setSelectedForQuote] = useState(new Set());
 
     // CARGA DE DATOS
     useEffect(() => {
@@ -49,6 +50,28 @@ const CatalogUpdatedView = () => {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleAddToQuote = (itemsToAdd) => {
+        try {
+            const existing = JSON.parse(localStorage.getItem('mcb_quote_cart') || '[]');
+            const existingIds = new Set(existing.map(i => i.product_id));
+            const newItems = itemsToAdd.filter(i => i && i.product_id && !existingIds.has(i.product_id));
+            localStorage.setItem('mcb_quote_cart', JSON.stringify([...existing, ...newItems]));
+            setSelectedForQuote(new Set());
+            alert(`✅ ${newItems.length} producto(s) agregado(s). Andá a "Cotizaciones" en el menú.`);
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    };
+
+    const toggleSelectForQuote = (productId) => {
+        setSelectedForQuote(prev => {
+            const next = new Set(prev);
+            if (next.has(productId)) next.delete(productId);
+            else next.add(productId);
+            return next;
+        });
     };
 
     // CATEGORÍAS SEGÚN EDITORIAL
@@ -302,6 +325,22 @@ const CatalogUpdatedView = () => {
                     <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left' }}>
                         <thead>
                             <tr style={{ background: '#f8fafc' }}>
+                                <th style={{ padding: '1.25rem 0.75rem', borderBottom: '2px solid #f1f5f9', width: '40px' }}>
+                                    <input
+                                        type="checkbox"
+                                        title="Seleccionar todos"
+                                        style={{ width: '1.1rem', height: '1.1rem', accentColor: '#f07d2a', cursor: 'pointer' }}
+                                        checked={filteredItems.slice(0, itemsToShow).length > 0 && filteredItems.slice(0, itemsToShow).every(i => selectedForQuote.has(i.product_id))}
+                                        onChange={(e) => {
+                                            const visible = filteredItems.slice(0, itemsToShow);
+                                            if (e.target.checked) {
+                                                setSelectedForQuote(prev => { const n = new Set(prev); visible.forEach(i => n.add(i.product_id)); return n; });
+                                            } else {
+                                                setSelectedForQuote(prev => { const n = new Set(prev); visible.forEach(i => n.delete(i.product_id)); return n; });
+                                            }
+                                        }}
+                                    />
+                                </th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>Producto</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>EAN (Limpio)</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>Editorial</th>
@@ -331,11 +370,20 @@ const CatalogUpdatedView = () => {
                             ) : filteredItems.slice(0, itemsToShow).map((item, idx) => (
                                 <tr key={`${item.product_id}-${idx}`} style={{ 
                                     borderBottom: '1px solid #f1f5f9',
-                                    transition: 'background 0.2s ease'
+                                    transition: 'background 0.2s ease',
+                                    background: selectedForQuote.has(item.product_id) ? 'rgba(240, 125, 42, 0.04)' : 'transparent'
                                 }}
-                                onMouseEnter={(e) => e.currentTarget.style.background = '#fcfdfe'}
-                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                onMouseEnter={(e) => { if (!selectedForQuote.has(item.product_id)) e.currentTarget.style.background = '#fcfdfe'; }}
+                                onMouseLeave={(e) => { if (!selectedForQuote.has(item.product_id)) e.currentTarget.style.background = 'transparent'; }}
                                 >
+                                    <td style={{ padding: '1.25rem 0.75rem' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedForQuote.has(item.product_id)}
+                                            onChange={() => toggleSelectForQuote(item.product_id)}
+                                            style={{ width: '1.1rem', height: '1.1rem', accentColor: '#f07d2a', cursor: 'pointer' }}
+                                        />
+                                    </td>
                                     <td style={{ padding: '1.25rem 1rem' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                             <div style={{ color: '#94a3b8', fontSize: '0.65rem', fontWeight: 600, fontFamily: 'monospace', width: '20px' }}>{idx + 1}</div>
@@ -394,6 +442,15 @@ const CatalogUpdatedView = () => {
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 600, color: '#334155' }}>
                                         {item.precio_mayoreo_bs ? `BS ${item.precio_mayoreo_bs.toFixed(2)}` : '--'}
                                     </td>
+                                    <td style={{ padding: '1.25rem 0.75rem' }}>
+                                        <button
+                                            title="Agregar a Cotización"
+                                            onClick={() => handleAddToQuote([item])}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(22,163,74,0.1)', color: '#16a34a', fontWeight: 800, fontSize: '0.7rem', padding: '4px 8px', borderRadius: '6px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                        >
+                                            <ShoppingCart size={11} /> +Cot.
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -423,6 +480,25 @@ const CatalogUpdatedView = () => {
                     </div>
                 )}
             </div>
+
+            {/* Floating Quote Bar */}
+            {selectedForQuote.size > 0 && (
+                <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: '#1a2d42', color: 'white', borderRadius: '999px', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', zIndex: 9999, border: '2px solid #f07d2a' }}>
+                    <ShoppingCart size={18} style={{ color: '#f07d2a' }} />
+                    <span style={{ fontWeight: 700, fontSize: '14px' }}>{selectedForQuote.size} producto(s) seleccionado(s)</span>
+                    <button
+                        onClick={() => handleAddToQuote(catalogData.filter(i => selectedForQuote.has(i.product_id)))}
+                        style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: 'none', cursor: 'pointer' }}
+                    >
+                        Agregar a Cotización ➡
+                    </button>
+                    <button
+                        onClick={() => setSelectedForQuote(new Set())}
+                        style={{ opacity: 0.5, cursor: 'pointer', background: 'none', border: 'none', color: 'white', fontSize: '16px' }}
+                        title="Deseleccionar todo"
+                    >✕</button>
+                </div>
+            )}
         </div>
     );
 };

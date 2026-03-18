@@ -10,7 +10,8 @@ import RemitosManagement from './components/RemitosManagement';
 import AdminMasterView from './components/AdminMasterView';
 import ComicAnalysisTool from './components/ComicAnalysisTool';
 import PriceAnalysisTool from './components/PriceAnalysisTool';
-import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2, Zap } from 'lucide-react';
+import QuotationTool from './components/QuotationTool';
+import { LayoutDashboard, Calendar, Users, LogOut, PanelLeftClose, PanelLeftOpen, Database, CheckCircle2, Zap, FileText } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
 import CatalogUpdatedView from './components/CatalogUpdatedView';
@@ -158,6 +159,13 @@ function Main() {
                                 <CheckCircle2 size={20} />
                                 {sidebarOpen && <span>Catálogo Actualizado</span>}
                             </button>
+                            <button
+                                onClick={() => setActiveTab('cotizaciones')}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'cotizaciones' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
+                            >
+                                <FileText size={20} />
+                                {sidebarOpen && <span>Cotizaciones</span>}
+                            </button>
                         </>
                     ) : (
                         <>
@@ -183,6 +191,13 @@ function Main() {
                             >
                                 <CheckCircle2 size={20} />
                                 {sidebarOpen && <span>Catálogo Actualizado</span>}
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('cotizaciones')}
+                                className={`w-full flex items-center gap-3 p-3 transition-all relative ${activeTab === 'cotizaciones' ? 'text-white font-bold bg-white/5 border-l-[3px] border-[#f07d2a]' : 'text-white/60 hover:bg-white/5 hover:text-[#f07d2a]'}`}
+                            >
+                                <FileText size={20} />
+                                {sidebarOpen && <span>Cotizaciones</span>}
                             </button>
                         </>
                     )}
@@ -236,6 +251,7 @@ function Main() {
                                                 activeTab === 'usuarios' ? 'Gestión de Vendedores' :
                                                     activeTab === 'precios' ? 'Análisis de Precios' :
                                                         activeTab === 'catalogo-actualizado' ? 'Catálogo Maestro Actualizado' :
+                                                        activeTab === 'cotizaciones' ? 'Cotizaciones' :
                                                             'Herramienta Editorial (Mangas Comics Bolivia)')
                             : 'Mis Pedidos Semanales'
                         }
@@ -253,11 +269,13 @@ function Main() {
                                             activeTab === 'usuarios' ? <AdminUserManagement /> :
                                                 activeTab === 'precios' ? <PriceAnalysisTool /> :
                                                     activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
-                                                        <ComicAnalysisTool />
+                                                        activeTab === 'cotizaciones' ? <QuotationTool /> :
+                                                            <ComicAnalysisTool />
                     ) : (
                         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
                             activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
-                                <SellerDashboard isAdmin={isAdmin} />
+                                activeTab === 'cotizaciones' ? <QuotationTool /> :
+                                    <SellerDashboard isAdmin={isAdmin} />
                     )}
                 </main>
 
