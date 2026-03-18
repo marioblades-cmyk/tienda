@@ -761,12 +761,30 @@ const ComicAnalysisTool = () => {
         if (!selectedItem) return;
 
         try {
+            // Recalcular precios inteligentes si el precio cambió
+            let pricingUpdates = {};
+            const settings = await catalogService.fetchPricingSettings();
+            
+            if (settings) {
+                const calculated = catalogService.calculateSuggestedPrices(selectedItem, settings);
+                if (calculated) {
+                    pricingUpdates = {
+                        precio_venta_bs: calculated.retail,
+                        precio_n2_bs: calculated.n2,
+                        precio_n3_bs: calculated.n3,
+                        precio_mayoreo_bs: calculated.mayoreo
+                    };
+                }
+            }
+
             const { error } = await supabase
                 .from('catalogo_productos')
                 .update({
                     precio_tapa: selectedItem.precio_tapa,
-                    categoria: selectedItem.categoria,
-                    titulo: selectedItem.titulo
+                    categoria: selectedItem.categoria || selectedItem.categoria_principal,
+                    titulo: selectedItem.titulo,
+                    ...pricingUpdates,
+                    updated_at: new Date().toISOString()
                 })
                 .eq('product_id', selectedItem.product_id);
 
@@ -776,7 +794,7 @@ const ComicAnalysisTool = () => {
             await fetchCatalog();
             setIsIdModalOpen(false);
             setSelectedItem(null);
-            alert('Producto actualizado correctamente en la base master.');
+            alert('Producto actualizado correctamente en la base master con precios inteligentes recalculados.');
         } catch (err) {
             console.error('Error al guardar:', err);
             alert('Error al guardar los cambios.');

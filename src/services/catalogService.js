@@ -507,6 +507,7 @@ export const catalogService = {
                         ean_interno: item.ean_interno,
                         editorial: item.editorial || edName,
                         categoria: item.categoria_principal,
+                        precio_tapa: item.precio_tapa,
                         es_reimpresion: esReimpresion || false,
                         // Precios inteligentes
                         precio_venta_bs: calculated?.retail || 0,
