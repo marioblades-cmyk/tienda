@@ -940,14 +940,14 @@ const ComicAnalysisTool = () => {
                                 }}
                             >
                                 <option value="TODOS">Todas las Editoriales</option>
-                                {(Object.values(dbCatalog || {})
+                                {[...new Set(Object.values(dbCatalog || {})
                                     .filter(Boolean)
                                     .map(i => i.editorial)
-                                    .filter(Boolean)
+                                    .filter(Boolean))]
                                     .sort()
                                     .map(ed => (
                                         <option key={ed} value={ed}>{ed}</option>
-                                    )))}
+                                    ))}
                             </select>
                         </div>
                         <div className="flex flex-col gap-1">
@@ -958,15 +958,15 @@ const ComicAnalysisTool = () => {
                                 onChange={(e) => setFilterCatCategory(e.target.value)}
                             >
                                 <option value="TODOS">Todas las Categorías</option>
-                                {(Object.values(dbCatalog || {})
+                                {[...new Set(Object.values(dbCatalog || {})
                                     .filter(Boolean)
                                     .filter(item => filterCatEditorial === 'TODOS' || item.editorial === filterCatEditorial)
                                     .map(i => i.categoria)
-                                    .filter(Boolean)
+                                    .filter(Boolean))]
                                     .sort()
                                     .map(cat => (
                                         <option key={cat} value={cat}>{cat}</option>
-                                    )))}
+                                    ))}
                             </select>
                         </div>
                     </div>
