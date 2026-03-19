@@ -15,7 +15,7 @@ import QuotationTool from './components/QuotationTool';
 import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
-    CheckCircle2, Zap, FileText, Menu, X
+    CheckCircle2, Zap, FileText
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -45,8 +45,8 @@ function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
     );
 }
 
-// --- Sidebar content (shared desktop + mobile drawer) ---
-function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, hasPendingChanges, user, profile, onClose }) {
+// --- Sidebar content ---
+function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, hasPendingChanges, user, profile }) {
     const adminItems = [
         { id: 'semanas', icon: Calendar, label: 'Semanas' },
         { id: 'mis-pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
@@ -80,15 +80,6 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
                     <span className="font-display text-xl tracking-wide whitespace-nowrap text-white flex-1 overflow-hidden">
                         MANGAS <span className="text-primary">COMICS</span>
                     </span>
-                )}
-                {onClose && (
-                    <button
-                        onClick={onClose}
-                        className="ml-auto text-white/60 hover:text-white p-1 transition-colors rounded"
-                        aria-label="Cerrar menú"
-                    >
-                        <X size={20} />
-                    </button>
                 )}
             </div>
 
@@ -158,7 +149,6 @@ function Main() {
     const [showRegister, setShowRegister] = useState(false);
     const [activeTab, setActiveTab] = useState('pedidos');
     const [sidebarOpen, setSidebarOpen] = useState(true);
-    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [initialized, setInitialized] = useState(false);
 
     useEffect(() => {
@@ -167,20 +157,6 @@ function Main() {
             setInitialized(true);
         }
     }, [loading, isAdmin, user, initialized]);
-
-    // Close mobile menu on resize to desktop
-    useEffect(() => {
-        const handleResize = () => {
-            if (window.innerWidth >= 768) setMobileMenuOpen(false);
-        };
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
-
-    const handleTabChange = (tab) => {
-        setActiveTab(tab);
-        setMobileMenuOpen(false);
-    };
 
     // --- Loading ---
     if (loading) {
@@ -255,17 +231,6 @@ function Main() {
         );
     }
 
-    // --- Shared sidebar props ---
-    const sidebarProps = {
-        activeTab,
-        onTabChange: handleTabChange,
-        isAdmin,
-        isSocio,
-        hasPendingChanges,
-        user,
-        profile,
-    };
-
     // --- Tab content ---
     const currentContent = isAdmin ? (
         activeTab === 'semanas' ? <AdminWeeklyView /> :
@@ -292,70 +257,23 @@ function Main() {
     const roleLabel = isAdmin ? 'ADMINISTRADOR' : (isSocio ? 'SOCIO' : 'VENDEDOR');
 
     return (
-        <div className="min-h-screen bg-background flex text-text font-sans antialiased">
+        <div className="min-h-screen bg-background flex text-text font-sans antialiased min-w-fit">
 
-            {/* ── MOBILE TOP HEADER ── */}
-            <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-[#1a2d42] h-14 flex items-center justify-between px-4 border-b border-white/10 shadow-lg">
-                <div className="flex items-center gap-2">
-                    <div className="bg-primary text-text p-1.5 rounded font-display text-base min-w-[28px] text-center leading-none">
-                        MC
-                    </div>
-                    <span className="font-display text-lg tracking-wide text-white">
-                        MANGAS <span className="text-primary">COMICS</span>
-                    </span>
-                </div>
-                <button
-                    onClick={() => setMobileMenuOpen(true)}
-                    className="text-white/80 hover:text-white p-2 rounded transition-colors"
-                    aria-label="Abrir menú"
-                >
-                    <Menu size={22} />
-                </button>
-            </header>
-
-            {/* ── MOBILE DRAWER ── */}
-            <AnimatePresence>
-                {mobileMenuOpen && (
-                    <>
-                        {/* Backdrop */}
-                        <motion.div
-                            key="backdrop"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            onClick={() => setMobileMenuOpen(false)}
-                            className="md:hidden fixed inset-0 bg-black/60 z-40"
-                        />
-                        {/* Drawer */}
-                        <motion.aside
-                            key="drawer"
-                            initial={{ x: '-100%' }}
-                            animate={{ x: 0 }}
-                            exit={{ x: '-100%' }}
-                            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-                            className="md:hidden fixed top-0 left-0 h-full w-72 bg-[#1a2d42] z-50 flex flex-col shadow-2xl"
-                        >
-                            <SidebarContent
-                                {...sidebarProps}
-                                showLabels={true}
-                                onClose={() => setMobileMenuOpen(false)}
-                            />
-                        </motion.aside>
-                    </>
-                )}
-            </AnimatePresence>
-
-            {/* ── DESKTOP SIDEBAR ── */}
+            {/* ── SIDEBAR ── */}
             <motion.aside
                 animate={{ width: sidebarOpen ? 256 : 80 }}
                 transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
-                className="hidden md:flex bg-[#1a2d42] flex-col sticky top-0 h-screen z-50 border-r border-white/5 overflow-hidden shrink-0"
+                className="bg-[#1a2d42] flex flex-col sticky top-0 h-screen z-50 border-r border-white/5 overflow-hidden shrink-0"
             >
                 <SidebarContent
-                    {...sidebarProps}
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
                     showLabels={sidebarOpen}
-                    onClose={null}
+                    isAdmin={isAdmin}
+                    isSocio={isSocio}
+                    hasPendingChanges={hasPendingChanges}
+                    user={user}
+                    profile={profile}
                 />
                 {/* Collapse toggle */}
                 <button
@@ -369,9 +287,6 @@ function Main() {
 
             {/* ── MAIN CONTENT ── */}
             <div className="flex-1 flex flex-col min-h-screen overflow-x-auto min-w-0">
-                {/* Spacer for mobile header */}
-                <div className="h-14 md:hidden shrink-0" />
-
                 <header className="p-4 md:p-6 pb-0">
                     <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-[0.2em] mb-3">
                         <span className="text-primary font-mono opacity-80">PLATAFORMA</span>
