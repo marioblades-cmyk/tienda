@@ -876,8 +876,10 @@ Gracias por tu confianza! 😊`;
                                             {items.map(item => {
                                                 const itemDtoPct = item.itemDiscountPct || 0;
                                                 const priceAfterItemDto = (item.unitPrice || 0) * (1 - itemDtoPct / 100);
+                                                const itemSubtotalOriginal = (item.unitPrice || 0) * (item.qty || 1);
                                                 const itemSubtotal = priceAfterItemDto * (item.qty || 1);
                                                 const itemSubtotalDesc = descuentoPct > 0 ? itemSubtotal * (1 - descuentoPct / 100) : null;
+                                                const showOriginalSubtotal = itemDtoPct > 0 || itemSubtotalDesc !== null;
                                                 return (
                                                     <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
                                                         <td className="p-3">
@@ -938,7 +940,10 @@ Gracias por tu confianza! 😊`;
                                                             </div>
                                                         </td>
                                                         <td className="p-3 text-right">
-                                                            <p className="font-bold font-mono text-primary">{itemSubtotalDesc !== null ? <span className="line-through text-muted text-xs mr-1">Bs. {itemSubtotal.toFixed(2)}</span> : null}Bs. {(itemSubtotalDesc ?? itemSubtotal).toFixed(2)}</p>
+                                                            {showOriginalSubtotal && (
+                                                                <p className="line-through text-muted text-xs font-mono">Bs. {itemSubtotalOriginal.toFixed(2)}</p>
+                                                            )}
+                                                            <p className="font-bold font-mono text-primary">Bs. {(itemSubtotalDesc ?? itemSubtotal).toFixed(2)}</p>
                                                         </td>
                                                         <td className="p-3">
                                                             <div className="flex gap-1">
