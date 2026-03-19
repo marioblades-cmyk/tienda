@@ -73,6 +73,18 @@ export default function QuotationTool() {
     const [bulkLoading, setBulkLoading] = useState(false);
     const bulkSearchRef = useRef(null);
 
+    // Single item search state
+    const [showItemSearch, setShowItemSearch] = useState(false);
+    const [itemSearchQuery, setItemSearchQuery] = useState('');
+    const [itemSearchResults, setItemSearchResults] = useState([]);
+    const [itemSearchLoading, setItemSearchLoading] = useState(false);
+    const itemSearchRef = useRef(null);
+    const itemSearchDebounce = useRef(null);
+
+    // Conditions editor state
+    const [customConditions, setCustomConditions] = useState(() => CONDITIONS.map(c => ({ ...c })));
+    const [showConditionsEditor, setShowConditionsEditor] = useState(false);
+
     // Load cart from localStorage on mount
     useEffect(() => {
         try {
@@ -145,12 +157,13 @@ export default function QuotationTool() {
     const clearAll = () => {
         setItems([]);
         setClienteNombre('');
-        setClienteCelular('');
+        setClienteCelular('+591 ');
         setNota('');
         setDescuentoPct(0);
         setCostoEnvio(0);
         setCurrentId(null);
         setCurrentEstado('borrador');
+        setCustomConditions(CONDITIONS.map(c => ({ ...c })));
     };
 
     // ── Bulk Add Modal ──
@@ -256,6 +269,46 @@ export default function QuotationTool() {
     const openBulkModal = () => {
         setShowBulkModal(true);
         setTimeout(() => bulkSearchRef.current?.focus(), 50);
+    };
+
+    // ── Single Item Search ──
+    const openItemSearch = () => {
+        setShowItemSearch(true);
+        setItemSearchQuery('');
+        setItemSearchResults([]);
+        setTimeout(() => itemSearchRef.current?.focus(), 50);
+    };
+
+    const handleItemSearchInput = (val) => {
+        setItemSearchQuery(val);
+        clearTimeout(itemSearchDebounce.current);
+        if (!val || val.trim().length < 2) { setItemSearchResults([]); return; }
+        setItemSearchLoading(true);
+        itemSearchDebounce.current = setTimeout(async () => {
+            try {
+                const { data } = await supabase
+                    .from('catalogo_productos')
+                    .select('*')
+                    .ilike('titulo', `%${val.trim()}%`)
+                    .order('titulo', { ascending: true })
+                    .limit(10);
+                setItemSearchResults(data || []);
+            } catch (e) {
+                console.error(e);
+            } finally {
+                setItemSearchLoading(false);
+            }
+        }, 300);
+    };
+
+    const addSingleItem = (product) => {
+        setItems(prev => {
+            if (prev.some(i => i.product_id === product.product_id)) return prev;
+            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null }];
+        });
+        setShowItemSearch(false);
+        setItemSearchQuery('');
+        setItemSearchResults([]);
     };
 
     // ── Capture card as Blob ──
@@ -610,7 +663,43 @@ Gracias por tu confianza! 😊`;
                                     rows={2}
                                     className="input-field text-sm w-full resize-none"
                                 />
-                                <p className="text-xs text-muted mt-1">Las condiciones estándar se incluyen automáticamente en la cotización.</p>
+                            </div>
+                            <div>
+                                <button
+                                    onClick={() => setShowConditionsEditor(v => !v)}
+                                    className="flex items-center justify-between w-full text-xs font-bold text-muted hover:text-text transition-colors py-1"
+                                >
+                                    <span className="uppercase tracking-wider">Condiciones estándar</span>
+                                    <span className={`transition-transform ${showConditionsEditor ? 'rotate-180' : ''}`}>▾</span>
+                                </button>
+                                {showConditionsEditor && (
+                                    <div className="mt-2 space-y-3 border border-border rounded-lg p-3 bg-surface-2">
+                                        {customConditions.map((cond, i) => (
+                                            <div key={i} className="space-y-1">
+                                                <input
+                                                    type="text"
+                                                    value={cond.title}
+                                                    onChange={e => setCustomConditions(prev => prev.map((c, j) => j === i ? { ...c, title: e.target.value } : c))}
+                                                    className="input-field h-8 text-xs w-full font-bold"
+                                                    placeholder="Título de condición"
+                                                />
+                                                <textarea
+                                                    value={cond.text}
+                                                    onChange={e => setCustomConditions(prev => prev.map((c, j) => j === i ? { ...c, text: e.target.value } : c))}
+                                                    rows={2}
+                                                    className="input-field text-xs w-full resize-none"
+                                                    placeholder="Texto de la condición..."
+                                                />
+                                            </div>
+                                        ))}
+                                        <button
+                                            onClick={() => setCustomConditions(CONDITIONS.map(c => ({ ...c })))}
+                                            className="text-xs text-muted hover:text-primary transition-colors"
+                                        >
+                                            ↺ Restablecer por defecto
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -704,17 +793,25 @@ Gracias por tu confianza! 😊`;
                     <div className="xl:col-span-2 space-y-6">
                         {/* ITEMS TABLE */}
                         <div className="card overflow-hidden">
-                            <div className="p-4 bg-surface-2 border-b border-border flex items-center justify-between">
-                                <h3 className="font-bold text-sm uppercase tracking-wider text-muted flex items-center gap-2">
+                            <div className="p-4 bg-surface-2 border-b border-border flex items-center justify-between gap-2">
+                                <h3 className="font-bold text-sm uppercase tracking-wider text-muted flex items-center gap-2 shrink-0">
                                     <ShoppingCart size={16} className="text-primary" />
                                     Productos ({items.length})
                                 </h3>
-                                <button
-                                    onClick={openBulkModal}
-                                    className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-all border border-primary/20"
-                                >
-                                    <Layers size={14} /> Agregar en lote
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={openItemSearch}
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-surface border border-border hover:border-primary text-muted hover:text-primary rounded-lg text-xs font-bold transition-all"
+                                    >
+                                        <Search size={14} /> Buscar item
+                                    </button>
+                                    <button
+                                        onClick={openBulkModal}
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-all border border-primary/20"
+                                    >
+                                        <Layers size={14} /> Agregar en lote
+                                    </button>
+                                </div>
                             </div>
 
                             {items.length === 0 ? (
@@ -820,7 +917,7 @@ Gracias por tu confianza! 😊`;
                                     style={{ fontFamily: 'sans-serif', maxWidth: '800px' }}
                                 >
                                     {/* Card Header */}
-                                    <div style={{ background: 'linear-gradient(135deg, #1a2d42 0%, #0f1e2e 100%)', padding: '28px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ background: 'linear-gradient(135deg, #1a2d42 0%, #0f1e2e 100%)', padding: '28px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                                             <img src="/logo.png" alt="Logo" style={{ height: '60px', objectFit: 'contain', filter: 'brightness(0) invert(1)', mixBlendMode: 'normal' }} />
                                             <div>
@@ -830,10 +927,18 @@ Gracias por tu confianza! 😊`;
                                                 <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', letterSpacing: '0.3em', fontWeight: 600 }}>BOLIVIA STORE</div>
                                             </div>
                                         </div>
-                                        <div style={{ textAlign: 'right' }}>
-                                            <div style={{ color: '#f07d2a', fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cotización</div>
-                                            <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px', marginTop: '4px' }}>{today}</div>
-                                            <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>{profile?.nombre || 'Agente de Ventas'}</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                            {descuentoPct > 0 && (
+                                                <div style={{ background: '#f07d2a', borderRadius: '8px', padding: '6px 12px', textAlign: 'center' }}>
+                                                    <div style={{ color: 'white', fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>{descuentoPct}%</div>
+                                                    <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.2em' }}>OFF</div>
+                                                </div>
+                                            )}
+                                            <div style={{ textAlign: 'right' }}>
+                                                <div style={{ color: '#f07d2a', fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cotización</div>
+                                                <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px', marginTop: '4px' }}>{today}</div>
+                                                <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>{profile?.nombre || 'Agente de Ventas'}</div>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -856,21 +961,33 @@ Gracias por tu confianza! 😊`;
                                                     <th style={{ textAlign: 'left', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Editorial</th>
                                                     <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Cant.</th>
                                                     <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P/U</th>
-                                                    <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: '0 4px 4px 0' }}>Subtotal</th>
+                                                    {descuentoPct > 0 && (
+                                                        <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#2d9e5a', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P. Final</th>
+                                                    )}
+                                                    <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: descuentoPct > 0 ? '0' : '0 4px 4px 0' }}>Subtotal</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {items.map((item, idx) => (
-                                                    <tr key={item.product_id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? 'white' : '#fafafa' }}>
-                                                        <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: 700, color: '#1a2d42', maxWidth: '260px' }}>{item.titulo}</td>
-                                                        <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: '#444' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>
-                                                            Bs. {(((item.unitPrice || 0) * (item.qty || 1)) * (1 - descuentoPct / 100)).toFixed(2)}
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                                {items.map((item, idx) => {
+                                                    const rawSubtotal = (item.unitPrice || 0) * (item.qty || 1);
+                                                    const finalSubtotal = rawSubtotal * (1 - descuentoPct / 100);
+                                                    return (
+                                                        <tr key={item.product_id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? 'white' : '#fafafa' }}>
+                                                            <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: 700, color: '#1a2d42', maxWidth: '240px' }}>{item.titulo}</td>
+                                                            <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
+                                                            <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
+                                                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: descuentoPct > 0 ? '#bbb' : '#444', textDecoration: descuentoPct > 0 ? 'line-through' : 'none' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
+                                                            {descuentoPct > 0 && (
+                                                                <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, color: '#2d9e5a' }}>
+                                                                    Bs. {(Number(item.unitPrice || 0) * (1 - descuentoPct / 100)).toFixed(2)}
+                                                                </td>
+                                                            )}
+                                                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>
+                                                                Bs. {finalSubtotal.toFixed(2)}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>
@@ -906,7 +1023,7 @@ Gracias por tu confianza! 😊`;
                                         <div style={{ fontSize: '11px', color: '#f07d2a', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: 800, marginBottom: '10px' }}>Condiciones</div>
                                         <div style={{ fontSize: '10px', color: '#555', fontWeight: 700, marginBottom: '10px' }}>Condiciones de la Cotización y Pedidos:</div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
-                                            {CONDITIONS.map((c, i) => (
+                                            {customConditions.map((c, i) => (
                                                 <div key={i} style={{ fontSize: '10px', color: '#555', lineHeight: 1.5 }}>
                                                     <span style={{ fontWeight: 800, color: '#333' }}>{c.title}: </span>{c.text}
                                                 </div>
@@ -925,6 +1042,57 @@ Gracias por tu confianza! 😊`;
                                 </div>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ── SINGLE ITEM SEARCH MODAL ── */}
+            {showItemSearch && (
+                <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4 bg-black/60 backdrop-blur-sm" onClick={e => e.target === e.currentTarget && setShowItemSearch(false)}>
+                    <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-lg">
+                        <div className="p-4 border-b border-border flex items-center gap-3">
+                            <Search size={16} className="text-muted shrink-0" />
+                            <input
+                                ref={itemSearchRef}
+                                type="text"
+                                placeholder="Buscar producto por nombre..."
+                                value={itemSearchQuery}
+                                onChange={e => handleItemSearchInput(e.target.value)}
+                                className="flex-1 bg-transparent outline-none text-sm"
+                            />
+                            {itemSearchLoading && <RefreshCw size={14} className="animate-spin text-muted shrink-0" />}
+                            <button onClick={() => setShowItemSearch(false)} className="text-muted hover:text-text shrink-0">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="max-h-80 overflow-y-auto">
+                            {itemSearchResults.length === 0 && itemSearchQuery.length >= 2 && !itemSearchLoading && (
+                                <p className="text-center text-muted text-sm py-8">Sin resultados para "{itemSearchQuery}"</p>
+                            )}
+                            {itemSearchResults.length === 0 && itemSearchQuery.length < 2 && (
+                                <p className="text-center text-muted text-xs py-8">Escribí al menos 2 caracteres para buscar</p>
+                            )}
+                            {itemSearchResults.map(product => {
+                                const alreadyIn = items.some(i => i.product_id === product.product_id);
+                                const price = getItemPrice(product, tipoPrecio);
+                                return (
+                                    <div
+                                        key={product.product_id}
+                                        onClick={() => !alreadyIn && addSingleItem(product)}
+                                        className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 transition-all ${alreadyIn ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-2 cursor-pointer'}`}
+                                    >
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
+                                            <p className="text-xs text-muted">{product.editorial}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <p className="text-sm font-bold font-mono text-primary">Bs. {price.toFixed(2)}</p>
+                                            {alreadyIn ? <p className="text-xs text-green-500">✓ ya en cotización</p> : <p className="text-xs text-muted">Click para agregar</p>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
             )}
