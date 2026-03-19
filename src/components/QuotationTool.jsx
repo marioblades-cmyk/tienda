@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
     FileImage, Send, Save, Trash2, Plus, X, ShoppingCart,
     MessageCircle, ChevronDown, RefreshCw, Package, CheckCircle2,
-    Clock, XCircle, Archive, Eye, Link
+    Clock, XCircle, Archive, Eye, Link, Search, Layers, Hash
 } from 'lucide-react';
 
 const PRICE_TYPES = [
@@ -55,6 +55,15 @@ export default function QuotationTool() {
     const [exporting, setExporting] = useState(false);
     const [currentId, setCurrentId] = useState(null);
     const [currentEstado, setCurrentEstado] = useState('borrador');
+
+    // Bulk add modal state
+    const [showBulkModal, setShowBulkModal] = useState(false);
+    const [bulkSearch, setBulkSearch] = useState('');
+    const [bulkRange, setBulkRange] = useState('');
+    const [bulkResults, setBulkResults] = useState([]);
+    const [bulkSelected, setBulkSelected] = useState(new Set());
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const bulkSearchRef = useRef(null);
 
     // Load cart from localStorage on mount
     useEffect(() => {
@@ -119,6 +128,93 @@ export default function QuotationTool() {
         setCostoEnvio(0);
         setCurrentId(null);
         setCurrentEstado('borrador');
+    };
+
+    // ── Bulk Add Modal ──
+    const parseRange = (rangeStr) => {
+        if (!rangeStr.trim()) return null;
+        const nums = new Set();
+        for (const part of rangeStr.split(',')) {
+            const trimmed = part.trim();
+            if (trimmed.includes('-')) {
+                const [a, b] = trimmed.split('-').map(n => parseInt(n.trim()));
+                if (!isNaN(a) && !isNaN(b)) {
+                    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) nums.add(i);
+                }
+            } else {
+                const n = parseInt(trimmed);
+                if (!isNaN(n)) nums.add(n);
+            }
+        }
+        return nums.size > 0 ? nums : null;
+    };
+
+    const extractVolNum = (title) => {
+        const matches = title.match(/\d+/g);
+        return matches ? parseInt(matches[matches.length - 1]) : null;
+    };
+
+    const searchBulkCatalog = async (term) => {
+        if (!term || term.trim().length < 2) { setBulkResults([]); return; }
+        setBulkLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('catalogo_productos')
+                .select('*')
+                .ilike('titulo', `%${term.trim()}%`)
+                .order('titulo', { ascending: true })
+                .limit(150);
+            if (error) throw error;
+            const results = data || [];
+            setBulkResults(results);
+            // Auto-select if range is already set
+            const rangeSet = parseRange(bulkRange);
+            if (rangeSet) {
+                setBulkSelected(new Set(
+                    results.filter(p => { const v = extractVolNum(p.titulo); return v !== null && rangeSet.has(v); }).map(p => p.product_id)
+                ));
+            } else {
+                setBulkSelected(new Set());
+            }
+        } catch (err) {
+            console.error('Error buscando catálogo:', err);
+        } finally {
+            setBulkLoading(false);
+        }
+    };
+
+    const applyBulkRange = () => {
+        const rangeSet = parseRange(bulkRange);
+        if (!rangeSet) { setBulkSelected(new Set(bulkResults.map(p => p.product_id))); return; }
+        setBulkSelected(new Set(
+            bulkResults.filter(p => { const v = extractVolNum(p.titulo); return v !== null && rangeSet.has(v); }).map(p => p.product_id)
+        ));
+    };
+
+    const toggleBulkItem = (productId) => {
+        setBulkSelected(prev => {
+            const next = new Set(prev);
+            next.has(productId) ? next.delete(productId) : next.add(productId);
+            return next;
+        });
+    };
+
+    const confirmBulkAdd = () => {
+        const toAdd = bulkResults.filter(p => bulkSelected.has(p.product_id));
+        setItems(prev => {
+            const existing = new Set(prev.map(i => i.product_id));
+            const newItems = toAdd.filter(p => !existing.has(p.product_id)).map(p => ({
+                ...p, qty: 1, unitPrice: getItemPrice(p, tipoPrecio), customPrice: null,
+            }));
+            return [...prev, ...newItems];
+        });
+        setShowBulkModal(false);
+        setBulkSearch(''); setBulkRange(''); setBulkResults([]); setBulkSelected(new Set());
+    };
+
+    const openBulkModal = () => {
+        setShowBulkModal(true);
+        setTimeout(() => bulkSearchRef.current?.focus(), 50);
     };
 
     // ── Capture card as Blob ──
@@ -571,16 +667,22 @@ Gracias por tu confianza! 😊`;
                                     <ShoppingCart size={16} className="text-primary" />
                                     Productos ({items.length})
                                 </h3>
-                                {items.length === 0 && (
-                                    <span className="text-xs text-muted italic">Seleccioná productos desde el Catálogo Maestro o la Herramienta Editorial</span>
-                                )}
+                                <button
+                                    onClick={openBulkModal}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-all border border-primary/20"
+                                >
+                                    <Layers size={14} /> Agregar en lote
+                                </button>
                             </div>
 
                             {items.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-center">
                                     <ShoppingCart size={48} className="text-muted opacity-20 mb-4" />
                                     <p className="text-muted text-sm font-mono">Carrito vacío</p>
-                                    <p className="text-muted/60 text-xs mt-2">Andá al Catálogo Maestro, seleccioná ítems<br />y apretá "Agregar a Cotización"</p>
+                                    <p className="text-muted/60 text-xs mt-2 mb-4">Usá "Agregar en lote" para cargar por colección,<br />o seleccioná desde el Catálogo Maestro</p>
+                                    <button onClick={openBulkModal} className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-sm font-bold transition-all border border-primary/20">
+                                        <Layers size={15} /> Agregar en lote
+                                    </button>
                                 </div>
                             ) : (
                                 <div className="overflow-x-auto">
@@ -743,6 +845,131 @@ Gracias por tu confianza! 😊`;
                                         <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '10px' }}>Generado el {today}</div>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* ── BULK ADD MODAL ── */}
+            {showBulkModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={e => e.target === e.currentTarget && setShowBulkModal(false)}>
+                    <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                        {/* Modal Header */}
+                        <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-2">
+                                <Layers size={18} className="text-primary" />
+                                <h2 className="font-bold text-base">Agregar en lote</h2>
+                            </div>
+                            <button onClick={() => setShowBulkModal(false)} className="text-muted hover:text-text transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Search + Range */}
+                        <div className="p-5 border-b border-border space-y-3 shrink-0">
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                                    <input
+                                        ref={bulkSearchRef}
+                                        type="text"
+                                        placeholder="Nombre de la colección, ej: Blue Lock"
+                                        value={bulkSearch}
+                                        onChange={e => setBulkSearch(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && searchBulkCatalog(bulkSearch)}
+                                        className="input-field h-10 pl-9 text-sm w-full"
+                                    />
+                                </div>
+                                <button
+                                    onClick={() => searchBulkCatalog(bulkSearch)}
+                                    disabled={bulkLoading}
+                                    className="px-4 h-10 bg-primary hover:bg-primary/80 text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50 shrink-0"
+                                >
+                                    {bulkLoading ? <RefreshCw size={15} className="animate-spin" /> : 'Buscar'}
+                                </button>
+                            </div>
+                            {bulkResults.length > 0 && (
+                                <div className="flex gap-2 items-center">
+                                    <Hash size={14} className="text-muted shrink-0" />
+                                    <input
+                                        type="text"
+                                        placeholder="Tomos a seleccionar, ej: 2-15 o 1,2,5-10"
+                                        value={bulkRange}
+                                        onChange={e => setBulkRange(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && applyBulkRange()}
+                                        className="input-field h-9 text-sm flex-1"
+                                    />
+                                    <button
+                                        onClick={applyBulkRange}
+                                        className="px-3 h-9 bg-surface border border-border hover:border-primary text-sm font-bold rounded-lg transition-all shrink-0"
+                                    >
+                                        Aplicar
+                                    </button>
+                                    <button
+                                        onClick={() => setBulkSelected(new Set(bulkResults.map(p => p.product_id)))}
+                                        className="px-3 h-9 text-xs text-muted hover:text-text transition-colors shrink-0"
+                                    >
+                                        Todos
+                                    </button>
+                                    <button
+                                        onClick={() => setBulkSelected(new Set())}
+                                        className="px-3 h-9 text-xs text-muted hover:text-text transition-colors shrink-0"
+                                    >
+                                        Ninguno
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Results List */}
+                        <div className="flex-1 overflow-y-auto">
+                            {bulkResults.length === 0 && !bulkLoading && (
+                                <div className="flex flex-col items-center justify-center py-16 text-center text-muted">
+                                    <Search size={36} className="opacity-20 mb-3" />
+                                    <p className="text-sm font-mono">Buscá una colección para ver los tomos disponibles</p>
+                                </div>
+                            )}
+                            {bulkResults.length > 0 && (
+                                <div className="divide-y divide-border">
+                                    {bulkResults.map(product => {
+                                        const isSelected = bulkSelected.has(product.product_id);
+                                        const alreadyInQuote = items.some(i => i.product_id === product.product_id);
+                                        const price = getItemPrice(product, tipoPrecio);
+                                        return (
+                                            <div
+                                                key={product.product_id}
+                                                onClick={() => !alreadyInQuote && toggleBulkItem(product.product_id)}
+                                                className={`flex items-center gap-3 px-5 py-3 transition-all cursor-pointer ${alreadyInQuote ? 'opacity-40 cursor-not-allowed' : isSelected ? 'bg-primary/10' : 'hover:bg-surface-2'}`}
+                                            >
+                                                <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border-2 transition-all ${isSelected ? 'bg-primary border-primary' : 'border-border'}`}>
+                                                    {isSelected && <svg viewBox="0 0 12 10" fill="none" className="w-3 h-3"><path d="M1 5l3 3 7-7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
+                                                    <p className="text-xs text-muted">{product.editorial}</p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className="text-sm font-bold font-mono text-primary">Bs. {price.toFixed(2)}</p>
+                                                    {alreadyInQuote && <p className="text-xs text-green-500">✓ ya agregado</p>}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Modal Footer */}
+                        {bulkSelected.size > 0 && (
+                            <div className="p-4 border-t border-border flex items-center justify-between shrink-0">
+                                <p className="text-sm text-muted"><span className="font-bold text-text">{bulkSelected.size}</span> tomos seleccionados</p>
+                                <button
+                                    onClick={confirmBulkAdd}
+                                    className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/80 text-white rounded-lg text-sm font-bold transition-all"
+                                >
+                                    <Plus size={16} /> Agregar a cotización
+                                </button>
                             </div>
                         )}
                     </div>
