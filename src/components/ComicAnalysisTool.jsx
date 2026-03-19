@@ -43,6 +43,7 @@ const ComicAnalysisTool = () => {
     const [filterCatEditorial, setFilterCatEditorial] = useState('TODOS');
     const [filterCatCategory, setFilterCatCategory] = useState('TODOS');
     const [itemsAusentes, setItemsAusentes] = useState({}); // { editorialName: [items] }
+    const [pendingDeletions, setPendingDeletions] = useState({}); // { editorial: Set<product_id> }
     const [selectedItem, setSelectedItem] = useState(null);
     const [isIdModalOpen, setIsIdModalOpen] = useState(false);
     const [lastFileName, setLastFileName] = useState(() => localStorage.getItem('mcb_last_filename') || '');
@@ -620,6 +621,74 @@ const ComicAnalysisTool = () => {
         }
     };
 
+    const togglePendingDeletion = (editorial, productId) => {
+        setPendingDeletions(prev => {
+            const next = { ...prev };
+            if (!next[editorial]) next[editorial] = new Set();
+            else next[editorial] = new Set(next[editorial]);
+            next[editorial].has(productId) ? next[editorial].delete(productId) : next[editorial].add(productId);
+            return next;
+        });
+    };
+
+    const toggleAllDeletionsForEd = (editorial, items) => {
+        setPendingDeletions(prev => {
+            const next = { ...prev };
+            const current = next[editorial] || new Set();
+            const allSelected = items.every(it => current.has(it.product_id));
+            next[editorial] = allSelected ? new Set() : new Set(items.map(it => it.product_id));
+            return next;
+        });
+    };
+
+    const totalPendingDeletions = Object.values(pendingDeletions).reduce((s, set) => s + set.size, 0);
+
+    const handleApplyDeletions = async () => {
+        const hasHistory = isViewingHistory;
+        const hasDeletions = totalPendingDeletions > 0;
+        if (!hasDeletions && !hasHistory) return;
+
+        const msgs = [];
+        if (hasDeletions) msgs.push(`Eliminar ${totalPendingDeletions} items descatalogados`);
+        if (hasHistory) msgs.push(`Re-sincronizar reporte histórico "${historyReportName}"`);
+        if (!confirm(`¿Confirmar?\n• ${msgs.join('\n• ')}`)) return;
+
+        setIsSyncing(true);
+        try {
+            // 1. Aplicar eliminaciones marcadas
+            if (hasDeletions) {
+                for (const [editorial, ids] of Object.entries(pendingDeletions)) {
+                    for (const productId of ids) {
+                        const { error } = await supabase.from('catalogo_productos').delete().eq('product_id', productId);
+                        if (error) throw error;
+                        setDbCatalog(prev => { const next = { ...prev }; delete next[productId]; return next; });
+                        setItemsAusentes(prev => ({
+                            ...prev,
+                            [editorial]: (prev[editorial] || []).filter(it => it.product_id !== productId)
+                        }));
+                    }
+                }
+                setPendingDeletions({});
+            }
+
+            // 2. Si es histórico, re-sincronizar el reporte
+            if (hasHistory && sheetsData && Object.keys(sheetsData).length > 0) {
+                const result = await catalogService.syncWithMaster(sheetsData, user.id, historyReportName);
+                if (result.success) {
+                    await fetchCatalog(true);
+                }
+            }
+
+            window.dispatchEvent(new CustomEvent('catalog-status-changed'));
+            alert(`✅ Operación completada exitosamente.`);
+        } catch (err) {
+            console.error('Error aplicando decisiones:', err);
+            alert('Error: ' + err.message);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
     const handleWipeCatalog = async () => {
         if (!isAdmin) {
             alert("Solo los administradores pueden realizar esta acción.");
@@ -1087,17 +1156,7 @@ const ComicAnalysisTool = () => {
                                 {isViewingHistory ? `HISTORIAL: ${historyReportName}` : 'RESUMEN DE LIMPIEZA'}
                             </h2>
                             <div className="flex gap-2">
-                                {!isViewingHistory && (
-                                    <button 
-                                        className="comic-btn-primary flex items-center gap-2 py-2 px-4 text-xs"
-                                        onClick={handleManualSync}
-                                        disabled={isSyncing}
-                                    >
-                                        <Zap size={14} className={isSyncing ? 'animate-spin' : ''} /> 
-                                        {isSyncing ? 'SINCRONIZANDO...' : 'SINCRONIZAR AHORA'}
-                                    </button>
-                                )}
-                                <button 
+                                <button
                                     className="comic-btn-ghost flex items-center gap-2 py-2 px-4 text-xs"
                                     onClick={() => setViewMode('catalog')}
                                 >
@@ -1340,31 +1399,57 @@ const ComicAnalysisTool = () => {
                                 </div>
                             </div>
 
+                            {totalPendingDeletions > 0 && (
+                                <div className="mb-3 flex items-center gap-3 p-3 bg-comic-destructive/10 border border-comic-destructive/30 rounded-xl">
+                                    <span className="text-xs font-bold text-comic-destructive flex-1">
+                                        {totalPendingDeletions} item(s) marcados para eliminar
+                                    </span>
+                                    <button
+                                        onClick={handleApplyDeletions}
+                                        disabled={isSyncing}
+                                        className="comic-btn-primary flex items-center gap-2 py-1.5 px-4 text-xs bg-comic-destructive hover:bg-comic-destructive/80"
+                                    >
+                                        <Trash2 size={13} className={isSyncing ? 'animate-spin' : ''} />
+                                        {isSyncing ? 'PROCESANDO...' : 'APLICAR ELIMINACIONES'}
+                                    </button>
+                                </div>
+                            )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {Object.entries(itemsAusentes).map(([ed, items]) => items.length > 0 && (
                                     <div key={ed} className="bg-white border-2 border-comic-border rounded-xl overflow-hidden shadow-sm">
                                         <div className="bg-comic-muted p-2 px-4 border-b-2 border-comic-border flex justify-between items-center">
                                             <span className="font-bold text-xs uppercase">{ed}</span>
-                                            <span className="comic-badge bg-comic-destructive/20 text-comic-destructive border-none">{items.length} AUSENTES</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="comic-badge bg-comic-destructive/20 text-comic-destructive border-none">{items.length} AUSENTES</span>
+                                                <button
+                                                    onClick={() => toggleAllDeletionsForEd(ed, items)}
+                                                    className="text-[10px] font-bold text-comic-destructive/70 hover:text-comic-destructive underline"
+                                                >
+                                                    {items.every(it => pendingDeletions[ed]?.has(it.product_id)) ? 'Desmarcar todos' : 'Marcar todos'}
+                                                </button>
+                                            </div>
                                         </div>
                                         <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
                                             <table className="w-full text-[11px]">
                                                 <tbody className="divide-y divide-comic-border">
-                                                    {items.slice(0, 20).map(it => (
-                                                        <tr key={it.product_id} className="hover:bg-comic-muted/30">
-                                                            <td className="p-2 font-bold">{it.titulo}</td>
-                                                            <td className="p-2 font-comic-mono opacity-50">{it.product_id}</td>
-                                                            <td className="p-2 text-right">
-                                                                <button
-                                                                    onClick={() => handleDeleteFromMaster(it.product_id, ed)}
-                                                                    className="text-comic-destructive hover:scale-110 transition-transform p-1"
-                                                                    title="Borrar del Catálogo Maestro"
-                                                                >
-                                                                    <Trash2 size={16} />
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                    {items.slice(0, 20).map(it => {
+                                                        const markedForDelete = pendingDeletions[ed]?.has(it.product_id);
+                                                        return (
+                                                            <tr key={it.product_id} className={`transition-colors ${markedForDelete ? 'bg-comic-destructive/10' : 'hover:bg-comic-muted/30'}`}>
+                                                                <td className="p-2 w-8">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={!!markedForDelete}
+                                                                        onChange={() => togglePendingDeletion(ed, it.product_id)}
+                                                                        className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+                                                                        title="Marcar para eliminar del catálogo"
+                                                                    />
+                                                                </td>
+                                                                <td className={`p-2 font-bold ${markedForDelete ? 'line-through opacity-50' : ''}`}>{it.titulo}</td>
+                                                                <td className="p-2 font-comic-mono opacity-50">{it.product_id}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
                                                 </tbody>
                                             </table>
                                             {items.length > 20 && (
@@ -1669,14 +1754,14 @@ const ComicAnalysisTool = () => {
                         >
                             ↩ VOLVER A LA SELECCIÓN
                         </button>
-                        {!isViewingHistory && (
-                            <button 
+                        {(totalPendingDeletions > 0 || isViewingHistory) && (
+                            <button
                                 className="comic-btn-primary flex items-center gap-2"
-                                onClick={handleManualSync}
+                                onClick={handleApplyDeletions}
                                 disabled={isSyncing}
                             >
-                                <Zap size={18} className={isSyncing ? 'animate-spin' : ''} /> 
-                                {isSyncing ? 'APLICAR CAMBIOS AL MAESTRO' : 'APLICAR CAMBIOS AL MAESTRO'}
+                                <Zap size={18} className={isSyncing ? 'animate-spin' : ''} />
+                                {isSyncing ? 'PROCESANDO...' : (isViewingHistory ? 'RE-SINCRONIZAR REPORTE' : `APLICAR ELIMINACIONES (${totalPendingDeletions})`)}
                             </button>
                         )}
                     </div>

@@ -547,6 +547,116 @@ export const catalogService = {
     },
 
     /**
+     * Aplica los configs de precios guardados (price_analysis_settings / adjustments)
+     * a todos los items del catálogo. Se ejecuta automáticamente después de syncWithMaster.
+     */
+    async applyStoredPricing() {
+        const EDITORIAL_DTOS_DEFAULT = {
+            'Ivrea': 35, 'Ovnipress': 30, 'Panini-Utopia': 20,
+            'Penguin': 35, 'Planeta': 35, 'Deux-PopFiction': 40,
+            'Hotel de las Ideas': 40, 'V&R': 35, 'Otras': 35, 'Merchandising': 0
+        };
+        const DEFAULTS = { flete: 6, tcf: 0.014, tca: 0.0068, dtoNiveles: [5, 10, 15], margen_venta: 0.40, margen_mayoreo: 0.30 };
+
+        // 1. Cargar configs guardados
+        const { data: settings } = await supabase.from('price_analysis_settings').select('*');
+        if (!settings || settings.length === 0) {
+            console.log('ℹ️ applyStoredPricing: sin configs guardados, omitiendo.');
+            return { count: 0 };
+        }
+
+        let { flete, tcf, tca, dtoNiveles } = DEFAULTS;
+        const edSettings = {};
+
+        settings.forEach(s => {
+            if (s.editorial === 'GLOBAL_SETTINGS') {
+                flete = parseFloat(s.flete) || DEFAULTS.flete;
+                tcf = parseFloat(s.tcf) || DEFAULTS.tcf;
+                tca = parseFloat(s.tca) || DEFAULTS.tca;
+                dtoNiveles = s.dto_niveles || DEFAULTS.dtoNiveles;
+            } else if (s.editorial) {
+                edSettings[s.editorial] = {
+                    dto: (parseFloat(s.descuento_proveedor) || 35) / 100,
+                    margen: parseFloat(s.margen_venta) || DEFAULTS.margen_venta,
+                    mmayo: parseFloat(s.margen_mayoreo) || DEFAULTS.margen_mayoreo,
+                };
+            }
+        });
+
+        // 2. Cargar ajustes manuales (overrides por editorial + precio ARS)
+        const { data: adjustments } = await supabase.from('price_analysis_adjustments').select('*');
+        const adjustMap = {};
+        (adjustments || []).forEach(a => {
+            if (!adjustMap[a.editorial]) adjustMap[a.editorial] = {};
+            adjustMap[a.editorial][Math.round(Number(a.precio_ars))] = parseFloat(a.pv_ajuste);
+        });
+
+        // 3. Obtener todos los items del catálogo
+        const allItems = [];
+        let from = 0;
+        let hasMore = true;
+        while (hasMore) {
+            const { data, error } = await supabase
+                .from('catalogo_productos')
+                .select('id, product_id, titulo, editorial, precio_tapa')
+                .range(from, from + 999);
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            allItems.push(...data);
+            hasMore = data.length === 1000;
+            from += 1000;
+        }
+
+        // 4. Calcular precios Bs. para cada item
+        const payload = [];
+        for (const item of allItems) {
+            const ars = Number(item.precio_tapa || 0);
+            if (!ars) continue;
+
+            const ed = item.editorial;
+            const edConf = edSettings[ed] || {};
+            const dto = edConf.dto ?? ((EDITORIAL_DTOS_DEFAULT[ed] ?? 35) / 100);
+            const margen = edConf.margen ?? DEFAULTS.margen_venta;
+            const mmayo = edConf.mmayo ?? DEFAULTS.margen_mayoreo;
+
+            const override = adjustMap[ed]?.[Math.round(ars)];
+            const D = (ars * (1 - dto) * tcf + flete) * (1 + margen);
+            const E = Math.round(D / 5) * 5;
+            const pvFinal = override || Math.round(E * 0.65 / 5) * 5;
+
+            const costoReal = ars * (1 - dto) * tca + flete;
+            const pMayor = costoReal * (1 + mmayo);
+            const n2 = pvFinal * (1 - (dtoNiveles[1] ?? 10) / 100);
+            const n3 = pvFinal * (1 - (dtoNiveles[2] ?? 15) / 100);
+
+            payload.push({
+                id: item.id,
+                product_id: item.product_id,
+                titulo: item.titulo,
+                editorial: item.editorial,
+                precio_tapa: item.precio_tapa,
+                precio_venta_bs: Number(pvFinal.toFixed(2)),
+                precio_n2_bs: Number(n2.toFixed(2)),
+                precio_n3_bs: Number(n3.toFixed(2)),
+                precio_mayoreo_bs: Number(pMayor.toFixed(2)),
+                updated_at: new Date(),
+            });
+        }
+
+        // 5. Upsert en batches de 500
+        for (let i = 0; i < payload.length; i += 500) {
+            const { error } = await supabase
+                .from('catalogo_productos')
+                .upsert(payload.slice(i, i + 500), { onConflict: 'id' });
+            if (error) throw error;
+        }
+
+        this.clearCache();
+        console.log(`✅ applyStoredPricing: ${payload.length} items actualizados con precios Bs.`);
+        return { count: payload.length };
+    },
+
+    /**
      * Limpia todas las etiquetas de reimpresión de la base de datos y la caché
      */
     async clearAllReprintLabels() {

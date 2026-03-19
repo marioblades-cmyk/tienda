@@ -22,6 +22,17 @@ const CatalogUpdatedView = () => {
         loadCatalog();
     }, []);
 
+    // Escuchar eventos de actualización de precios para auto-refrescar
+    useEffect(() => {
+        const handler = () => loadCatalog(true);
+        window.addEventListener('catalog-prices-updated', handler);
+        window.addEventListener('catalog-status-changed', handler);
+        return () => {
+            window.removeEventListener('catalog-prices-updated', handler);
+            window.removeEventListener('catalog-status-changed', handler);
+        };
+    }, []);
+
     const loadCatalog = async (force = false) => {
         setIsLoading(true);
         try {

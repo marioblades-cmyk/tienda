@@ -158,8 +158,23 @@ export default function AdminWeeklyView() {
                     // 4. SINCRONIZACIÓN INTELIGENTE (FASE 3)
                     console.log('🚀 Iniciando sincronización automática con el Maestro...');
                     const syncResult = await catalogService.syncWithMaster(analysis, user.id, file.name, id);
+
+                    // 5. AUTO-PRICING (FASE 4): aplica configs guardados para calcular precios Bs.
+                    let pricingCount = 0;
+                    try {
+                        console.log('💰 Aplicando análisis de precios con configs guardados...');
+                        const pricingResult = await catalogService.applyStoredPricing();
+                        pricingCount = pricingResult?.count || 0;
+                        if (pricingCount > 0) {
+                            window.dispatchEvent(new CustomEvent('catalog-prices-updated'));
+                        }
+                    } catch (pricingErr) {
+                        console.warn('⚠️ Auto-pricing falló (no crítico):', pricingErr);
+                    }
+
                     if (syncResult && syncResult.count > 0) {
-                        alert(`📖 CATÁLOGO ACTUALIZADO\nSe sincronizaron ${syncResult.count} productos con sus nuevos precios sugeridos.`);
+                        const pricingMsg = pricingCount > 0 ? `\n💰 Precios Bs. calculados: ${pricingCount} productos` : '';
+                        alert(`📖 CATÁLOGO ACTUALIZADO\nSe sincronizaron ${syncResult.count} productos con sus nuevos precios sugeridos.${pricingMsg}`);
                     }
                 }
             } catch (err) {
