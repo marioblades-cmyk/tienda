@@ -307,8 +307,6 @@ export default function QuotationTool() {
             return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null }];
         });
         setShowItemSearch(false);
-        setItemSearchQuery('');
-        setItemSearchResults([]);
     };
 
     // ── Capture card as Blob ──
@@ -803,7 +801,7 @@ Gracias por tu confianza! 😊`;
                                         onClick={openItemSearch}
                                         className="flex items-center gap-2 px-3 py-1.5 bg-surface border border-border hover:border-primary text-muted hover:text-primary rounded-lg text-xs font-bold transition-all"
                                     >
-                                        <Search size={14} /> Buscar item
+                                        <Plus size={14} /> Agregar rápidamente
                                     </button>
                                     <button
                                         onClick={openBulkModal}
@@ -813,6 +811,59 @@ Gracias por tu confianza! 😊`;
                                     </button>
                                 </div>
                             </div>
+
+                            {showItemSearch && (
+                                <div className="border-b border-border bg-surface/50 p-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <Search size={14} className="text-muted shrink-0" />
+                                        <input
+                                            ref={itemSearchRef}
+                                            type="text"
+                                            placeholder="Buscar producto por nombre..."
+                                            value={itemSearchQuery}
+                                            onChange={e => handleItemSearchInput(e.target.value)}
+                                            className="flex-1 bg-transparent outline-none text-sm"
+                                            autoFocus
+                                        />
+                                        {itemSearchLoading && <RefreshCw size={14} className="animate-spin text-muted shrink-0" />}
+                                        <button
+                                            onClick={() => { setShowItemSearch(false); setItemSearchQuery(''); setItemSearchResults([]); }}
+                                            className="text-muted hover:text-text shrink-0"
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto rounded-lg border border-border">
+                                        {itemSearchResults.length === 0 && itemSearchQuery.length >= 2 && !itemSearchLoading && (
+                                            <p className="text-center text-muted text-xs py-4">Sin resultados para "{itemSearchQuery}"</p>
+                                        )}
+                                        {itemSearchResults.length === 0 && itemSearchQuery.length < 2 && (
+                                            <p className="text-center text-muted text-xs py-4">Escribí 2+ caracteres para buscar</p>
+                                        )}
+                                        {itemSearchResults.map(product => {
+                                            const alreadyIn = items.some(i => i.product_id === product.product_id);
+                                            const price = getItemPrice(product, tipoPrecio);
+                                            return (
+                                                <div key={product.product_id}
+                                                    onClick={() => !alreadyIn && addSingleItem(product)}
+                                                    className={`flex items-center gap-3 px-3 py-2 border-b border-border/50 transition-all last:border-0 ${alreadyIn ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-2 cursor-pointer'}`}
+                                                >
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
+                                                        <p className="text-xs text-muted">{product.editorial}</p>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <p className="text-sm font-bold font-mono text-primary">Bs. {price.toFixed(2)}</p>
+                                                        {alreadyIn
+                                                            ? <p className="text-xs text-green-500">✓ ya en cotización</p>
+                                                            : <p className="text-xs text-muted">Click para agregar</p>}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
                             {items.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -1042,57 +1093,6 @@ Gracias por tu confianza! 😊`;
                                 </div>
                             </div>
                         )}
-                    </div>
-                </div>
-            )}
-
-            {/* ── SINGLE ITEM SEARCH MODAL ── */}
-            {showItemSearch && (
-                <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4 bg-black/60 backdrop-blur-sm" onClick={e => e.target === e.currentTarget && setShowItemSearch(false)}>
-                    <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-lg">
-                        <div className="p-4 border-b border-border flex items-center gap-3">
-                            <Search size={16} className="text-muted shrink-0" />
-                            <input
-                                ref={itemSearchRef}
-                                type="text"
-                                placeholder="Buscar producto por nombre..."
-                                value={itemSearchQuery}
-                                onChange={e => handleItemSearchInput(e.target.value)}
-                                className="flex-1 bg-transparent outline-none text-sm"
-                            />
-                            {itemSearchLoading && <RefreshCw size={14} className="animate-spin text-muted shrink-0" />}
-                            <button onClick={() => setShowItemSearch(false)} className="text-muted hover:text-text shrink-0">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="max-h-80 overflow-y-auto">
-                            {itemSearchResults.length === 0 && itemSearchQuery.length >= 2 && !itemSearchLoading && (
-                                <p className="text-center text-muted text-sm py-8">Sin resultados para "{itemSearchQuery}"</p>
-                            )}
-                            {itemSearchResults.length === 0 && itemSearchQuery.length < 2 && (
-                                <p className="text-center text-muted text-xs py-8">Escribí al menos 2 caracteres para buscar</p>
-                            )}
-                            {itemSearchResults.map(product => {
-                                const alreadyIn = items.some(i => i.product_id === product.product_id);
-                                const price = getItemPrice(product, tipoPrecio);
-                                return (
-                                    <div
-                                        key={product.product_id}
-                                        onClick={() => !alreadyIn && addSingleItem(product)}
-                                        className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 transition-all ${alreadyIn ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-2 cursor-pointer'}`}
-                                    >
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
-                                            <p className="text-xs text-muted">{product.editorial}</p>
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                            <p className="text-sm font-bold font-mono text-primary">Bs. {price.toFixed(2)}</p>
-                                            {alreadyIn ? <p className="text-xs text-green-500">✓ ya en cotización</p> : <p className="text-xs text-muted">Click para agregar</p>}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
                     </div>
                 </div>
             )}
