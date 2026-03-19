@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
     FileImage, Send, Save, Trash2, Plus, X, ShoppingCart,
     MessageCircle, ChevronDown, RefreshCw, Package, CheckCircle2,
-    Clock, XCircle, Archive, Eye, Link, Search, Layers, Hash
+    Clock, XCircle, Archive, Eye, Link, Search, Layers, Hash, Copy
 } from 'lucide-react';
 
 const PRICE_TYPES = [
@@ -29,6 +29,14 @@ const ESTADO_CONFIG = {
     rechazada: { label: 'Rechazada', icon: XCircle, color: 'text-red-400 bg-red-400/10 border-red-400/20' },
 };
 
+const CONDITIONS = [
+    { title: 'Disponibilidad de Stock', text: 'Los títulos y productos están sujetos a disponibilidad al momento de concretar la compra. Debido al flujo constante de ventas, el inventario puede variar entre la emisión de esta cotización y la confirmación final del pedido.' },
+    { title: 'Gestión con Editoriales', text: 'Los pedidos pueden verse afectados por factores ajenos a la tienda, tales como retrasos en las fechas de salida editorial, falta de disponibilidad de producto en origen o recortes en las unidades asignadas por parte de la editorial.' },
+    { title: 'Eventos Imprevistos', text: 'La entrega o disponibilidad final podría verse afectada por situaciones de fuerza mayor, eventos climatológicos extremos o retrasos logísticos en el transporte internacional/nacional.' },
+    { title: 'Envíos', text: 'El costo de envío no está incluido en el precio. La logística y entrega serán coordinadas directamente con el cliente una vez confirmado el pago, según la zona y el método de transporte de su preferencia.' },
+    { title: 'Confirmación', text: 'Para asegurar sus ejemplares, le recomendamos realizar el pago y enviar el comprobante a la brevedad posible.' },
+];
+
 function getItemPrice(item, priceType) {
     const field = PRICE_FIELD[priceType];
     return Number(item[field] || item.precio_tapa || 0);
@@ -40,7 +48,7 @@ export default function QuotationTool() {
 
     // Form state
     const [clienteNombre, setClienteNombre] = useState('');
-    const [clienteCelular, setClienteCelular] = useState('');
+    const [clienteCelular, setClienteCelular] = useState('+591 ');
     const [nota, setNota] = useState('');
     const [tipoPrecio, setTipoPrecio] = useState('retail');
     const [descuentoPct, setDescuentoPct] = useState(0);
@@ -119,6 +127,21 @@ export default function QuotationTool() {
         setItems(prev => prev.map(i => i.product_id === productId ? { ...i, unitPrice: p, customPrice: p } : i));
     };
 
+    const updateTitulo = (productId, titulo) => {
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo } : i));
+    };
+
+    const duplicateItem = (item) => {
+        const newId = `${item.product_id}_copy_${Date.now()}`;
+        setItems(prev => {
+            const idx = prev.findIndex(i => i.product_id === item.product_id);
+            const copy = { ...item, product_id: newId };
+            const next = [...prev];
+            next.splice(idx + 1, 0, copy);
+            return next;
+        });
+    };
+
     const clearAll = () => {
         setItems([]);
         setClienteNombre('');
@@ -171,7 +194,10 @@ export default function QuotationTool() {
             const rangeSet = parseRange(bulkRange);
             if (rangeSet) {
                 setBulkSelected(new Set(
-                    results.filter(p => { const v = extractVolNum(p.titulo); return v !== null && rangeSet.has(v); }).map(p => p.product_id)
+                    results.filter(p => {
+                        const v = extractVolNum(p.titulo);
+                        return p.titulo.toLowerCase().startsWith(term.trim().toLowerCase()) && v !== null && rangeSet.has(v);
+                    }).map(p => p.product_id)
                 ));
             } else {
                 setBulkSelected(new Set());
@@ -183,11 +209,26 @@ export default function QuotationTool() {
         }
     };
 
+    const titleMatchesTerm = (title, term) => {
+        // Only select items whose title STARTS WITH the search term (case-insensitive)
+        // This avoids selecting "Chainsaw Man x Blue Lock" when searching "Blue Lock"
+        return title.toLowerCase().startsWith(term.trim().toLowerCase());
+    };
+
     const applyBulkRange = () => {
         const rangeSet = parseRange(bulkRange);
-        if (!rangeSet) { setBulkSelected(new Set(bulkResults.map(p => p.product_id))); return; }
+        if (!rangeSet) {
+            // No range: select only items that start with search term
+            setBulkSelected(new Set(
+                bulkResults.filter(p => titleMatchesTerm(p.titulo, bulkSearch)).map(p => p.product_id)
+            ));
+            return;
+        }
         setBulkSelected(new Set(
-            bulkResults.filter(p => { const v = extractVolNum(p.titulo); return v !== null && rangeSet.has(v); }).map(p => p.product_id)
+            bulkResults.filter(p => {
+                const v = extractVolNum(p.titulo);
+                return titleMatchesTerm(p.titulo, bulkSearch) && v !== null && rangeSet.has(v);
+            }).map(p => p.product_id)
         ));
     };
 
@@ -561,14 +602,15 @@ Gracias por tu confianza! 😊`;
                                 </div>
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-muted uppercase tracking-wider block mb-1.5">Nota / Condiciones</label>
+                                <label className="text-xs font-bold text-muted uppercase tracking-wider block mb-1.5">Nota adicional (opcional)</label>
                                 <textarea
-                                    placeholder="Ej.: Válida por 7 días. Precio sujeto a disponibilidad..."
+                                    placeholder="Ej.: Válida hasta el 30/03. Consultar disponibilidad..."
                                     value={nota}
                                     onChange={e => setNota(e.target.value)}
-                                    rows={3}
+                                    rows={2}
                                     className="input-field text-sm w-full resize-none"
                                 />
+                                <p className="text-xs text-muted mt-1">Las condiciones estándar se incluyen automáticamente en la cotización.</p>
                             </div>
                         </div>
 
@@ -691,53 +733,77 @@ Gracias por tu confianza! 😊`;
                                             <tr>
                                                 <th className="text-left p-3">Título</th>
                                                 <th className="text-center p-3 w-20">Cant.</th>
-                                                <th className="text-right p-3 w-32">P. Unitario</th>
+                                                <th className="text-right p-3 w-36">P. Unitario</th>
                                                 <th className="text-right p-3 w-32">Subtotal</th>
-                                                <th className="p-3 w-10"></th>
+                                                <th className="p-3 w-16"></th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
-                                            {items.map(item => (
-                                                <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
-                                                    <td className="p-3">
-                                                        <p className="font-semibold text-text leading-tight">{item.titulo}</p>
-                                                        <p className="text-xs text-muted mt-0.5">{item.editorial}</p>
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <input
-                                                            type="number"
-                                                            min="1"
-                                                            value={item.qty}
-                                                            onChange={e => updateQty(item.product_id, e.target.value)}
-                                                            className="w-16 text-center bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
-                                                        />
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <div className="flex items-center justify-end gap-1">
-                                                            <span className="text-muted text-xs">Bs.</span>
+                                            {items.map(item => {
+                                                const itemSubtotal = (item.unitPrice || 0) * (item.qty || 1);
+                                                const itemSubtotalDesc = descuentoPct > 0 ? itemSubtotal * (1 - descuentoPct / 100) : null;
+                                                return (
+                                                    <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
+                                                        <td className="p-3">
+                                                            <input
+                                                                type="text"
+                                                                value={item.titulo}
+                                                                onChange={e => updateTitulo(item.product_id, e.target.value)}
+                                                                className="font-semibold text-text leading-tight bg-transparent border-b border-transparent hover:border-border focus:border-primary focus:outline-none w-full text-sm transition-colors"
+                                                            />
+                                                            <p className="text-xs text-muted mt-0.5">{item.editorial}</p>
+                                                        </td>
+                                                        <td className="p-3">
                                                             <input
                                                                 type="number"
-                                                                min="0"
-                                                                step="0.5"
-                                                                value={item.unitPrice}
-                                                                onChange={e => updatePrice(item.product_id, e.target.value)}
-                                                                className="w-24 text-right bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
+                                                                min="1"
+                                                                value={item.qty}
+                                                                onChange={e => updateQty(item.product_id, e.target.value)}
+                                                                className="w-16 text-center bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
                                                             />
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-3 text-right font-bold font-mono text-primary">
-                                                        Bs. {((item.unitPrice || 0) * (item.qty || 1)).toFixed(2)}
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <button
-                                                            onClick={() => removeItem(item.product_id)}
-                                                            className="text-muted hover:text-red-400 transition-colors"
-                                                        >
-                                                            <X size={16} />
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="flex items-center justify-end gap-1">
+                                                                <span className="text-muted text-xs">Bs.</span>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    step="0.5"
+                                                                    value={item.unitPrice}
+                                                                    onChange={e => updatePrice(item.product_id, e.target.value)}
+                                                                    className="w-24 text-right bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
+                                                                />
+                                                            </div>
+                                                            {itemSubtotalDesc !== null && (
+                                                                <p className="text-xs text-green-500 text-right mt-0.5 font-mono">
+                                                                    c/desc: Bs. {(item.unitPrice * (1 - descuentoPct / 100)).toFixed(2)}
+                                                                </p>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3 text-right">
+                                                            <p className="font-bold font-mono text-primary">{itemSubtotalDesc !== null ? <span className="line-through text-muted text-xs mr-1">Bs. {itemSubtotal.toFixed(2)}</span> : null}Bs. {(itemSubtotalDesc ?? itemSubtotal).toFixed(2)}</p>
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="flex gap-1">
+                                                                <button
+                                                                    onClick={() => duplicateItem(item)}
+                                                                    className="text-muted hover:text-primary transition-colors"
+                                                                    title="Duplicar item"
+                                                                >
+                                                                    <Copy size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => removeItem(item.product_id)}
+                                                                    className="text-muted hover:text-red-400 transition-colors"
+                                                                    title="Eliminar"
+                                                                >
+                                                                    <X size={16} />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -800,7 +866,9 @@ Gracias por tu confianza! 😊`;
                                                         <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
                                                         <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
                                                         <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: '#444' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>Bs. {((item.unitPrice || 0) * (item.qty || 1)).toFixed(2)}</td>
+                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>
+                                                            Bs. {(((item.unitPrice || 0) * (item.qty || 1)) * (1 - descuentoPct / 100)).toFixed(2)}
+                                                        </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -833,14 +901,24 @@ Gracias por tu confianza! 😊`;
                                         </div>
                                     </div>
 
-                                    {/* Footer */}
-                                    {nota && (
-                                        <div style={{ padding: '12px 32px', background: '#f9f9f9', borderTop: '1px solid #eee' }}>
-                                            <div style={{ fontSize: '10px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 700, marginBottom: '4px' }}>Nota</div>
-                                            <div style={{ fontSize: '12px', color: '#555', fontStyle: 'italic' }}>{nota}</div>
+                                    {/* Conditions */}
+                                    <div style={{ padding: '16px 32px 8px', background: '#f9f9f9', borderTop: '2px solid #eee' }}>
+                                        <div style={{ fontSize: '11px', color: '#f07d2a', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: 800, marginBottom: '10px' }}>Condiciones</div>
+                                        <div style={{ fontSize: '10px', color: '#555', fontWeight: 700, marginBottom: '10px' }}>Condiciones de la Cotización y Pedidos:</div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
+                                            {CONDITIONS.map((c, i) => (
+                                                <div key={i} style={{ fontSize: '10px', color: '#555', lineHeight: 1.5 }}>
+                                                    <span style={{ fontWeight: 800, color: '#333' }}>{c.title}: </span>{c.text}
+                                                </div>
+                                            ))}
                                         </div>
-                                    )}
-                                    <div style={{ padding: '12px 32px 20px', background: 'linear-gradient(135deg, #1a2d42, #0f1e2e)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        {nota && (
+                                            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #e5e5e5', fontSize: '10px', color: '#777', fontStyle: 'italic' }}>
+                                                <span style={{ fontWeight: 700, fontStyle: 'normal', color: '#555' }}>Nota: </span>{nota}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div style={{ padding: '10px 32px 16px', background: 'linear-gradient(135deg, #1a2d42, #0f1e2e)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.2em' }}>MANGAS COMICS BOLIVIA</div>
                                         <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '10px' }}>Generado el {today}</div>
                                     </div>
