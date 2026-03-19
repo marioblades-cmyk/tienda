@@ -824,19 +824,14 @@ Gracias por tu confianza! 😊`;
                                             const price = getItemPrice(product, tipoPrecio);
                                             return (
                                                 <div key={product.product_id}
-                                                    className="flex items-center gap-3 px-3 py-2 border-b border-border/50 last:border-0 hover:bg-surface-2 transition-all"
+                                                    onClick={() => !alreadyIn && addSingleItem(product)}
+                                                    className={`flex items-center gap-3 px-3 py-2 border-b border-border/50 last:border-0 transition-all ${alreadyIn ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-2 cursor-pointer'}`}
                                                 >
                                                     <div className="flex-1 min-w-0">
                                                         <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
                                                         <p className="text-xs text-muted">{product.editorial} · Bs. {price.toFixed(2)}</p>
                                                     </div>
-                                                    <button
-                                                        onClick={() => !alreadyIn && addSingleItem(product)}
-                                                        disabled={alreadyIn}
-                                                        className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-all ${alreadyIn ? 'opacity-40 cursor-not-allowed text-muted' : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20'}`}
-                                                    >
-                                                        {alreadyIn ? '✓ En lista' : <><Plus size={12} /> Agregar</>}
-                                                    </button>
+                                                    {alreadyIn && <span className="shrink-0 text-xs text-green-500">✓ En lista</span>}
                                                 </div>
                                             );
                                         })}
@@ -883,8 +878,8 @@ Gracias por tu confianza! 😊`;
                                                             />
                                                             <div className="flex items-center gap-1 mt-0.5">
                                                                 <p className="text-xs text-muted">{item.editorial}</p>
-                                                                {item.product_id && (
-                                                                    <span className="text-xs text-green-500/50 font-mono" title="Vinculado al catálogo maestro">· #cat</span>
+                                                                {!item.product_id && (
+                                                                    <span className="text-xs text-yellow-500 font-mono" title="No vinculado al catálogo maestro">⚠ sin cat</span>
                                                                 )}
                                                             </div>
                                                         </td>
