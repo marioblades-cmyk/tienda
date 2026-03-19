@@ -119,7 +119,10 @@ export default function QuotationTool() {
     }, [tipoPrecio]);
 
     // Calculated totals
-    const subtotal = items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.qty || 1), 0);
+    const subtotal = items.reduce((sum, item) => {
+        const priceAfterItemDto = (item.unitPrice || 0) * (1 - (item.itemDiscountPct || 0) / 100);
+        return sum + priceAfterItemDto * (item.qty || 1);
+    }, 0);
     const discountAmount = subtotal * (descuentoPct / 100);
     const total = subtotal - discountAmount + Number(costoEnvio || 0);
 
@@ -140,6 +143,11 @@ export default function QuotationTool() {
 
     const updateTitulo = (productId, titulo) => {
         setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo } : i));
+    };
+
+    const updateItemDiscount = (productId, pct) => {
+        const d = Math.min(100, Math.max(0, parseFloat(pct) || 0));
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: d } : i));
     };
 
     const duplicateItem = (item) => {
@@ -859,13 +867,16 @@ Gracias por tu confianza! 😊`;
                                                 <th className="text-left p-3">Título</th>
                                                 <th className="text-center p-3 w-20">Cant.</th>
                                                 <th className="text-right p-3 w-36">P. Unitario</th>
+                                                <th className="text-center p-3 w-20">Desc. %</th>
                                                 <th className="text-right p-3 w-32">Subtotal</th>
                                                 <th className="p-3 w-16"></th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
                                             {items.map(item => {
-                                                const itemSubtotal = (item.unitPrice || 0) * (item.qty || 1);
+                                                const itemDtoPct = item.itemDiscountPct || 0;
+                                                const priceAfterItemDto = (item.unitPrice || 0) * (1 - itemDtoPct / 100);
+                                                const itemSubtotal = priceAfterItemDto * (item.qty || 1);
                                                 const itemSubtotalDesc = descuentoPct > 0 ? itemSubtotal * (1 - descuentoPct / 100) : null;
                                                 return (
                                                     <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
@@ -878,9 +889,10 @@ Gracias por tu confianza! 😊`;
                                                             />
                                                             <div className="flex items-center gap-1 mt-0.5">
                                                                 <p className="text-xs text-muted">{item.editorial}</p>
-                                                                {!item.product_id && (
-                                                                    <span className="text-xs text-yellow-500 font-mono" title="No vinculado al catálogo maestro">⚠ sin cat</span>
-                                                                )}
+                                                                {item.product_id
+                                                                    ? <span className="text-xs text-green-500/70" title="Vinculado al catálogo maestro">· ✓ cat</span>
+                                                                    : <span className="text-xs text-yellow-500" title="No vinculado al catálogo maestro">· ⚠ sin cat</span>
+                                                                }
                                                             </div>
                                                         </td>
                                                         <td className="p-3">
@@ -904,11 +916,26 @@ Gracias por tu confianza! 😊`;
                                                                     className="w-24 text-right bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
                                                                 />
                                                             </div>
-                                                            {itemSubtotalDesc !== null && (
-                                                                <p className="text-xs text-green-500 text-right mt-0.5 font-mono">
-                                                                    c/desc: Bs. {(item.unitPrice * (1 - descuentoPct / 100)).toFixed(2)}
+                                                            {itemDtoPct > 0 && (
+                                                                <p className="text-xs text-primary/70 text-right mt-0.5 font-mono">
+                                                                    → Bs. {priceAfterItemDto.toFixed(2)}
                                                                 </p>
                                                             )}
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="flex items-center justify-center gap-0.5">
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    max="100"
+                                                                    step="1"
+                                                                    value={itemDtoPct || ''}
+                                                                    placeholder="0"
+                                                                    onChange={e => updateItemDiscount(item.product_id, e.target.value)}
+                                                                    className="w-12 text-center bg-surface border border-border rounded px-1 py-1 text-sm font-mono"
+                                                                />
+                                                                <span className="text-muted text-xs">%</span>
+                                                            </div>
                                                         </td>
                                                         <td className="p-3 text-right">
                                                             <p className="font-bold font-mono text-primary">{itemSubtotalDesc !== null ? <span className="line-through text-muted text-xs mr-1">Bs. {itemSubtotal.toFixed(2)}</span> : null}Bs. {(itemSubtotalDesc ?? itemSubtotal).toFixed(2)}</p>

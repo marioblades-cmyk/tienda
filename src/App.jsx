@@ -15,7 +15,7 @@ import QuotationTool from './components/QuotationTool';
 import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
-    CheckCircle2, Zap, FileText
+    CheckCircle2, BookOpen, FileText
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -54,7 +54,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'confirmaciones', icon: CheckCircle2, label: 'Confirmaciones' },
         { id: 'remitos', icon: Database, label: 'Gestión Integral' },
         { id: 'usuarios', icon: Users, label: 'Vendedores' },
-        { id: 'entelequia', icon: Zap, label: 'Herramienta Editorial' },
+        { id: 'entelequia', icon: BookOpen, label: 'Herramienta Editorial' },
         { id: 'precios', icon: Database, label: 'Análisis de Precios' },
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
