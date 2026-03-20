@@ -94,7 +94,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
                         active={activeTab === item.id}
                         onClick={onTabChange}
                         showLabel={showLabels}
-                        badge={false}
+                        badge={item.id === 'entelequia' && hasPendingChanges}
                     />
                 ))}
             </nav>
