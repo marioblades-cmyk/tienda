@@ -164,6 +164,10 @@ export default function QuotationTool() {
         setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: d, hasCustomDiscount: true } : i));
     };
 
+    const resetItemDiscount = (productId) => {
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: 0, hasCustomDiscount: false } : i));
+    };
+
     const duplicateItem = (item) => {
         const newId = `${item.product_id}_copy_${Date.now()}`;
         setItems(prev => {
@@ -938,18 +942,24 @@ Gracias por tu confianza! 😊`;
                                                             )}
                                                         </td>
                                                         <td className="p-3">
-                                                            <div className="flex items-center justify-center gap-0.5">
-                                                                <input
-                                                                    type="number"
-                                                                    min="0"
-                                                                    max="100"
-                                                                    step="1"
-                                                                    value={effectivePct || ''}
-                                                                    placeholder="0"
-                                                                    onChange={e => updateItemDiscount(item.product_id, e.target.value)}
-                                                                    className={`w-12 text-center bg-surface border rounded px-1 py-1 text-sm font-mono ${item.hasCustomDiscount ? 'border-primary' : 'border-border'}`}
-                                                                />
-                                                                <span className="text-muted text-xs">%</span>
+                                                            <div className="flex flex-col items-center gap-0.5">
+                                                                <div className="flex items-center gap-0.5">
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="100"
+                                                                        step="1"
+                                                                        value={effectivePct || ''}
+                                                                        placeholder="0"
+                                                                        onChange={e => updateItemDiscount(item.product_id, e.target.value)}
+                                                                        className={`w-12 text-center bg-surface border rounded px-1 py-1 text-sm font-mono ${item.hasCustomDiscount ? 'border-primary' : 'border-border'}`}
+                                                                    />
+                                                                    <span className="text-muted text-xs">%</span>
+                                                                </div>
+                                                                {item.hasCustomDiscount
+                                                                    ? <button onClick={() => resetItemDiscount(item.product_id)} className="text-[10px] text-muted hover:text-primary transition-colors leading-none" title="Volver al descuento global">↺ global</button>
+                                                                    : descuentoPct > 0 && <span className="text-[10px] text-muted leading-none">global</span>
+                                                                }
                                                             </div>
                                                         </td>
                                                         <td className="p-3 text-right">
