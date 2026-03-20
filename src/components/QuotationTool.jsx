@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
     FileImage, Send, Save, Trash2, Plus, X, ShoppingCart,
     MessageCircle, ChevronDown, RefreshCw, Package, CheckCircle2,
-    Clock, XCircle, Archive, Eye, Link
+    Clock, XCircle, Archive, Eye, Link, Search, Layers, Hash, Copy
 } from 'lucide-react';
 
 const PRICE_TYPES = [
@@ -29,6 +29,14 @@ const ESTADO_CONFIG = {
     rechazada: { label: 'Rechazada', icon: XCircle, color: 'text-red-400 bg-red-400/10 border-red-400/20' },
 };
 
+const CONDITIONS = [
+    { title: 'Disponibilidad de Stock', text: 'Los títulos y productos están sujetos a disponibilidad al momento de concretar la compra. Debido al flujo constante de ventas, el inventario puede variar entre la emisión de esta cotización y la confirmación final del pedido.' },
+    { title: 'Gestión con Editoriales', text: 'Los pedidos pueden verse afectados por factores ajenos a la tienda, tales como retrasos en las fechas de salida editorial, falta de disponibilidad de producto en origen o recortes en las unidades asignadas por parte de la editorial.' },
+    { title: 'Eventos Imprevistos', text: 'La entrega o disponibilidad final podría verse afectada por situaciones de fuerza mayor, eventos climatológicos extremos o retrasos logísticos en el transporte internacional/nacional.' },
+    { title: 'Envíos', text: 'El costo de envío no está incluido en el precio. La logística y entrega serán coordinadas directamente con el cliente una vez confirmado el pago, según la zona y el método de transporte de su preferencia.' },
+    { title: 'Confirmación', text: 'Para asegurar sus ejemplares, le recomendamos realizar el pago y enviar el comprobante a la brevedad posible.' },
+];
+
 function getItemPrice(item, priceType) {
     const field = PRICE_FIELD[priceType];
     return Number(item[field] || item.precio_tapa || 0);
@@ -40,7 +48,7 @@ export default function QuotationTool() {
 
     // Form state
     const [clienteNombre, setClienteNombre] = useState('');
-    const [clienteCelular, setClienteCelular] = useState('');
+    const [clienteCelular, setClienteCelular] = useState('+591 ');
     const [nota, setNota] = useState('');
     const [tipoPrecio, setTipoPrecio] = useState('retail');
     const [descuentoPct, setDescuentoPct] = useState(0);
@@ -56,6 +64,27 @@ export default function QuotationTool() {
     const [currentId, setCurrentId] = useState(null);
     const [currentEstado, setCurrentEstado] = useState('borrador');
 
+    // Bulk add modal state
+    const [showBulkModal, setShowBulkModal] = useState(false);
+    const [bulkSearch, setBulkSearch] = useState('');
+    const [bulkRange, setBulkRange] = useState('');
+    const [bulkResults, setBulkResults] = useState([]);
+    const [bulkSelected, setBulkSelected] = useState(new Set());
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const bulkSearchRef = useRef(null);
+
+    // Single item search state
+    const [itemSearchQuery, setItemSearchQuery] = useState('');
+    const [itemSearchResults, setItemSearchResults] = useState([]);
+    const [itemSearchLoading, setItemSearchLoading] = useState(false);
+    const itemSearchRef = useRef(null);
+    const itemSearchDebounce = useRef(null);
+    const tituloCheckDebounce = useRef({});
+
+    // Conditions editor state
+    const [customConditions, setCustomConditions] = useState(() => CONDITIONS.map(c => ({ ...c })));
+    const [showConditionsEditor, setShowConditionsEditor] = useState(false);
+
     // Load cart from localStorage on mount
     useEffect(() => {
         try {
@@ -63,17 +92,17 @@ export default function QuotationTool() {
             if (cart) {
                 const parsed = JSON.parse(cart);
                 if (Array.isArray(parsed) && parsed.length > 0) {
+                    const toMerge = [];
                     setItems(prev => {
                         // Merge avoiding duplicates by product_id
                         const existing = new Set(prev.map(i => i.product_id));
-                        const newItems = parsed.filter(i => !existing.has(i.product_id)).map(item => ({
-                            ...item,
-                            qty: 1,
-                            unitPrice: getItemPrice(item, tipoPrecio),
-                            customPrice: null,
-                        }));
+                        const newItems = parsed.filter(i => !existing.has(i.product_id)).map(item => {
+                            toMerge.push(item);
+                            return { ...item, qty: 1, unitPrice: getItemPrice(item, tipoPrecio), customPrice: null, catalogLinked: null };
+                        });
                         return [...prev, ...newItems];
                     });
+                    setTimeout(() => toMerge.forEach(item => checkCatalog(item.product_id, item.titulo)), 0);
                     localStorage.removeItem('mcb_quote_cart');
                 }
             }
@@ -90,10 +119,23 @@ export default function QuotationTool() {
         })));
     }, [tipoPrecio]);
 
+    // Descuento efectivo por item: si el item tiene descuento propio lo usa,
+    // si no, usa el global. No se acumulan.
+    const getEffectivePct = (item) => item.hasCustomDiscount ? (item.itemDiscountPct || 0) : descuentoPct;
+
     // Calculated totals
-    const subtotal = items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.qty || 1), 0);
-    const discountAmount = subtotal * (descuentoPct / 100);
-    const total = subtotal - discountAmount + Number(costoEnvio || 0);
+    const rawTotal = items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.qty || 1), 0);
+    const subtotal = items.reduce((sum, item) => {
+        const pct = getEffectivePct(item);
+        return sum + (item.unitPrice || 0) * (1 - pct / 100) * (item.qty || 1);
+    }, 0);
+    const discountAmount = rawTotal - subtotal;
+    const total = subtotal + Number(costoEnvio || 0);
+
+    // Badge: solo aparece cuando TODOS los items tienen el mismo %
+    const effectiveDiscounts = items.map(getEffectivePct);
+    const allSamePct = items.length > 0 && effectiveDiscounts.every(d => d === effectiveDiscounts[0]);
+    const uniformPct = allSamePct ? effectiveDiscounts[0] : 0;
 
     // ── Item Management ──
     const removeItem = (productId) => {
@@ -110,15 +152,201 @@ export default function QuotationTool() {
         setItems(prev => prev.map(i => i.product_id === productId ? { ...i, unitPrice: p, customPrice: p } : i));
     };
 
+    // Verifica en BD si el título coincide exactamente con algún producto del catálogo
+    const checkCatalog = (productId, titulo, delay = 0) => {
+        clearTimeout(tituloCheckDebounce.current[productId]);
+        tituloCheckDebounce.current[productId] = setTimeout(async () => {
+            const t = (titulo || '').trim();
+            if (!t) {
+                setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: false } : i));
+                return;
+            }
+            const { data } = await supabase
+                .from('catalogo_productos')
+                .select('product_id')
+                .ilike('titulo', t)
+                .limit(1);
+            const linked = !!(data && data.length > 0);
+            setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: linked } : i));
+        }, delay);
+    };
+
+    const updateTitulo = (productId, titulo) => {
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo, catalogLinked: null } : i));
+        checkCatalog(productId, titulo, 400);
+    };
+
+    const updateItemDiscount = (productId, pct) => {
+        const d = Math.min(100, Math.max(0, parseFloat(pct) || 0));
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: d, hasCustomDiscount: true } : i));
+    };
+
+    const resetItemDiscount = (productId) => {
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: 0, hasCustomDiscount: false } : i));
+    };
+
+    const duplicateItem = (item) => {
+        const newId = `${item.product_id}_copy_${Date.now()}`;
+        setItems(prev => {
+            const idx = prev.findIndex(i => i.product_id === item.product_id);
+            const copy = { ...item, product_id: newId, catalogLinked: null, itemDiscountPct: 0 };
+            const next = [...prev];
+            next.splice(idx + 1, 0, copy);
+            return next;
+        });
+        checkCatalog(newId, item.titulo);
+    };
+
     const clearAll = () => {
         setItems([]);
         setClienteNombre('');
-        setClienteCelular('');
+        setClienteCelular('+591 ');
         setNota('');
         setDescuentoPct(0);
         setCostoEnvio(0);
         setCurrentId(null);
         setCurrentEstado('borrador');
+        setCustomConditions(CONDITIONS.map(c => ({ ...c })));
+    };
+
+    // ── Bulk Add Modal ──
+    const parseRange = (rangeStr) => {
+        if (!rangeStr.trim()) return null;
+        const nums = new Set();
+        for (const part of rangeStr.split(',')) {
+            const trimmed = part.trim();
+            if (trimmed.includes('-')) {
+                const [a, b] = trimmed.split('-').map(n => parseInt(n.trim()));
+                if (!isNaN(a) && !isNaN(b)) {
+                    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) nums.add(i);
+                }
+            } else {
+                const n = parseInt(trimmed);
+                if (!isNaN(n)) nums.add(n);
+            }
+        }
+        return nums.size > 0 ? nums : null;
+    };
+
+    const extractVolNum = (title) => {
+        const matches = title.match(/\d+/g);
+        return matches ? parseInt(matches[matches.length - 1]) : null;
+    };
+
+    const searchBulkCatalog = async (term) => {
+        if (!term || term.trim().length < 2) { setBulkResults([]); return; }
+        setBulkLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('catalogo_productos')
+                .select('*')
+                .ilike('titulo', `%${term.trim()}%`)
+                .order('titulo', { ascending: true })
+                .limit(150);
+            if (error) throw error;
+            const results = data || [];
+            setBulkResults(results);
+            // Auto-select if range is already set
+            const rangeSet = parseRange(bulkRange);
+            if (rangeSet) {
+                setBulkSelected(new Set(
+                    results.filter(p => {
+                        const v = extractVolNum(p.titulo);
+                        return p.titulo.toLowerCase().startsWith(term.trim().toLowerCase()) && v !== null && rangeSet.has(v);
+                    }).map(p => p.product_id)
+                ));
+            } else {
+                setBulkSelected(new Set());
+            }
+        } catch (err) {
+            console.error('Error buscando catálogo:', err);
+        } finally {
+            setBulkLoading(false);
+        }
+    };
+
+    const titleMatchesTerm = (title, term) => {
+        // Only select items whose title STARTS WITH the search term (case-insensitive)
+        // This avoids selecting "Chainsaw Man x Blue Lock" when searching "Blue Lock"
+        return title.toLowerCase().startsWith(term.trim().toLowerCase());
+    };
+
+    const applyBulkRange = () => {
+        const rangeSet = parseRange(bulkRange);
+        if (!rangeSet) {
+            // No range: select only items that start with search term
+            setBulkSelected(new Set(
+                bulkResults.filter(p => titleMatchesTerm(p.titulo, bulkSearch)).map(p => p.product_id)
+            ));
+            return;
+        }
+        setBulkSelected(new Set(
+            bulkResults.filter(p => {
+                const v = extractVolNum(p.titulo);
+                return titleMatchesTerm(p.titulo, bulkSearch) && v !== null && rangeSet.has(v);
+            }).map(p => p.product_id)
+        ));
+    };
+
+    const toggleBulkItem = (productId) => {
+        setBulkSelected(prev => {
+            const next = new Set(prev);
+            next.has(productId) ? next.delete(productId) : next.add(productId);
+            return next;
+        });
+    };
+
+    const confirmBulkAdd = () => {
+        const toAdd = bulkResults.filter(p => bulkSelected.has(p.product_id));
+        setItems(prev => {
+            const existing = new Set(prev.map(i => i.product_id));
+            const newItems = toAdd.filter(p => !existing.has(p.product_id)).map(p => ({
+                ...p, qty: 1, unitPrice: getItemPrice(p, tipoPrecio), customPrice: null, catalogLinked: null,
+            }));
+            return [...prev, ...newItems];
+        });
+        toAdd.forEach(p => checkCatalog(p.product_id, p.titulo));
+        setShowBulkModal(false);
+        setBulkSearch(''); setBulkRange(''); setBulkResults([]); setBulkSelected(new Set());
+    };
+
+    const openBulkModal = () => {
+        setShowBulkModal(true);
+        setTimeout(() => bulkSearchRef.current?.focus(), 50);
+    };
+
+    // ── Single Item Search ──
+    const handleItemSearchInput = (val) => {
+        setItemSearchQuery(val);
+        clearTimeout(itemSearchDebounce.current);
+        if (!val || val.trim().length < 2) { setItemSearchResults([]); return; }
+        setItemSearchLoading(true);
+        itemSearchDebounce.current = setTimeout(async () => {
+            try {
+                const { data } = await supabase
+                    .from('catalogo_productos')
+                    .select('*')
+                    .ilike('titulo', `%${val.trim()}%`)
+                    .order('titulo', { ascending: true })
+                    .limit(10);
+                setItemSearchResults(data || []);
+            } catch (e) {
+                console.error(e);
+            } finally {
+                setItemSearchLoading(false);
+            }
+        }, 300);
+    };
+
+    const addSingleItem = (product) => {
+        setItems(prev => {
+            if (prev.some(i => i.product_id === product.product_id)) return prev;
+            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null, catalogLinked: null }];
+        });
+        checkCatalog(product.product_id, product.titulo);
+        setItemSearchQuery('');
+        setItemSearchResults([]);
+        setTimeout(() => itemSearchRef.current?.focus(), 50);
     };
 
     // ── Capture card as Blob ──
@@ -465,14 +693,51 @@ Gracias por tu confianza! 😊`;
                                 </div>
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-muted uppercase tracking-wider block mb-1.5">Nota / Condiciones</label>
+                                <label className="text-xs font-bold text-muted uppercase tracking-wider block mb-1.5">Nota adicional (opcional)</label>
                                 <textarea
-                                    placeholder="Ej.: Válida por 7 días. Precio sujeto a disponibilidad..."
+                                    placeholder="Ej.: Válida hasta el 30/03. Consultar disponibilidad..."
                                     value={nota}
                                     onChange={e => setNota(e.target.value)}
-                                    rows={3}
+                                    rows={2}
                                     className="input-field text-sm w-full resize-none"
                                 />
+                            </div>
+                            <div>
+                                <button
+                                    onClick={() => setShowConditionsEditor(v => !v)}
+                                    className="flex items-center justify-between w-full text-xs font-bold text-muted hover:text-text transition-colors py-1"
+                                >
+                                    <span className="uppercase tracking-wider">Condiciones estándar</span>
+                                    <span className={`transition-transform ${showConditionsEditor ? 'rotate-180' : ''}`}>▾</span>
+                                </button>
+                                {showConditionsEditor && (
+                                    <div className="mt-2 space-y-3 border border-border rounded-lg p-3 bg-surface-2">
+                                        {customConditions.map((cond, i) => (
+                                            <div key={i} className="space-y-1">
+                                                <input
+                                                    type="text"
+                                                    value={cond.title}
+                                                    onChange={e => setCustomConditions(prev => prev.map((c, j) => j === i ? { ...c, title: e.target.value } : c))}
+                                                    className="input-field h-8 text-xs w-full font-bold"
+                                                    placeholder="Título de condición"
+                                                />
+                                                <textarea
+                                                    value={cond.text}
+                                                    onChange={e => setCustomConditions(prev => prev.map((c, j) => j === i ? { ...c, text: e.target.value } : c))}
+                                                    rows={2}
+                                                    className="input-field text-xs w-full resize-none"
+                                                    placeholder="Texto de la condición..."
+                                                />
+                                            </div>
+                                        ))}
+                                        <button
+                                            onClick={() => setCustomConditions(CONDITIONS.map(c => ({ ...c })))}
+                                            className="text-xs text-muted hover:text-primary transition-colors"
+                                        >
+                                            ↺ Restablecer por defecto
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -526,9 +791,9 @@ Gracias por tu confianza! 😊`;
                                     <span className="text-muted">Subtotal</span>
                                     <span className="font-bold">Bs. {subtotal.toFixed(2)}</span>
                                 </div>
-                                {descuentoPct > 0 && (
+                                {discountAmount > 0 && (
                                     <div className="flex justify-between font-mono text-red-400">
-                                        <span>Descuento ({descuentoPct}%)</span>
+                                        <span>Descuento{uniformPct > 0 ? ` (${uniformPct}%)` : ''}</span>
                                         <span>-Bs. {discountAmount.toFixed(2)}</span>
                                     </div>
                                 )}
@@ -566,13 +831,60 @@ Gracias por tu confianza! 😊`;
                     <div className="xl:col-span-2 space-y-6">
                         {/* ITEMS TABLE */}
                         <div className="card overflow-hidden">
-                            <div className="p-4 bg-surface-2 border-b border-border flex items-center justify-between">
-                                <h3 className="font-bold text-sm uppercase tracking-wider text-muted flex items-center gap-2">
+                            <div className="p-4 bg-surface-2 border-b border-border flex items-center justify-between gap-2">
+                                <h3 className="font-bold text-sm uppercase tracking-wider text-muted flex items-center gap-2 shrink-0">
                                     <ShoppingCart size={16} className="text-primary" />
                                     Productos ({items.length})
                                 </h3>
-                                {items.length === 0 && (
-                                    <span className="text-xs text-muted italic">Seleccioná productos desde el Catálogo Maestro o la Herramienta Editorial</span>
+                                <button
+                                    onClick={openBulkModal}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-bold transition-all border border-primary/20"
+                                >
+                                    <Layers size={14} /> Agregar en lote
+                                </button>
+                            </div>
+
+                            {/* ── BÚSQUEDA RÁPIDA (siempre visible) ── */}
+                            <div className="border-b border-border bg-surface/50 p-3">
+                                <div className="flex items-center gap-2">
+                                    <Search size={14} className="text-muted shrink-0" />
+                                    <input
+                                        ref={itemSearchRef}
+                                        type="text"
+                                        placeholder="Buscar y agregar producto al catálogo..."
+                                        value={itemSearchQuery}
+                                        onChange={e => handleItemSearchInput(e.target.value)}
+                                        className="flex-1 bg-transparent outline-none text-sm"
+                                    />
+                                    {itemSearchLoading && <RefreshCw size={14} className="animate-spin text-muted shrink-0" />}
+                                    {itemSearchQuery && (
+                                        <button onClick={() => { setItemSearchQuery(''); setItemSearchResults([]); }} className="text-muted hover:text-text shrink-0">
+                                            <X size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                                {itemSearchResults.length > 0 && (
+                                    <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-border">
+                                        {itemSearchResults.map(product => {
+                                            const alreadyIn = items.some(i => i.product_id === product.product_id);
+                                            const price = getItemPrice(product, tipoPrecio);
+                                            return (
+                                                <div key={product.product_id}
+                                                    onClick={() => !alreadyIn && addSingleItem(product)}
+                                                    className={`flex items-center gap-3 px-3 py-2 border-b border-border/50 last:border-0 transition-all ${alreadyIn ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-2 cursor-pointer'}`}
+                                                >
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
+                                                        <p className="text-xs text-muted">{product.editorial} · Bs. {price.toFixed(2)}</p>
+                                                    </div>
+                                                    {alreadyIn && <span className="shrink-0 text-xs text-green-500">✓ En lista</span>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                {itemSearchQuery.length >= 2 && itemSearchResults.length === 0 && !itemSearchLoading && (
+                                    <p className="text-center text-muted text-xs py-3">Sin resultados para "{itemSearchQuery}"</p>
                                 )}
                             </div>
 
@@ -580,7 +892,10 @@ Gracias por tu confianza! 😊`;
                                 <div className="flex flex-col items-center justify-center py-16 text-center">
                                     <ShoppingCart size={48} className="text-muted opacity-20 mb-4" />
                                     <p className="text-muted text-sm font-mono">Carrito vacío</p>
-                                    <p className="text-muted/60 text-xs mt-2">Andá al Catálogo Maestro, seleccioná ítems<br />y apretá "Agregar a Cotización"</p>
+                                    <p className="text-muted/60 text-xs mt-2 mb-4">Buscá un producto arriba para agregar,<br />o usá "Agregar en lote" para cargar por colección</p>
+                                    <button onClick={openBulkModal} className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-sm font-bold transition-all border border-primary/20">
+                                        <Layers size={15} /> Agregar en lote
+                                    </button>
                                 </div>
                             ) : (
                                 <div className="overflow-x-auto">
@@ -589,53 +904,113 @@ Gracias por tu confianza! 😊`;
                                             <tr>
                                                 <th className="text-left p-3">Título</th>
                                                 <th className="text-center p-3 w-20">Cant.</th>
-                                                <th className="text-right p-3 w-32">P. Unitario</th>
+                                                <th className="text-right p-3 w-36">P. Unitario</th>
+                                                <th className="text-center p-3 w-20">Desc. %</th>
                                                 <th className="text-right p-3 w-32">Subtotal</th>
-                                                <th className="p-3 w-10"></th>
+                                                <th className="p-3 w-16"></th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
-                                            {items.map(item => (
-                                                <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
-                                                    <td className="p-3">
-                                                        <p className="font-semibold text-text leading-tight">{item.titulo}</p>
-                                                        <p className="text-xs text-muted mt-0.5">{item.editorial}</p>
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <input
-                                                            type="number"
-                                                            min="1"
-                                                            value={item.qty}
-                                                            onChange={e => updateQty(item.product_id, e.target.value)}
-                                                            className="w-16 text-center bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
-                                                        />
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <div className="flex items-center justify-end gap-1">
-                                                            <span className="text-muted text-xs">Bs.</span>
+                                            {items.map(item => {
+                                                const effectivePct = getEffectivePct(item);
+                                                const priceAfterDto = (item.unitPrice || 0) * (1 - effectivePct / 100);
+                                                const itemSubtotalOriginal = (item.unitPrice || 0) * (item.qty || 1);
+                                                const itemSubtotal = priceAfterDto * (item.qty || 1);
+                                                const showOriginalSubtotal = effectivePct > 0;
+                                                return (
+                                                    <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
+                                                        <td className="p-3">
+                                                            <input
+                                                                type="text"
+                                                                value={item.titulo}
+                                                                onChange={e => updateTitulo(item.product_id, e.target.value)}
+                                                                className="font-semibold text-text leading-tight bg-transparent border-b border-transparent hover:border-border focus:border-primary focus:outline-none w-full text-sm transition-colors"
+                                                            />
+                                                            <div className="flex items-center gap-1 mt-0.5">
+                                                                <p className="text-xs text-muted">{item.editorial}</p>
+                                                                {item.catalogLinked === null
+                                                                    ? <span className="text-xs text-muted">· ...</span>
+                                                                    : item.catalogLinked
+                                                                        ? <span className="text-xs text-green-500/70" title="Vinculado al catálogo maestro">· ✓ cat</span>
+                                                                        : <span className="text-xs text-yellow-500" title="No vinculado al catálogo maestro">· ⚠ sin cat</span>
+                                                                }
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-3">
                                                             <input
                                                                 type="number"
-                                                                min="0"
-                                                                step="0.5"
-                                                                value={item.unitPrice}
-                                                                onChange={e => updatePrice(item.product_id, e.target.value)}
-                                                                className="w-24 text-right bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
+                                                                min="1"
+                                                                value={item.qty}
+                                                                onChange={e => updateQty(item.product_id, e.target.value)}
+                                                                className="w-16 text-center bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
                                                             />
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-3 text-right font-bold font-mono text-primary">
-                                                        Bs. {((item.unitPrice || 0) * (item.qty || 1)).toFixed(2)}
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <button
-                                                            onClick={() => removeItem(item.product_id)}
-                                                            className="text-muted hover:text-red-400 transition-colors"
-                                                        >
-                                                            <X size={16} />
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="flex items-center justify-end gap-1">
+                                                                <span className="text-muted text-xs">Bs.</span>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    step="0.5"
+                                                                    value={item.unitPrice}
+                                                                    onChange={e => updatePrice(item.product_id, e.target.value)}
+                                                                    className="w-24 text-right bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
+                                                                />
+                                                            </div>
+                                                            {effectivePct > 0 && (
+                                                                <p className="text-xs text-primary/70 text-right mt-0.5 font-mono">
+                                                                    → Bs. {priceAfterDto.toFixed(2)}
+                                                                </p>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="flex flex-col items-center gap-0.5">
+                                                                <div className="flex items-center gap-0.5">
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="100"
+                                                                        step="1"
+                                                                        value={effectivePct || ''}
+                                                                        placeholder="0"
+                                                                        onChange={e => updateItemDiscount(item.product_id, e.target.value)}
+                                                                        className={`w-12 text-center bg-surface border rounded px-1 py-1 text-sm font-mono ${item.hasCustomDiscount ? 'border-primary' : 'border-border'}`}
+                                                                    />
+                                                                    <span className="text-muted text-xs">%</span>
+                                                                </div>
+                                                                {item.hasCustomDiscount
+                                                                    ? <button onClick={() => resetItemDiscount(item.product_id)} className="text-[10px] text-muted hover:text-primary transition-colors leading-none" title="Volver al descuento global">↺ global</button>
+                                                                    : descuentoPct > 0 && <span className="text-[10px] text-muted leading-none">global</span>
+                                                                }
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-3 text-right">
+                                                            {showOriginalSubtotal && (
+                                                                <p className="line-through text-muted text-xs font-mono">Bs. {itemSubtotalOriginal.toFixed(2)}</p>
+                                                            )}
+                                                            <p className="font-bold font-mono text-primary">Bs. {itemSubtotal.toFixed(2)}</p>
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="flex gap-1">
+                                                                <button
+                                                                    onClick={() => duplicateItem(item)}
+                                                                    className="text-muted hover:text-primary transition-colors"
+                                                                    title="Duplicar item"
+                                                                >
+                                                                    <Copy size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => removeItem(item.product_id)}
+                                                                    className="text-muted hover:text-red-400 transition-colors"
+                                                                    title="Eliminar"
+                                                                >
+                                                                    <X size={16} />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -652,9 +1027,11 @@ Gracias por tu confianza! 😊`;
                                     style={{ fontFamily: 'sans-serif', maxWidth: '800px' }}
                                 >
                                     {/* Card Header */}
-                                    <div style={{ background: 'linear-gradient(135deg, #1a2d42 0%, #0f1e2e 100%)', padding: '28px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ background: 'linear-gradient(135deg, #1a2d42 0%, #0f1e2e 100%)', padding: '28px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                            <img src="/logo.png" alt="Logo" style={{ height: '60px', objectFit: 'contain', filter: 'brightness(0) invert(1)', mixBlendMode: 'normal' }} />
+                                            <div style={{ background: 'white', borderRadius: '8px', padding: '4px', height: '60px', width: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <img src="/logo.png" alt="Logo" style={{ height: '52px', width: '52px', objectFit: 'contain' }} />
+                                            </div>
                                             <div>
                                                 <div style={{ color: 'white', fontSize: '22px', fontWeight: 800, letterSpacing: '0.05em' }}>
                                                     MANGAS <span style={{ color: '#f07d2a' }}>COMICS</span>
@@ -662,10 +1039,18 @@ Gracias por tu confianza! 😊`;
                                                 <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', letterSpacing: '0.3em', fontWeight: 600 }}>BOLIVIA STORE</div>
                                             </div>
                                         </div>
-                                        <div style={{ textAlign: 'right' }}>
-                                            <div style={{ color: '#f07d2a', fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cotización</div>
-                                            <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px', marginTop: '4px' }}>{today}</div>
-                                            <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>{profile?.nombre || 'Agente de Ventas'}</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                            {uniformPct > 0 && (
+                                                <div style={{ background: '#f07d2a', borderRadius: '8px', padding: '6px 12px', textAlign: 'center' }}>
+                                                    <div style={{ color: 'white', fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>{uniformPct}%</div>
+                                                    <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.2em' }}>OFF</div>
+                                                </div>
+                                            )}
+                                            <div style={{ textAlign: 'right' }}>
+                                                <div style={{ color: '#f07d2a', fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cotización</div>
+                                                <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px', marginTop: '4px' }}>{today}</div>
+                                                <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>{profile?.nombre || 'Agente de Ventas'}</div>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -681,6 +1066,9 @@ Gracias por tu confianza! 😊`;
 
                                     {/* Items Table */}
                                     <div style={{ padding: '0 32px' }}>
+                                        {(() => {
+                                        const showPFinal = items.some(i => getEffectivePct(i) > 0);
+                                        return (
                                         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '16px' }}>
                                             <thead>
                                                 <tr style={{ background: '#f5f5f5' }}>
@@ -688,21 +1076,46 @@ Gracias por tu confianza! 😊`;
                                                     <th style={{ textAlign: 'left', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Editorial</th>
                                                     <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Cant.</th>
                                                     <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P/U</th>
-                                                    <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: '0 4px 4px 0' }}>Subtotal</th>
+                                                    {showPFinal && (
+                                                        <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: '10px', color: '#e53e3e', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Desc.</th>
+                                                    )}
+                                                    {showPFinal && (
+                                                        <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#2d9e5a', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P. Final</th>
+                                                    )}
+                                                    <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: showPFinal ? '0' : '0 4px 4px 0' }}>Subtotal</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {items.map((item, idx) => (
-                                                    <tr key={item.product_id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? 'white' : '#fafafa' }}>
-                                                        <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: 700, color: '#1a2d42', maxWidth: '260px' }}>{item.titulo}</td>
-                                                        <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: '#444' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
-                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>Bs. {((item.unitPrice || 0) * (item.qty || 1)).toFixed(2)}</td>
-                                                    </tr>
-                                                ))}
+                                                {items.map((item, idx) => {
+                                                    const ePct = getEffectivePct(item);
+                                                    const finalUnit = (item.unitPrice || 0) * (1 - ePct / 100);
+                                                    const hasAnyDiscount = ePct > 0;
+                                                    const finalSubtotal = finalUnit * (item.qty || 1);
+                                                    return (
+                                                        <tr key={item.product_id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? 'white' : '#fafafa' }}>
+                                                            <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: 700, color: '#1a2d42', maxWidth: '240px' }}>{item.titulo}</td>
+                                                            <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
+                                                            <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
+                                                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: hasAnyDiscount ? '#bbb' : '#444', textDecoration: hasAnyDiscount ? 'line-through' : 'none' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
+                                                            {showPFinal && (
+                                                                <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontFamily: 'monospace', fontWeight: 700, color: '#e53e3e' }}>
+                                                                    {hasAnyDiscount ? `${ePct}%` : '—'}
+                                                                </td>
+                                                            )}
+                                                            {showPFinal && (
+                                                                <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, color: '#2d9e5a' }}>
+                                                                    {hasAnyDiscount ? `Bs. ${finalUnit.toFixed(2)}` : '—'}
+                                                                </td>
+                                                            )}
+                                                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>
+                                                                Bs. {finalSubtotal.toFixed(2)}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
+                                        );})()}
                                     </div>
 
                                     {/* Totals */}
@@ -712,9 +1125,9 @@ Gracias por tu confianza! 😊`;
                                                 <span>Subtotal</span>
                                                 <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>Bs. {subtotal.toFixed(2)}</span>
                                             </div>
-                                            {descuentoPct > 0 && (
+                                            {discountAmount > 0 && (
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px', color: '#e53e3e' }}>
-                                                    <span>Descuento ({descuentoPct}%)</span>
+                                                    <span>Descuento{uniformPct > 0 ? ` (${uniformPct}%)` : ''}</span>
                                                     <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>-Bs. {discountAmount.toFixed(2)}</span>
                                                 </div>
                                             )}
@@ -731,18 +1144,153 @@ Gracias por tu confianza! 😊`;
                                         </div>
                                     </div>
 
-                                    {/* Footer */}
-                                    {nota && (
-                                        <div style={{ padding: '12px 32px', background: '#f9f9f9', borderTop: '1px solid #eee' }}>
-                                            <div style={{ fontSize: '10px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 700, marginBottom: '4px' }}>Nota</div>
-                                            <div style={{ fontSize: '12px', color: '#555', fontStyle: 'italic' }}>{nota}</div>
+                                    {/* Conditions */}
+                                    <div style={{ padding: '16px 32px 8px', background: '#f9f9f9', borderTop: '2px solid #eee' }}>
+                                        <div style={{ fontSize: '11px', color: '#f07d2a', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: 800, marginBottom: '10px' }}>Condiciones</div>
+                                        <div style={{ fontSize: '10px', color: '#555', fontWeight: 700, marginBottom: '10px' }}>Condiciones de la Cotización y Pedidos:</div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
+                                            {customConditions.map((c, i) => (
+                                                <div key={i} style={{ fontSize: '10px', color: '#555', lineHeight: 1.5 }}>
+                                                    <span style={{ fontWeight: 800, color: '#333' }}>{c.title}: </span>{c.text}
+                                                </div>
+                                            ))}
                                         </div>
-                                    )}
-                                    <div style={{ padding: '12px 32px 20px', background: 'linear-gradient(135deg, #1a2d42, #0f1e2e)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        {nota && (
+                                            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #e5e5e5', fontSize: '10px', color: '#777', fontStyle: 'italic' }}>
+                                                <span style={{ fontWeight: 700, fontStyle: 'normal', color: '#555' }}>Nota: </span>{nota}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div style={{ padding: '10px 32px 16px', background: 'linear-gradient(135deg, #1a2d42, #0f1e2e)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.2em' }}>MANGAS COMICS BOLIVIA</div>
                                         <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '10px' }}>Generado el {today}</div>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* ── BULK ADD MODAL ── */}
+            {showBulkModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={e => e.target === e.currentTarget && setShowBulkModal(false)}>
+                    <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                        {/* Modal Header */}
+                        <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-2">
+                                <Layers size={18} className="text-primary" />
+                                <h2 className="font-bold text-base">Agregar en lote</h2>
+                            </div>
+                            <button onClick={() => setShowBulkModal(false)} className="text-muted hover:text-text transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Search + Range */}
+                        <div className="p-5 border-b border-border space-y-3 shrink-0">
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                                    <input
+                                        ref={bulkSearchRef}
+                                        type="text"
+                                        placeholder="Nombre de la colección, ej: Blue Lock"
+                                        value={bulkSearch}
+                                        onChange={e => setBulkSearch(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && searchBulkCatalog(bulkSearch)}
+                                        className="input-field h-10 pl-9 text-sm w-full"
+                                    />
+                                </div>
+                                <button
+                                    onClick={() => searchBulkCatalog(bulkSearch)}
+                                    disabled={bulkLoading}
+                                    className="px-4 h-10 bg-primary hover:bg-primary/80 text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50 shrink-0"
+                                >
+                                    {bulkLoading ? <RefreshCw size={15} className="animate-spin" /> : 'Buscar'}
+                                </button>
+                            </div>
+                            {bulkResults.length > 0 && (
+                                <div className="flex gap-2 items-center">
+                                    <Hash size={14} className="text-muted shrink-0" />
+                                    <input
+                                        type="text"
+                                        placeholder="Tomos a seleccionar, ej: 2-15 o 1,2,5-10"
+                                        value={bulkRange}
+                                        onChange={e => setBulkRange(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && applyBulkRange()}
+                                        className="input-field h-9 text-sm flex-1"
+                                    />
+                                    <button
+                                        onClick={applyBulkRange}
+                                        className="px-3 h-9 bg-surface border border-border hover:border-primary text-sm font-bold rounded-lg transition-all shrink-0"
+                                    >
+                                        Aplicar
+                                    </button>
+                                    <button
+                                        onClick={() => setBulkSelected(new Set(bulkResults.map(p => p.product_id)))}
+                                        className="px-3 h-9 text-xs text-muted hover:text-text transition-colors shrink-0"
+                                    >
+                                        Todos
+                                    </button>
+                                    <button
+                                        onClick={() => setBulkSelected(new Set())}
+                                        className="px-3 h-9 text-xs text-muted hover:text-text transition-colors shrink-0"
+                                    >
+                                        Ninguno
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Results List */}
+                        <div className="flex-1 overflow-y-auto">
+                            {bulkResults.length === 0 && !bulkLoading && (
+                                <div className="flex flex-col items-center justify-center py-16 text-center text-muted">
+                                    <Search size={36} className="opacity-20 mb-3" />
+                                    <p className="text-sm font-mono">Buscá una colección para ver los tomos disponibles</p>
+                                </div>
+                            )}
+                            {bulkResults.length > 0 && (
+                                <div className="divide-y divide-border">
+                                    {bulkResults.map(product => {
+                                        const isSelected = bulkSelected.has(product.product_id);
+                                        const alreadyInQuote = items.some(i => i.product_id === product.product_id);
+                                        const price = getItemPrice(product, tipoPrecio);
+                                        return (
+                                            <div
+                                                key={product.product_id}
+                                                onClick={() => !alreadyInQuote && toggleBulkItem(product.product_id)}
+                                                className={`flex items-center gap-3 px-5 py-3 transition-all cursor-pointer ${alreadyInQuote ? 'opacity-40 cursor-not-allowed' : isSelected ? 'bg-primary/10' : 'hover:bg-surface-2'}`}
+                                            >
+                                                <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border-2 transition-all ${isSelected ? 'bg-primary border-primary' : 'border-border'}`}>
+                                                    {isSelected && <svg viewBox="0 0 12 10" fill="none" className="w-3 h-3"><path d="M1 5l3 3 7-7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-semibold text-text truncate">{product.titulo}</p>
+                                                    <p className="text-xs text-muted">{product.editorial}</p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className="text-sm font-bold font-mono text-primary">Bs. {price.toFixed(2)}</p>
+                                                    {alreadyInQuote && <p className="text-xs text-green-500">✓ ya agregado</p>}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Modal Footer */}
+                        {bulkSelected.size > 0 && (
+                            <div className="p-4 border-t border-border flex items-center justify-between shrink-0">
+                                <p className="text-sm text-muted"><span className="font-bold text-text">{bulkSelected.size}</span> tomos seleccionados</p>
+                                <button
+                                    onClick={confirmBulkAdd}
+                                    className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/80 text-white rounded-lg text-sm font-bold transition-all"
+                                >
+                                    <Plus size={16} /> Agregar a cotización
+                                </button>
                             </div>
                         )}
                     </div>

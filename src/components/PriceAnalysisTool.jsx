@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabase';
+import { catalogService } from '../services/catalogService';
 import { SHEET_PROCESSORS } from '../utils/excelProcessors';
 import { RefreshCw, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import './PriceAnalysisTool.css';
@@ -416,6 +417,9 @@ export default function PriceAnalysisTool() {
         }
       }
 
+      // Notificar a CatalogUpdatedView y otras vistas para que refresquen
+      catalogService.clearCache?.();
+      window.dispatchEvent(new CustomEvent('catalog-prices-updated'));
       showToast(`¡Cambios aplicados! Configuración guardada y productos actualizados.`);
     } catch (err) {
       console.error('Error al guardar y aplicar:', err);
