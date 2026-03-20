@@ -34,7 +34,7 @@ export function useCatalogStatus() {
             const { data: logs, error: logError } = await supabase
                 .from('catalogo_sync_logs')
                 .select('*')
-                .eq('filename', currentWeek.archivo_nombre)
+                .eq('filename', cleanFileName || currentWeek.archivo_nombre)
                 .order('created_at', { ascending: false })
                 .limit(1);
 
