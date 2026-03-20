@@ -984,7 +984,9 @@ Gracias por tu confianza! 😊`;
                                     {/* Card Header */}
                                     <div style={{ background: 'linear-gradient(135deg, #1a2d42 0%, #0f1e2e 100%)', padding: '28px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                            <img src="/logo.png" alt="Logo" style={{ height: '60px', objectFit: 'contain', filter: 'brightness(0) invert(1)', mixBlendMode: 'normal' }} />
+                                            <div style={{ background: 'white', borderRadius: '8px', padding: '4px', height: '60px', width: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <img src="/logo.png" alt="Logo" style={{ height: '52px', width: '52px', objectFit: 'contain' }} />
+                                            </div>
                                             <div>
                                                 <div style={{ color: 'white', fontSize: '22px', fontWeight: 800, letterSpacing: '0.05em' }}>
                                                     MANGAS <span style={{ color: '#f07d2a' }}>COMICS</span>
@@ -1034,17 +1036,20 @@ Gracias por tu confianza! 😊`;
                                             </thead>
                                             <tbody>
                                                 {items.map((item, idx) => {
-                                                    const rawSubtotal = (item.unitPrice || 0) * (item.qty || 1);
-                                                    const finalSubtotal = rawSubtotal * (1 - descuentoPct / 100);
+                                                    const itemDtoPct = item.itemDiscountPct || 0;
+                                                    const effectiveUnit = (item.unitPrice || 0) * (1 - itemDtoPct / 100);
+                                                    const hasAnyDiscount = itemDtoPct > 0 || descuentoPct > 0;
+                                                    const finalUnit = effectiveUnit * (1 - descuentoPct / 100);
+                                                    const finalSubtotal = finalUnit * (item.qty || 1);
                                                     return (
                                                         <tr key={item.product_id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? 'white' : '#fafafa' }}>
                                                             <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: 700, color: '#1a2d42', maxWidth: '240px' }}>{item.titulo}</td>
                                                             <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
                                                             <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
-                                                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: descuentoPct > 0 ? '#bbb' : '#444', textDecoration: descuentoPct > 0 ? 'line-through' : 'none' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
+                                                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: hasAnyDiscount ? '#bbb' : '#444', textDecoration: hasAnyDiscount ? 'line-through' : 'none' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
                                                             {descuentoPct > 0 && (
                                                                 <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, color: '#2d9e5a' }}>
-                                                                    Bs. {(Number(item.unitPrice || 0) * (1 - descuentoPct / 100)).toFixed(2)}
+                                                                    Bs. {finalUnit.toFixed(2)}
                                                                 </td>
                                                             )}
                                                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>
