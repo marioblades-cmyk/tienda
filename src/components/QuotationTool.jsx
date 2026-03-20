@@ -142,7 +142,7 @@ export default function QuotationTool() {
     };
 
     const updateTitulo = (productId, titulo) => {
-        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo } : i));
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo, catalogLinked: false } : i));
     };
 
     const updateItemDiscount = (productId, pct) => {
@@ -154,7 +154,7 @@ export default function QuotationTool() {
         const newId = `${item.product_id}_copy_${Date.now()}`;
         setItems(prev => {
             const idx = prev.findIndex(i => i.product_id === item.product_id);
-            const copy = { ...item, product_id: newId };
+            const copy = { ...item, product_id: newId, catalogLinked: false, itemDiscountPct: 0 };
             const next = [...prev];
             next.splice(idx + 1, 0, copy);
             return next;
@@ -304,7 +304,7 @@ export default function QuotationTool() {
     const addSingleItem = (product) => {
         setItems(prev => {
             if (prev.some(i => i.product_id === product.product_id)) return prev;
-            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null }];
+            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null, catalogLinked: true }];
         });
         setItemSearchQuery('');
         setItemSearchResults([]);
@@ -891,7 +891,7 @@ Gracias por tu confianza! 😊`;
                                                             />
                                                             <div className="flex items-center gap-1 mt-0.5">
                                                                 <p className="text-xs text-muted">{item.editorial}</p>
-                                                                {item.product_id
+                                                                {item.catalogLinked
                                                                     ? <span className="text-xs text-green-500/70" title="Vinculado al catálogo maestro">· ✓ cat</span>
                                                                     : <span className="text-xs text-yellow-500" title="No vinculado al catálogo maestro">· ⚠ sin cat</span>
                                                                 }
@@ -1021,6 +1021,9 @@ Gracias por tu confianza! 😊`;
 
                                     {/* Items Table */}
                                     <div style={{ padding: '0 32px' }}>
+                                        {(() => {
+                                        const showPFinal = descuentoPct > 0 || items.some(i => (i.itemDiscountPct || 0) > 0);
+                                        return (
                                         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '16px' }}>
                                             <thead>
                                                 <tr style={{ background: '#f5f5f5' }}>
@@ -1028,10 +1031,10 @@ Gracias por tu confianza! 😊`;
                                                     <th style={{ textAlign: 'left', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Editorial</th>
                                                     <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Cant.</th>
                                                     <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P/U</th>
-                                                    {descuentoPct > 0 && (
+                                                    {showPFinal && (
                                                         <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#2d9e5a', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P. Final</th>
                                                     )}
-                                                    <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: descuentoPct > 0 ? '0' : '0 4px 4px 0' }}>Subtotal</th>
+                                                    <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: showPFinal ? '0' : '0 4px 4px 0' }}>Subtotal</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1039,6 +1042,7 @@ Gracias por tu confianza! 😊`;
                                                     const itemDtoPct = item.itemDiscountPct || 0;
                                                     const effectiveUnit = (item.unitPrice || 0) * (1 - itemDtoPct / 100);
                                                     const hasAnyDiscount = itemDtoPct > 0 || descuentoPct > 0;
+                                                    // ambos descuentos se acumulan: item primero, global encima
                                                     const finalUnit = effectiveUnit * (1 - descuentoPct / 100);
                                                     const finalSubtotal = finalUnit * (item.qty || 1);
                                                     return (
@@ -1047,9 +1051,9 @@ Gracias por tu confianza! 😊`;
                                                             <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
                                                             <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
                                                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: hasAnyDiscount ? '#bbb' : '#444', textDecoration: hasAnyDiscount ? 'line-through' : 'none' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
-                                                            {descuentoPct > 0 && (
+                                                            {showPFinal && (
                                                                 <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, color: '#2d9e5a' }}>
-                                                                    Bs. {finalUnit.toFixed(2)}
+                                                                    {hasAnyDiscount ? `Bs. ${finalUnit.toFixed(2)}` : '—'}
                                                                 </td>
                                                             )}
                                                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800, color: '#f07d2a' }}>
@@ -1060,6 +1064,7 @@ Gracias por tu confianza! 😊`;
                                                 })}
                                             </tbody>
                                         </table>
+                                        );})()}
                                     </div>
 
                                     {/* Totals */}
