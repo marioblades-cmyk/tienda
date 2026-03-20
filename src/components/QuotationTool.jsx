@@ -92,17 +92,17 @@ export default function QuotationTool() {
             if (cart) {
                 const parsed = JSON.parse(cart);
                 if (Array.isArray(parsed) && parsed.length > 0) {
+                    const toMerge = [];
                     setItems(prev => {
                         // Merge avoiding duplicates by product_id
                         const existing = new Set(prev.map(i => i.product_id));
-                        const newItems = parsed.filter(i => !existing.has(i.product_id)).map(item => ({
-                            ...item,
-                            qty: 1,
-                            unitPrice: getItemPrice(item, tipoPrecio),
-                            customPrice: null,
-                        }));
+                        const newItems = parsed.filter(i => !existing.has(i.product_id)).map(item => {
+                            toMerge.push(item);
+                            return { ...item, qty: 1, unitPrice: getItemPrice(item, tipoPrecio), customPrice: null, catalogLinked: null };
+                        });
                         return [...prev, ...newItems];
                     });
+                    setTimeout(() => toMerge.forEach(item => checkCatalog(item.product_id, item.titulo)), 0);
                     localStorage.removeItem('mcb_quote_cart');
                 }
             }
@@ -152,23 +152,28 @@ export default function QuotationTool() {
         setItems(prev => prev.map(i => i.product_id === productId ? { ...i, unitPrice: p, customPrice: p } : i));
     };
 
-    const updateTitulo = (productId, titulo) => {
-        // actualizar título inmediatamente, catalogLinked pendiente
-        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo, catalogLinked: null } : i));
-
-        // debounce: verificar en BD si el título existe exacto
+    // Verifica en BD si el título coincide exactamente con algún producto del catálogo
+    const checkCatalog = (productId, titulo, delay = 0) => {
         clearTimeout(tituloCheckDebounce.current[productId]);
         tituloCheckDebounce.current[productId] = setTimeout(async () => {
-            const t = titulo.trim();
-            if (!t) { setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: false } : i)); return; }
+            const t = (titulo || '').trim();
+            if (!t) {
+                setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: false } : i));
+                return;
+            }
             const { data } = await supabase
                 .from('catalogo_productos')
                 .select('product_id')
                 .ilike('titulo', t)
                 .limit(1);
-            const linked = data && data.length > 0;
+            const linked = !!(data && data.length > 0);
             setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: linked } : i));
-        }, 400);
+        }, delay);
+    };
+
+    const updateTitulo = (productId, titulo) => {
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo, catalogLinked: null } : i));
+        checkCatalog(productId, titulo, 400);
     };
 
     const updateItemDiscount = (productId, pct) => {
@@ -184,11 +189,12 @@ export default function QuotationTool() {
         const newId = `${item.product_id}_copy_${Date.now()}`;
         setItems(prev => {
             const idx = prev.findIndex(i => i.product_id === item.product_id);
-            const copy = { ...item, product_id: newId, catalogLinked: false, itemDiscountPct: 0 };
+            const copy = { ...item, product_id: newId, catalogLinked: null, itemDiscountPct: 0 };
             const next = [...prev];
             next.splice(idx + 1, 0, copy);
             return next;
         });
+        checkCatalog(newId, item.titulo);
     };
 
     const clearAll = () => {
@@ -295,10 +301,11 @@ export default function QuotationTool() {
         setItems(prev => {
             const existing = new Set(prev.map(i => i.product_id));
             const newItems = toAdd.filter(p => !existing.has(p.product_id)).map(p => ({
-                ...p, qty: 1, unitPrice: getItemPrice(p, tipoPrecio), customPrice: null,
+                ...p, qty: 1, unitPrice: getItemPrice(p, tipoPrecio), customPrice: null, catalogLinked: null,
             }));
             return [...prev, ...newItems];
         });
+        toAdd.forEach(p => checkCatalog(p.product_id, p.titulo));
         setShowBulkModal(false);
         setBulkSearch(''); setBulkRange(''); setBulkResults([]); setBulkSelected(new Set());
     };
@@ -334,8 +341,9 @@ export default function QuotationTool() {
     const addSingleItem = (product) => {
         setItems(prev => {
             if (prev.some(i => i.product_id === product.product_id)) return prev;
-            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null, catalogLinked: true, catalogTitulo: product.titulo }];
+            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null, catalogLinked: null }];
         });
+        checkCatalog(product.product_id, product.titulo);
         setItemSearchQuery('');
         setItemSearchResults([]);
         setTimeout(() => itemSearchRef.current?.focus(), 50);
