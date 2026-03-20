@@ -118,13 +118,23 @@ export default function QuotationTool() {
         })));
     }, [tipoPrecio]);
 
+    // Descuento efectivo por item: si el item tiene descuento propio lo usa,
+    // si no, usa el global. No se acumulan.
+    const getEffectivePct = (item) => item.hasCustomDiscount ? (item.itemDiscountPct || 0) : descuentoPct;
+
     // Calculated totals
+    const rawTotal = items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.qty || 1), 0);
     const subtotal = items.reduce((sum, item) => {
-        const priceAfterItemDto = (item.unitPrice || 0) * (1 - (item.itemDiscountPct || 0) / 100);
-        return sum + priceAfterItemDto * (item.qty || 1);
+        const pct = getEffectivePct(item);
+        return sum + (item.unitPrice || 0) * (1 - pct / 100) * (item.qty || 1);
     }, 0);
-    const discountAmount = subtotal * (descuentoPct / 100);
-    const total = subtotal - discountAmount + Number(costoEnvio || 0);
+    const discountAmount = rawTotal - subtotal;
+    const total = subtotal + Number(costoEnvio || 0);
+
+    // Badge: solo aparece cuando TODOS los items tienen el mismo %
+    const effectiveDiscounts = items.map(getEffectivePct);
+    const allSamePct = items.length > 0 && effectiveDiscounts.every(d => d === effectiveDiscounts[0]);
+    const uniformPct = allSamePct ? effectiveDiscounts[0] : 0;
 
     // ── Item Management ──
     const removeItem = (productId) => {
@@ -147,7 +157,7 @@ export default function QuotationTool() {
 
     const updateItemDiscount = (productId, pct) => {
         const d = Math.min(100, Math.max(0, parseFloat(pct) || 0));
-        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: d } : i));
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, itemDiscountPct: d, hasCustomDiscount: true } : i));
     };
 
     const duplicateItem = (item) => {
@@ -753,9 +763,9 @@ Gracias por tu confianza! 😊`;
                                     <span className="text-muted">Subtotal</span>
                                     <span className="font-bold">Bs. {subtotal.toFixed(2)}</span>
                                 </div>
-                                {descuentoPct > 0 && (
+                                {discountAmount > 0 && (
                                     <div className="flex justify-between font-mono text-red-400">
-                                        <span>Descuento ({descuentoPct}%)</span>
+                                        <span>Descuento{uniformPct > 0 ? ` (${uniformPct}%)` : ''}</span>
                                         <span>-Bs. {discountAmount.toFixed(2)}</span>
                                     </div>
                                 )}
@@ -874,12 +884,11 @@ Gracias por tu confianza! 😊`;
                                         </thead>
                                         <tbody className="divide-y divide-border">
                                             {items.map(item => {
-                                                const itemDtoPct = item.itemDiscountPct || 0;
-                                                const priceAfterItemDto = (item.unitPrice || 0) * (1 - itemDtoPct / 100);
+                                                const effectivePct = getEffectivePct(item);
+                                                const priceAfterDto = (item.unitPrice || 0) * (1 - effectivePct / 100);
                                                 const itemSubtotalOriginal = (item.unitPrice || 0) * (item.qty || 1);
-                                                const itemSubtotal = priceAfterItemDto * (item.qty || 1);
-                                                const itemSubtotalDesc = descuentoPct > 0 ? itemSubtotal * (1 - descuentoPct / 100) : null;
-                                                const showOriginalSubtotal = itemDtoPct > 0 || itemSubtotalDesc !== null;
+                                                const itemSubtotal = priceAfterDto * (item.qty || 1);
+                                                const showOriginalSubtotal = effectivePct > 0;
                                                 return (
                                                     <tr key={item.product_id} className="hover:bg-surface-2/50 transition-colors">
                                                         <td className="p-3">
@@ -918,9 +927,9 @@ Gracias por tu confianza! 😊`;
                                                                     className="w-24 text-right bg-surface border border-border rounded px-2 py-1 text-sm font-mono"
                                                                 />
                                                             </div>
-                                                            {itemDtoPct > 0 && (
+                                                            {effectivePct > 0 && (
                                                                 <p className="text-xs text-primary/70 text-right mt-0.5 font-mono">
-                                                                    → Bs. {priceAfterItemDto.toFixed(2)}
+                                                                    → Bs. {priceAfterDto.toFixed(2)}
                                                                 </p>
                                                             )}
                                                         </td>
@@ -931,10 +940,10 @@ Gracias por tu confianza! 😊`;
                                                                     min="0"
                                                                     max="100"
                                                                     step="1"
-                                                                    value={itemDtoPct || ''}
+                                                                    value={effectivePct || ''}
                                                                     placeholder="0"
                                                                     onChange={e => updateItemDiscount(item.product_id, e.target.value)}
-                                                                    className="w-12 text-center bg-surface border border-border rounded px-1 py-1 text-sm font-mono"
+                                                                    className={`w-12 text-center bg-surface border rounded px-1 py-1 text-sm font-mono ${item.hasCustomDiscount ? 'border-primary' : 'border-border'}`}
                                                                 />
                                                                 <span className="text-muted text-xs">%</span>
                                                             </div>
@@ -943,7 +952,7 @@ Gracias por tu confianza! 😊`;
                                                             {showOriginalSubtotal && (
                                                                 <p className="line-through text-muted text-xs font-mono">Bs. {itemSubtotalOriginal.toFixed(2)}</p>
                                                             )}
-                                                            <p className="font-bold font-mono text-primary">Bs. {(itemSubtotalDesc ?? itemSubtotal).toFixed(2)}</p>
+                                                            <p className="font-bold font-mono text-primary">Bs. {itemSubtotal.toFixed(2)}</p>
                                                         </td>
                                                         <td className="p-3">
                                                             <div className="flex gap-1">
@@ -995,9 +1004,9 @@ Gracias por tu confianza! 😊`;
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                            {descuentoPct > 0 && (
+                                            {uniformPct > 0 && (
                                                 <div style={{ background: '#f07d2a', borderRadius: '8px', padding: '6px 12px', textAlign: 'center' }}>
-                                                    <div style={{ color: 'white', fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>{descuentoPct}%</div>
+                                                    <div style={{ color: 'white', fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>{uniformPct}%</div>
                                                     <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: '9px', fontWeight: 700, letterSpacing: '0.2em' }}>OFF</div>
                                                 </div>
                                             )}
@@ -1022,7 +1031,7 @@ Gracias por tu confianza! 😊`;
                                     {/* Items Table */}
                                     <div style={{ padding: '0 32px' }}>
                                         {(() => {
-                                        const showPFinal = descuentoPct > 0 || items.some(i => (i.itemDiscountPct || 0) > 0);
+                                        const showPFinal = items.some(i => getEffectivePct(i) > 0);
                                         return (
                                         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '16px' }}>
                                             <thead>
@@ -1039,11 +1048,9 @@ Gracias por tu confianza! 😊`;
                                             </thead>
                                             <tbody>
                                                 {items.map((item, idx) => {
-                                                    const itemDtoPct = item.itemDiscountPct || 0;
-                                                    const effectiveUnit = (item.unitPrice || 0) * (1 - itemDtoPct / 100);
-                                                    const hasAnyDiscount = itemDtoPct > 0 || descuentoPct > 0;
-                                                    // ambos descuentos se acumulan: item primero, global encima
-                                                    const finalUnit = effectiveUnit * (1 - descuentoPct / 100);
+                                                    const ePct = getEffectivePct(item);
+                                                    const finalUnit = (item.unitPrice || 0) * (1 - ePct / 100);
+                                                    const hasAnyDiscount = ePct > 0;
                                                     const finalSubtotal = finalUnit * (item.qty || 1);
                                                     return (
                                                         <tr key={item.product_id} style={{ borderBottom: '1px solid #f0f0f0', background: idx % 2 === 0 ? 'white' : '#fafafa' }}>
@@ -1074,9 +1081,9 @@ Gracias por tu confianza! 😊`;
                                                 <span>Subtotal</span>
                                                 <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>Bs. {subtotal.toFixed(2)}</span>
                                             </div>
-                                            {descuentoPct > 0 && (
+                                            {discountAmount > 0 && (
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px', color: '#e53e3e' }}>
-                                                    <span>Descuento ({descuentoPct}%)</span>
+                                                    <span>Descuento{uniformPct > 0 ? ` (${uniformPct}%)` : ''}</span>
                                                     <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>-Bs. {discountAmount.toFixed(2)}</span>
                                                 </div>
                                             )}
