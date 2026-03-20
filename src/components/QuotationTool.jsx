@@ -882,7 +882,6 @@ Gracias por tu confianza! 😊`;
                                                 <th className="text-center p-3 w-20">Cant.</th>
                                                 <th className="text-right p-3 w-36">P. Unitario</th>
                                                 <th className="text-center p-3 w-20">Desc. %</th>
-                                                <th className="text-right p-3 w-28">Ahorro</th>
                                                 <th className="text-right p-3 w-32">Subtotal</th>
                                                 <th className="p-3 w-16"></th>
                                             </tr>
@@ -952,12 +951,6 @@ Gracias por tu confianza! 😊`;
                                                                 />
                                                                 <span className="text-muted text-xs">%</span>
                                                             </div>
-                                                        </td>
-                                                        <td className="p-3 text-right">
-                                                            {effectivePct > 0
-                                                                ? <p className="font-mono text-red-400 text-sm">-Bs. {(itemSubtotalOriginal - itemSubtotal).toFixed(2)}</p>
-                                                                : <p className="font-mono text-muted text-xs">—</p>
-                                                            }
                                                         </td>
                                                         <td className="p-3 text-right">
                                                             {showOriginalSubtotal && (
@@ -1052,6 +1045,9 @@ Gracias por tu confianza! 😊`;
                                                     <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Cant.</th>
                                                     <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P/U</th>
                                                     {showPFinal && (
+                                                        <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: '10px', color: '#e53e3e', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Desc.</th>
+                                                    )}
+                                                    {showPFinal && (
                                                         <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#2d9e5a', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>P. Final</th>
                                                     )}
                                                     <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, borderRadius: showPFinal ? '0' : '0 4px 4px 0' }}>Subtotal</th>
@@ -1069,6 +1065,11 @@ Gracias por tu confianza! 😊`;
                                                             <td style={{ padding: '10px 12px', fontSize: '11px', color: '#888' }}>{item.editorial}</td>
                                                             <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>{item.qty}</td>
                                                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', color: hasAnyDiscount ? '#bbb' : '#444', textDecoration: hasAnyDiscount ? 'line-through' : 'none' }}>Bs. {Number(item.unitPrice || 0).toFixed(2)}</td>
+                                                            {showPFinal && (
+                                                                <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontFamily: 'monospace', fontWeight: 700, color: '#e53e3e' }}>
+                                                                    {hasAnyDiscount ? `${ePct}%` : '—'}
+                                                                </td>
+                                                            )}
                                                             {showPFinal && (
                                                                 <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, color: '#2d9e5a' }}>
                                                                     {hasAnyDiscount ? `Bs. ${finalUnit.toFixed(2)}` : '—'}
