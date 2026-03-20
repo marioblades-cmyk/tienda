@@ -152,7 +152,11 @@ export default function QuotationTool() {
     };
 
     const updateTitulo = (productId, titulo) => {
-        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo, catalogLinked: false } : i));
+        setItems(prev => prev.map(i => {
+            if (i.product_id !== productId) return i;
+            const restoredLink = i.catalogTitulo && titulo.trim().toLowerCase() === i.catalogTitulo.trim().toLowerCase();
+            return { ...i, titulo, catalogLinked: restoredLink };
+        }));
     };
 
     const updateItemDiscount = (productId, pct) => {
@@ -314,7 +318,7 @@ export default function QuotationTool() {
     const addSingleItem = (product) => {
         setItems(prev => {
             if (prev.some(i => i.product_id === product.product_id)) return prev;
-            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null, catalogLinked: true }];
+            return [...prev, { ...product, qty: 1, unitPrice: getItemPrice(product, tipoPrecio), customPrice: null, catalogLinked: true, catalogTitulo: product.titulo }];
         });
         setItemSearchQuery('');
         setItemSearchResults([]);
@@ -878,6 +882,7 @@ Gracias por tu confianza! 😊`;
                                                 <th className="text-center p-3 w-20">Cant.</th>
                                                 <th className="text-right p-3 w-36">P. Unitario</th>
                                                 <th className="text-center p-3 w-20">Desc. %</th>
+                                                <th className="text-right p-3 w-28">Ahorro</th>
                                                 <th className="text-right p-3 w-32">Subtotal</th>
                                                 <th className="p-3 w-16"></th>
                                             </tr>
@@ -947,6 +952,12 @@ Gracias por tu confianza! 😊`;
                                                                 />
                                                                 <span className="text-muted text-xs">%</span>
                                                             </div>
+                                                        </td>
+                                                        <td className="p-3 text-right">
+                                                            {effectivePct > 0
+                                                                ? <p className="font-mono text-red-400 text-sm">-Bs. {(itemSubtotalOriginal - itemSubtotal).toFixed(2)}</p>
+                                                                : <p className="font-mono text-muted text-xs">—</p>
+                                                            }
                                                         </td>
                                                         <td className="p-3 text-right">
                                                             {showOriginalSubtotal && (
