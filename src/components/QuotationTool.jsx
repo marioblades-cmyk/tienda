@@ -79,6 +79,7 @@ export default function QuotationTool() {
     const [itemSearchLoading, setItemSearchLoading] = useState(false);
     const itemSearchRef = useRef(null);
     const itemSearchDebounce = useRef(null);
+    const tituloCheckDebounce = useRef({});
 
     // Conditions editor state
     const [customConditions, setCustomConditions] = useState(() => CONDITIONS.map(c => ({ ...c })));
@@ -152,11 +153,22 @@ export default function QuotationTool() {
     };
 
     const updateTitulo = (productId, titulo) => {
-        setItems(prev => prev.map(i => {
-            if (i.product_id !== productId) return i;
-            const restoredLink = i.catalogTitulo && titulo.trim().toLowerCase() === i.catalogTitulo.trim().toLowerCase();
-            return { ...i, titulo, catalogLinked: restoredLink };
-        }));
+        // actualizar título inmediatamente, catalogLinked pendiente
+        setItems(prev => prev.map(i => i.product_id === productId ? { ...i, titulo, catalogLinked: null } : i));
+
+        // debounce: verificar en BD si el título existe exacto
+        clearTimeout(tituloCheckDebounce.current[productId]);
+        tituloCheckDebounce.current[productId] = setTimeout(async () => {
+            const t = titulo.trim();
+            if (!t) { setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: false } : i)); return; }
+            const { data } = await supabase
+                .from('catalogo_productos')
+                .select('product_id')
+                .ilike('titulo', t)
+                .limit(1);
+            const linked = data && data.length > 0;
+            setItems(prev => prev.map(i => i.product_id === productId ? { ...i, catalogLinked: linked } : i));
+        }, 400);
     };
 
     const updateItemDiscount = (productId, pct) => {
@@ -908,9 +920,11 @@ Gracias por tu confianza! 😊`;
                                                             />
                                                             <div className="flex items-center gap-1 mt-0.5">
                                                                 <p className="text-xs text-muted">{item.editorial}</p>
-                                                                {item.catalogLinked
-                                                                    ? <span className="text-xs text-green-500/70" title="Vinculado al catálogo maestro">· ✓ cat</span>
-                                                                    : <span className="text-xs text-yellow-500" title="No vinculado al catálogo maestro">· ⚠ sin cat</span>
+                                                                {item.catalogLinked === null
+                                                                    ? <span className="text-xs text-muted">· ...</span>
+                                                                    : item.catalogLinked
+                                                                        ? <span className="text-xs text-green-500/70" title="Vinculado al catálogo maestro">· ✓ cat</span>
+                                                                        : <span className="text-xs text-yellow-500" title="No vinculado al catálogo maestro">· ⚠ sin cat</span>
                                                                 }
                                                             </div>
                                                         </td>
