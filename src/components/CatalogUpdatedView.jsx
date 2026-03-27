@@ -358,22 +358,23 @@ const CatalogUpdatedView = () => {
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>Categoría</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>Precio Tapa</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#f07d2a', fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>G PV (BS)</th>
-                                <th style={{ padding: '1.25rem 1rem', color: '#334155', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N2 -10%</th>
-                                <th style={{ padding: '1.25rem 1rem', color: '#334155', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N3 -15%</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#16a34a', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N1 -10%</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#2563eb', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N2 -15%</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#7c3aed', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N3 -20%</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#334155', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>Mayoreo</th>
                             </tr>
                         </thead>
                         <tbody>
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan="8" style={{ padding: '6rem 2rem', textAlign: 'center' }}>
+                                    <td colSpan="11" style={{ padding: '6rem 2rem', textAlign: 'center' }}>
                                         <div className="animate-spin" style={{ width: '40px', height: '40px', border: '4px solid #f1f5f9', borderTopColor: '#f07d2a', borderRadius: '50%', margin: '0 auto 1.5rem' }}></div>
-                                        <span style={{ color: '#64748b', fontWeight: 600, fontSize: '1rem' }}>Sincronizando catálogo maestro...</span>
+                                        <span style={{ color: '#64748b', fontWeight: 600, fontSize: '1rem' }}>Sincronizando catálogo...</span>
                                     </td>
                                 </tr>
                             ) : filteredItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" style={{ padding: '6rem 2rem', textAlign: 'center' }}>
+                                    <td colSpan="11" style={{ padding: '6rem 2rem', textAlign: 'center' }}>
                                         <div style={{ opacity: 0.2, marginBottom: '1rem' }}><Database size={48} style={{ margin: '0 auto' }} /></div>
                                         <span style={{ color: '#94a3b8', fontSize: '1.125rem', fontWeight: 500 }}>No se encontraron coincidencias para los filtros aplicados.</span>
                                     </td>
@@ -440,15 +441,26 @@ const CatalogUpdatedView = () => {
                                             {item.precio_venta_bs ? `BS ${item.precio_venta_bs.toFixed(2)}` : '--'}
                                         </div>
                                     </td>
-                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 600, color: '#334155' }}>
+                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                        {item.precio_n1_bs 
+                                            ? `BS ${item.precio_n1_bs.toFixed(2)}` 
+                                            : item.precio_venta_bs 
+                                                ? `BS ${(item.precio_venta_bs * 0.90).toFixed(2)}` 
+                                                : '--'}
+                                    </td>
+                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
                                         {item.precio_n2_bs 
                                             ? `BS ${item.precio_n2_bs.toFixed(2)}` 
                                             : item.precio_venta_bs 
-                                                ? `BS ${(item.precio_venta_bs * 0.9).toFixed(2)}` 
+                                                ? `BS ${(item.precio_venta_bs * 0.85).toFixed(2)}` 
                                                 : '--'}
                                     </td>
-                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 600, color: '#334155' }}>
-                                        {item.precio_n3_bs ? `BS ${item.precio_n3_bs.toFixed(2)}` : '--'}
+                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, color: '#7c3aed' }}>
+                                        {item.precio_n3_bs 
+                                            ? `BS ${item.precio_n3_bs.toFixed(2)}` 
+                                            : item.precio_venta_bs 
+                                                ? `BS ${(item.precio_venta_bs * 0.80).toFixed(2)}` 
+                                                : '--'}
                                     </td>
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 600, color: '#334155' }}>
                                         {item.precio_mayoreo_bs ? `BS ${item.precio_mayoreo_bs.toFixed(2)}` : '--'}
