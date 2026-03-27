@@ -41,53 +41,73 @@ export default function PreSaleGenerator() {
     const [savedProjects, setSavedProjects] = useState({});
     const [selectedProjectKey, setSelectedProjectKey] = useState('');
 
+    const runMigration = async () => {
+        if (!user) return;
+        setStatusMessage("MIGRANDO DATOS...");
+        const localProjs = localStorage.getItem('presale_projects');
+        const localTemps = localStorage.getItem('presale_templates');
+        
+        let count = 0;
+        if (localProjs) {
+            try {
+                const parsed = JSON.parse(localProjs);
+                for (const [name, data] of Object.entries(parsed)) {
+                    await supabase.from('presale_projects').upsert({
+                        user_id: user.id,
+                        name: name,
+                        config: data.config,
+                        items: data.items,
+                        updated_at: data.date || new Date().toISOString()
+                    }, { onConflict: 'user_id,name' });
+                    count++;
+                }
+                localStorage.removeItem('presale_projects');
+            } catch (e) { console.error(e); }
+        }
+        
+        if (localTemps) {
+            try {
+                const parsed = JSON.parse(localTemps);
+                for (const [name, config] of Object.entries(parsed)) {
+                    if (DEFAULT_TEMPLATES[name]) continue;
+                    await supabase.from('presale_templates').upsert({
+                        user_id: user.id,
+                        name: name,
+                        config: config
+                    }, { onConflict: 'user_id,name' });
+                    count++;
+                }
+                localStorage.removeItem('presale_templates');
+            } catch (e) { console.error(e); }
+        }
+        
+        if (count > 0) {
+            alert(`¡Éxito! Se migraron ${count} elementos a la nube.`);
+            window.location.reload(); // Recargar para ver los cambios
+        } else {
+            alert("No se encontraron datos locales para migrar en este navegador.");
+            setStatusMessage("");
+        }
+    };
+
     // Carga inicial de proyectos y plantillas desde Supabase
     useEffect(() => {
         if (!user) return;
         
         const fetchData = async () => {
+            console.log("Iniciando sincronización con Supabase...");
             setIsLoadingProjects(true);
             try {
-                // --- MIGRACIÓN: De LocalStorage a Supabase ---
+                // Ejecutar migración silenciosa automática
                 const localProjs = localStorage.getItem('presale_projects');
                 const localTemps = localStorage.getItem('presale_templates');
-
-                if (localProjs) {
-                    try {
-                        const parsedProjs = JSON.parse(localProjs);
-                        for (const [name, data] of Object.entries(parsedProjs)) {
-                            await supabase.from('presale_projects').upsert({
-                                user_id: user.id,
-                                name: name,
-                                config: data.config,
-                                items: data.items,
-                                updated_at: data.date || new Date().toISOString()
-                            }, { onConflict: 'user_id,name' });
-                        }
-                        localStorage.removeItem('presale_projects');
-                        console.log("Proyectos locales migrados a Supabase");
-                    } catch (e) { console.error("Error migrando proyectos:", e); }
-                }
-
-                if (localTemps) {
-                    try {
-                        const parsedTemps = JSON.parse(localTemps);
-                        for (const [name, config] of Object.entries(parsedTemps)) {
-                            // No migrar las plantillas por defecto
-                            if (DEFAULT_TEMPLATES[name]) continue;
-                            await supabase.from('presale_templates').upsert({
-                                user_id: user.id,
-                                name: name,
-                                config: config
-                            }, { onConflict: 'user_id,name' });
-                        }
-                        localStorage.removeItem('presale_templates');
-                        console.log("Plantillas locales migradas a Supabase");
-                    } catch (e) { console.error("Error migrando plantillas:", e); }
+                
+                if (localProjs || localTemps) {
+                    console.log("Detectados datos locales. Migrando...");
+                    await runMigration();
                 }
 
                 // --- CARGA NORMAL DE SUPABASE ---
-                // Cargar Proyectos
                 const { data: projectsData, error: projError } = await supabase
                     .from('presale_projects')
                     .select('*')
@@ -100,7 +120,6 @@ export default function PreSaleGenerator() {
                 });
                 setSavedProjects(projsMap);
 
-                // Cargar Plantillas
                 const { data: templatesData, error: tempError } = await supabase
                     .from('presale_templates')
                     .select('*')
@@ -112,6 +131,7 @@ export default function PreSaleGenerator() {
                     tempsMap[t.name] = t.config;
                 });
                 setUserTemplates(tempsMap);
+                console.log("Sincronización completada.");
             } catch (err) {
                 console.error("Error al cargar datos de Supabase:", err);
                 setUserTemplates(DEFAULT_TEMPLATES);
@@ -161,7 +181,23 @@ export default function PreSaleGenerator() {
         const proj = savedProjects[selectedProjectKey];
         if (proj.config) setConfig(proj.config);
         if (proj.items) setSelectedItems(proj.items);
-        alert('Proyecto cargado exitosamente.');
+        setStatusMessage("✓ PROYECTO CARGADO");
+        setTimeout(() => setStatusMessage(""), 3000);
+    };
+
+    const loadTemplate = () => {
+        if (!selectedTemplateKey || !userTemplates[selectedTemplateKey]) return;
+        const tpl = userTemplates[selectedTemplateKey];
+        setConfig(prev => ({...prev, ...tpl}));
+        
+        // Aplicar descuento de la plantilla a los ítems actuales
+        const mult = (100 - tpl.discountPercent) / 100;
+        setSelectedItems(items => items.map(it => ({
+            ...it,
+            customPreventa: it.customPvp * mult
+        })));
+        setStatusMessage("✓ PLANTILLA APLICADA");
+        setTimeout(() => setStatusMessage(""), 3000);
     };
 
     const deleteProject = async () => {
@@ -723,13 +759,16 @@ export default function PreSaleGenerator() {
                                 ))}
                             </select>
                             <div className="flex gap-2">
-                                <button onClick={loadProject} className="flex-1 text-[10px] font-bold bg-[#1b3a57] text-white py-1.5 rounded-lg hover:bg-[#132a41] transition-all">
-                                    CARGAR MANUALMENTE
+                                <button onClick={loadProject} className="flex-1 text-[10px] font-bold bg-[#e68219] text-white py-1.5 rounded-lg hover:bg-[#d47617] transition-all flex items-center justify-center gap-1">
+                                    <Cloud size={12} /> CARGAR PROYECTO
                                 </button>
-                                {statusMessage && (
-                                    <div className="text-[10px] font-black text-orange-600 animate-pulse flex items-center">{statusMessage}</div>
-                                )}
+                                <button onClick={() => { setSelectedProjectKey(''); setStatusMessage("NUEVO PROYECTO"); setTimeout(()=>setStatusMessage(""), 2000); }} className="px-3 text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all">
+                                    NUEVO
+                                </button>
                             </div>
+                            {statusMessage && (
+                                <div className="text-[10px] font-black text-orange-600 animate-pulse mt-1 flex justify-center uppercase">{statusMessage}</div>
+                            )}
                         </div>
 
                         <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
@@ -749,27 +788,22 @@ export default function PreSaleGenerator() {
                             </div>
                             <select 
                                 value={selectedTemplateKey}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    setSelectedTemplateKey(val);
-                                    if (val && userTemplates[val]) {
-                                        const tpl = userTemplates[val];
-                                        setConfig(prev => ({...prev, ...tpl}));
-                                        
-                                        const mult = (100 - tpl.discountPercent) / 100;
-                                        setSelectedItems(items => items.map(it => ({
-                                            ...it,
-                                            customPreventa: it.customPvp * mult
-                                        })));
-                                    }
-                                }}
-                                className="w-full text-xs font-bold border-2 border-slate-200 focus:border-[#f5a800] outline-none rounded-lg px-3 py-2 bg-white text-[#1b3a57] cursor-pointer shadow-sm transition-all"
+                                onChange={(e) => setSelectedTemplateKey(e.target.value)}
+                                className="w-full text-xs font-bold border-2 border-slate-200 focus:border-[#f5a800] outline-none rounded-lg px-3 py-2 bg-white text-[#1b3a57] cursor-pointer shadow-sm transition-all mb-2"
                             >
-                                <option value="">-- Personalizada (Sin plantilla) --</option>
+                                <option value="">-- Mis Plantillas Guardadas --</option>
                                 {Object.keys(userTemplates).map(key => (
                                     <option key={key} value={key}>{key} ({userTemplates[key].discountPercent}%)</option>
                                 ))}
                             </select>
+                            <div className="flex gap-2">
+                                <button onClick={loadTemplate} className="flex-1 text-[10px] font-bold bg-[#1b3a57] text-white py-1.5 rounded-lg hover:bg-[#132435] transition-all flex items-center justify-center gap-1">
+                                    <Zap size={12} className="fill-white" /> CARGAR PLANTILLA
+                                </button>
+                                <button onClick={() => { setSelectedTemplateKey(''); setStatusMessage("ESTILO LIBRE"); setTimeout(()=>setStatusMessage(""), 2000); }} className="px-3 text-[10px] font-bold bg-white text-slate-500 border border-slate-200 py-1.5 rounded-lg hover:bg-slate-50 transition-all">
+                                    LIMPIAR
+                                </button>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -817,9 +851,17 @@ export default function PreSaleGenerator() {
                                      </div>
                                 </div>
                             </div>
+                        <div className="pt-2 flex justify-center">
+                            <button 
+                                onClick={runMigration}
+                                className="text-[9px] font-black text-slate-400 hover:text-[#f5a800] transition-colors border-b border-dotted border-slate-300 uppercase italic tracking-tighter"
+                            >
+                                ¿Faltan datos? Intentar migración manual de este navegador
+                            </button>
                         </div>
                     </div>
                 </div>
+            </div>
 
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-border/40">
                     <h4 className="text-sm font-black text-[#1b3a57] uppercase mb-3 flex items-center gap-2">
