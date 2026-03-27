@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useDropzone } from 'react-dropzone';
 import * as xlsx from 'xlsx';
-import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2 } from 'lucide-react';
+import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2, Edit2, Check } from 'lucide-react';
 
 export default function AdminMasterView() {
     const [semanas, setSemanas] = useState([]);
@@ -11,6 +11,10 @@ export default function AdminMasterView() {
     const [processing, setProcessing] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    
+    // Edit Title State
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [newTitleValue, setNewTitleValue] = useState('');
 
     // Preview Data
     const [previewData, setPreviewData] = useState(null);
@@ -315,6 +319,88 @@ export default function AdminMasterView() {
         }
     };
 
+    const handleUpdateTitle = async () => {
+        if (!newTitleValue.trim() || !existingMaster) return;
+        setProcessing(true);
+        setError('');
+        setSuccess('');
+
+        const oldTitle = existingMaster.titulo_despacho;
+        const newTitle = newTitleValue.trim();
+
+        if (oldTitle === newTitle) {
+            setIsEditingTitle(false);
+            setProcessing(false);
+            return;
+        }
+
+        try {
+            // 1. Update master_confirmaciones
+            const { error: masterError } = await supabase
+                .from('master_confirmaciones')
+                .update({ titulo_despacho: newTitle })
+                .eq('id', existingMaster.id);
+
+            if (masterError) throw masterError;
+
+            // Get week name for full name pattern matching
+            const semanaGuardada = semanas.find(s => s.id === selectedSemana);
+            const nombreSemana = semanaGuardada ? semanaGuardada.nombre : selectedSemana;
+            
+            const oldPedidoName = `${oldTitle} (${nombreSemana})`;
+            const newPedidoName = `${newTitle} (${nombreSemana})`;
+
+            // 2. Update app_state - DISTRIBUIDOR
+            const { data: distStateRes } = await supabase.from('app_state').select('data').eq('id', 'distribuidor').maybeSingle();
+            if (distStateRes?.data) {
+                let distData = distStateRes.data;
+                let changedDist = false;
+                
+                if (distData.pedidos) {
+                    distData.pedidos = distData.pedidos.map(p => {
+                        if (p.nombre === oldPedidoName || p.nombre === oldTitle) {
+                            changedDist = true;
+                            return { ...p, nombre: newPedidoName };
+                        }
+                        return p;
+                    });
+                }
+                
+                if (changedDist) {
+                    await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
+                }
+            }
+
+            // 3. Update app_state - REMITOS
+            const { data: remStateRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
+            if (remStateRes?.data) {
+                let remData = Array.isArray(remStateRes.data) ? remStateRes.data : (remStateRes.data.rows || []);
+                let changedRem = false;
+
+                remData = remData.map(r => {
+                    if (r.pedido === oldPedidoName || r.pedido === oldTitle) {
+                        changedRem = true;
+                        return { ...r, pedido: newPedidoName };
+                    }
+                    return r;
+                });
+
+                if (changedRem) {
+                    await supabase.from('app_state').upsert({ id: 'remitos', data: remData });
+                }
+            }
+
+            setExistingMaster({ ...existingMaster, titulo_despacho: newTitle });
+            setSuccess("Título actualizado correctamente en Confirmaciones y Gestión Integral.");
+            setIsEditingTitle(false);
+        } catch (err) {
+            console.error(err);
+            setError("Error al actualizar el título.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     if (loading) return <div className="p-8 text-center animate-pulse"><Loader2 className="mx-auto animate-spin mb-4" /> Cargando semanas...</div>;
 
     return (
@@ -371,8 +457,48 @@ export default function AdminMasterView() {
                             <CheckCircle2 size={24} /> Base Maestro Activada
                         </div>
                         <p className="text-sm text-green-700/80">Esta semana ya tiene un archivo de confirmación cargado.</p>
-                        <ul className="mt-4 space-y-1 text-xs text-green-800 font-mono">
-                            <li><strong>Título Despacho:</strong> {existingMaster.titulo_despacho}</li>
+                        <ul className="mt-4 space-y-2 text-xs text-green-800 font-mono">
+                            <li className="flex items-center gap-2">
+                                <strong>Título Despacho:</strong> 
+                                {isEditingTitle ? (
+                                    <div className="flex items-center gap-1">
+                                        <input 
+                                            type="text" 
+                                            value={newTitleValue} 
+                                            onChange={(e) => setNewTitleValue(e.target.value)}
+                                            className="px-2 py-0.5 border border-green-300 rounded bg-white text-navy font-bold outline-none focus:ring-1 focus:ring-green-500"
+                                            autoFocus
+                                        />
+                                        <button 
+                                            onClick={handleUpdateTitle}
+                                            disabled={processing}
+                                            className="p-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                                        >
+                                            {processing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                        </button>
+                                        <button 
+                                            onClick={() => setIsEditingTitle(false)}
+                                            className="p-1 bg-gray-400 text-white rounded hover:bg-gray-500 transition-colors"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <span>{existingMaster.titulo_despacho}</span>
+                                        <button 
+                                            onClick={() => {
+                                                setNewTitleValue(existingMaster.titulo_despacho);
+                                                setIsEditingTitle(true);
+                                            }}
+                                            className="p-1 hover:bg-green-200 rounded transition-colors text-green-700"
+                                            title="Editar título"
+                                        >
+                                            <Edit2 size={12} />
+                                        </button>
+                                    </>
+                                )}
+                            </li>
                             <li><strong>Total ARS (Final):</strong> $ {Number(parseFloat(existingMaster.total_ars || 0)).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
                             <li><strong>Total Prod:</strong> $ {Number(parseFloat(existingMaster.total_productos || 0)).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
                             {(existingMaster.costo_envio || 0) > 0 && (
