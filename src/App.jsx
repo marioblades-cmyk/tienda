@@ -12,10 +12,11 @@ import AdminMasterView from './components/AdminMasterView';
 import ComicAnalysisTool from './components/ComicAnalysisTool';
 import PriceAnalysisTool from './components/PriceAnalysisTool';
 import QuotationTool from './components/QuotationTool';
+import PreSaleGenerator from './components/PreSaleGenerator';
 import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
-    CheckCircle2, BookOpen, FileText
+    CheckCircle2, BookOpen, FileText, Image as ImageIcon
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -57,6 +58,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'entelequia', icon: BookOpen, label: 'Herramienta Editorial' },
         { id: 'precios', icon: Database, label: 'Análisis de Precios' },
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
+        { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
     ];
 
@@ -64,6 +66,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
         ...(isSocio ? [{ id: 'remitos', icon: Database, label: 'Gestión Integral' }] : []),
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
+        { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
     ];
 
@@ -130,16 +133,18 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
 }
 
 // --- Tab title map ---
-const ADMIN_TITLES = {
+const TAB_TITLES = {
     semanas: 'Gestión de Semanas',
     consolidado: 'Consolidado General',
     remitos: 'Remitos y Finanzas',
     confirmaciones: 'Base Master',
     'mis-pedidos': 'Mis Pedidos como Vendedor',
+    pedidos: 'Mis Pedidos Semanales',
     usuarios: 'Gestión de Vendedores',
     precios: 'Análisis de Precios',
     'catalogo-actualizado': 'Catálogo Maestro Actualizado',
-    cotizaciones: 'Cotizaciones',
+    preventas: 'Generador de Preventas',
+    cotizaciones: 'Generador de Cotizaciones',
     entelequia: 'Herramienta Editorial',
 };
 
@@ -241,18 +246,18 @@ function Main() {
         activeTab === 'usuarios' ? <AdminUserManagement /> :
         activeTab === 'precios' ? <PriceAnalysisTool /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
+        activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
         <ComicAnalysisTool />
     ) : (
         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
+        activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
         <SellerDashboard isAdmin={isAdmin} />
     );
 
-    const pageTitle = isAdmin
-        ? (ADMIN_TITLES[activeTab] || 'Panel Admin')
-        : 'Mis Pedidos Semanales';
+    const pageTitle = TAB_TITLES[activeTab] || 'Módulos Mangas Comics';
 
     const roleLabel = isAdmin ? 'ADMINISTRADOR' : (isSocio ? 'SOCIO' : 'VENDEDOR');
 
