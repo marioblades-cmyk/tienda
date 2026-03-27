@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { catalogService } from '../services/catalogService';
-import { Search, Download, Trash2, Image as ImageIcon, CheckCircle2, AlertCircle, Loader2, Zap, Smartphone, MapPin, Facebook, Book } from 'lucide-react';
+import { Search, Download, Trash2, Image as ImageIcon, CheckCircle2, AlertCircle, Loader2, Zap, Smartphone, MapPin, Facebook, Book, Save, Cloud } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import { supabase } from '../services/supabase';
+import { useAuth } from '../hooks/useAuth';
 
 export default function PreSaleGenerator() {
+    const { user } = useAuth();
+    const [isSaving, setIsSaving] = useState(false);
+    const [isLoadingProjects, setIsLoadingProjects] = useState(true);
     const DEFAULT_TEMPLATES = {
         'Preventas Clásicas': {
             discountPercent: 20,
@@ -36,39 +41,119 @@ export default function PreSaleGenerator() {
     const [savedProjects, setSavedProjects] = useState({});
     const [selectedProjectKey, setSelectedProjectKey] = useState('');
 
+    // Carga inicial de proyectos y plantillas desde Supabase
     useEffect(() => {
-        const saved = localStorage.getItem('presale_templates');
-        if (saved) {
+        if (!user) return;
+        
+        const fetchData = async () => {
+            setIsLoadingProjects(true);
             try {
-                setUserTemplates(JSON.parse(saved));
-            } catch (e) {
+                // --- MIGRACIÓN: De LocalStorage a Supabase ---
+                const localProjs = localStorage.getItem('presale_projects');
+                const localTemps = localStorage.getItem('presale_templates');
+
+                if (localProjs) {
+                    try {
+                        const parsedProjs = JSON.parse(localProjs);
+                        for (const [name, data] of Object.entries(parsedProjs)) {
+                            await supabase.from('presale_projects').upsert({
+                                user_id: user.id,
+                                name: name,
+                                config: data.config,
+                                items: data.items,
+                                updated_at: data.date || new Date().toISOString()
+                            }, { onConflict: 'user_id,name' });
+                        }
+                        localStorage.removeItem('presale_projects');
+                        console.log("Proyectos locales migrados a Supabase");
+                    } catch (e) { console.error("Error migrando proyectos:", e); }
+                }
+
+                if (localTemps) {
+                    try {
+                        const parsedTemps = JSON.parse(localTemps);
+                        for (const [name, config] of Object.entries(parsedTemps)) {
+                            // No migrar las plantillas por defecto
+                            if (DEFAULT_TEMPLATES[name]) continue;
+                            await supabase.from('presale_templates').upsert({
+                                user_id: user.id,
+                                name: name,
+                                config: config
+                            }, { onConflict: 'user_id,name' });
+                        }
+                        localStorage.removeItem('presale_templates');
+                        console.log("Plantillas locales migradas a Supabase");
+                    } catch (e) { console.error("Error migrando plantillas:", e); }
+                }
+
+                // --- CARGA NORMAL DE SUPABASE ---
+                // Cargar Proyectos
+                const { data: projectsData, error: projError } = await supabase
+                    .from('presale_projects')
+                    .select('*')
+                    .order('updated_at', { ascending: false });
+                
+                if (projError) throw projError;
+                const projsMap = {};
+                projectsData?.forEach(p => {
+                    projsMap[p.name] = { config: p.config, items: p.items, date: p.updated_at, id: p.id };
+                });
+                setSavedProjects(projsMap);
+
+                // Cargar Plantillas
+                const { data: templatesData, error: tempError } = await supabase
+                    .from('presale_templates')
+                    .select('*')
+                    .order('name', { ascending: true });
+                
+                if (tempError) throw tempError;
+                const tempsMap = { ...DEFAULT_TEMPLATES };
+                templatesData?.forEach(t => {
+                    tempsMap[t.name] = t.config;
+                });
+                setUserTemplates(tempsMap);
+            } catch (err) {
+                console.error("Error al cargar datos de Supabase:", err);
                 setUserTemplates(DEFAULT_TEMPLATES);
-            }
-        } else {
-            setUserTemplates(DEFAULT_TEMPLATES);
-        }
-
-        const projs = localStorage.getItem('presale_projects');
-        if (projs) {
-            try { setSavedProjects(JSON.parse(projs)); } catch(e) {}
-        }
-    }, []);
-
-    const saveProject = () => {
-        const name = prompt("Nombre del proyecto a guardar (guardará mangas e información completa):", selectedProjectKey || `Proyecto ${new Date().toLocaleDateString()}`);
-        if (!name) return;
-        const newProjs = {
-            ...savedProjects,
-            [name]: {
-                config,
-                items: selectedItems,
-                date: new Date().toISOString()
+            } finally {
+                setIsLoadingProjects(false);
             }
         };
-        setSavedProjects(newProjs);
-        setSelectedProjectKey(name);
-        localStorage.setItem('presale_projects', JSON.stringify(newProjs));
-        alert('Proyecto guardado exitosamente.');
+
+        fetchData();
+    }, [user]);
+
+    const saveProject = async () => {
+        if (!user) { alert("Debes iniciar sesión para guardar proyectos."); return; }
+        const name = prompt("Nombre del proyecto a guardar (sincronizará con la nube):", selectedProjectKey || `Proyecto ${new Date().toLocaleDateString()}`);
+        if (!name) return;
+
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('presale_projects')
+                .upsert({
+                    user_id: user.id,
+                    name: name,
+                    config: config,
+                    items: selectedItems,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'user_id,name' });
+
+            if (error) throw error;
+            
+            // Actualizar estado local
+            setSavedProjects(prev => ({
+                ...prev,
+                [name]: { config, items: selectedItems, date: new Date().toISOString() }
+            }));
+            setSelectedProjectKey(name);
+            alert('Proyecto guardado y sincronizado exitosamente.');
+        } catch (err) {
+            alert('Error al guardar en Supabase: ' + err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const loadProject = () => {
@@ -79,52 +164,129 @@ export default function PreSaleGenerator() {
         alert('Proyecto cargado exitosamente.');
     };
 
-    const deleteProject = () => {
-        if (!selectedProjectKey || !savedProjects[selectedProjectKey]) return;
-        if (!window.confirm(`¿Seguro que deseas eliminar permanentemente el proyecto "${selectedProjectKey}"?`)) return;
-        const next = { ...savedProjects };
-        delete next[selectedProjectKey];
-        setSavedProjects(next);
-        setSelectedProjectKey('');
-        localStorage.setItem('presale_projects', JSON.stringify(next));
+    const deleteProject = async () => {
+        if (!selectedProjectKey || !user) return;
+        if (!window.confirm(`¿Seguro que deseas eliminar permanentemente el proyecto "${selectedProjectKey}" de la nube?`)) return;
+        
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('presale_projects')
+                .delete()
+                .eq('user_id', user.id)
+                .eq('name', selectedProjectKey);
+
+            if (error) throw error;
+
+            const next = { ...savedProjects };
+            delete next[selectedProjectKey];
+            setSavedProjects(next);
+            setSelectedProjectKey('');
+            alert('Proyecto eliminado de la nube.');
+        } catch (err) {
+            alert('Error al eliminar de Supabase: ' + err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    const saveCurrentAsTemplate = () => {
-        const name = prompt("Nombre de la plantilla a guardar/sobrescribir:", selectedTemplateKey || "Mi Nueva Plantilla");
+    const saveCurrentAsTemplate = async () => {
+        if (!user) return;
+        const name = prompt("Nombre de la plantilla a guardar en la nube:", selectedTemplateKey || "Mi Nueva Plantilla");
         if (!name) return;
-        const newTemplates = {
-            ...userTemplates,
-            [name]: { ...config }
-        };
-        setUserTemplates(newTemplates);
-        setSelectedTemplateKey(name);
-        localStorage.setItem('presale_templates', JSON.stringify(newTemplates));
-        alert('Plantilla guardada exitosamente.');
+
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('presale_templates')
+                .upsert({
+                    user_id: user.id,
+                    name: name,
+                    config: config
+                }, { onConflict: 'user_id,name' });
+
+            if (error) throw error;
+            
+            setUserTemplates(prev => ({
+                ...prev,
+                [name]: config
+            }));
+            setSelectedTemplateKey(name);
+            alert('Plantilla guardada y sincronizada.');
+        } catch (err) {
+            alert('Error al guardar plantilla: ' + err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    const deleteTemplate = () => {
-        if (!selectedTemplateKey || !userTemplates[selectedTemplateKey]) return;
-        if (!window.confirm(`¿Seguro que deseas eliminar la plantilla "${selectedTemplateKey}"?`)) return;
-        const next = { ...userTemplates };
-        delete next[selectedTemplateKey];
-        setUserTemplates(next);
-        setSelectedTemplateKey('');
-        localStorage.setItem('presale_templates', JSON.stringify(next));
+    const deleteTemplate = async () => {
+        if (!selectedTemplateKey || !user || DEFAULT_TEMPLATES[selectedTemplateKey]) {
+            alert("No se pueden eliminar las plantillas por defecto.");
+            return;
+        }
+        if (!window.confirm(`¿Seguro que deseas eliminar la plantilla "${selectedTemplateKey}" de la nube?`)) return;
+        
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('presale_templates')
+                .delete()
+                .eq('user_id', user.id)
+                .eq('name', selectedTemplateKey);
+
+            if (error) throw error;
+            
+            const next = { ...userTemplates };
+            delete next[selectedTemplateKey];
+            setUserTemplates(next);
+            setSelectedTemplateKey('');
+            alert('Plantilla eliminada de la nube.');
+        } catch (err) {
+            alert('Error al eliminar plantilla: ' + err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    const renameTemplate = () => {
-        if (!selectedTemplateKey || !userTemplates[selectedTemplateKey]) return;
+    const renameTemplate = async () => {
+        if (!selectedTemplateKey || !user || DEFAULT_TEMPLATES[selectedTemplateKey]) return;
         const newName = prompt("Nuevo nombre para la plantilla:", selectedTemplateKey);
         if (!newName || newName === selectedTemplateKey) return;
         
-        const next = { ...userTemplates };
-        next[newName] = next[selectedTemplateKey];
-        delete next[selectedTemplateKey];
-        
-        setUserTemplates(next);
-        setSelectedTemplateKey(newName);
-        localStorage.setItem('presale_templates', JSON.stringify(next));
-        alert('Plantilla renombrada.');
+        setIsSaving(true);
+        try {
+            // En Supabase, para renombrar borramos el viejo y subimos el nuevo (o hacemos update si tuviéramos ID)
+            // Dado que el UNIQUE es (user_id, name), lo más limpio es upsert con el nuevo nombre
+            const { error: upsertError } = await supabase
+                .from('presale_templates')
+                .upsert({
+                    user_id: user.id,
+                    name: newName,
+                    config: userTemplates[selectedTemplateKey]
+                }, { onConflict: 'user_id,name' });
+
+            if (upsertError) throw upsertError;
+
+            // Borrar el anterior
+            await supabase
+                .from('presale_templates')
+                .delete()
+                .eq('user_id', user.id)
+                .eq('name', selectedTemplateKey);
+
+            const next = { ...userTemplates };
+            next[newName] = next[selectedTemplateKey];
+            delete next[selectedTemplateKey];
+            
+            setUserTemplates(next);
+            setSelectedTemplateKey(newName);
+            alert('Plantilla renombrada en la nube.');
+        } catch (err) {
+            alert('Error al renombrar plantilla: ' + err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     // Configuración global del póster
