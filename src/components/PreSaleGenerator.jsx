@@ -6,7 +6,7 @@ import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 
 export default function PreSaleGenerator() {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingProjects, setIsLoadingProjects] = useState(true);
     const DEFAULT_TEMPLATES = {
@@ -36,10 +36,10 @@ export default function PreSaleGenerator() {
         }
     };
 
-    const [userTemplates, setUserTemplates] = useState({});
-    const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
-    const [savedProjects, setSavedProjects] = useState({});
-    const [selectedProjectKey, setSelectedProjectKey] = useState('');
+    const [userTemplates, setUserTemplates] = useState({}); // { id: { name, config, owner_id, owner_name } }
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [savedProjects, setSavedProjects] = useState({}); // { id: { name, config, items, date, owner_id, owner_name } }
+    const [selectedProjectId, setSelectedProjectId] = useState('');
 
     const runMigration = async () => {
         if (!user) return;
@@ -108,27 +108,55 @@ export default function PreSaleGenerator() {
                 }
 
                 // --- CARGA NORMAL DE SUPABASE ---
+                // Seleccionar proyectos uniendo con el perfil para ver el dueño
                 const { data: projectsData, error: projError } = await supabase
                     .from('presale_projects')
-                    .select('*')
+                    .select(`
+                        *,
+                        owner:vendedores(nombre)
+                    `)
                     .order('updated_at', { ascending: false });
                 
                 if (projError) throw projError;
                 const projsMap = {};
                 projectsData?.forEach(p => {
-                    projsMap[p.name] = { config: p.config, items: p.items, date: p.updated_at, id: p.id };
+                    projsMap[p.id] = { 
+                        id: p.id,
+                        name: p.name, 
+                        config: p.config, 
+                        items: p.items, 
+                        date: p.updated_at, 
+                        user_id: p.user_id,
+                        owner_name: p.owner?.nombre || 'Desconocido'
+                    };
                 });
                 setSavedProjects(projsMap);
 
+                // Seleccionar plantillas uniendo con el perfil
                 const { data: templatesData, error: tempError } = await supabase
                     .from('presale_templates')
-                    .select('*')
+                    .select(`
+                        *,
+                        owner:vendedores(nombre)
+                    `)
                     .order('name', { ascending: true });
                 
                 if (tempError) throw tempError;
-                const tempsMap = { ...DEFAULT_TEMPLATES };
+                
+                // Las DEFAULT_TEMPLATES no tienen ID, usaremos su nombre como ID interno
+                const tempsMap = {};
+                Object.entries(DEFAULT_TEMPLATES).forEach(([name, cfg]) => {
+                    tempsMap[name] = { name, config: cfg, owner_name: 'SISTEMA', isDefault: true };
+                });
+
                 templatesData?.forEach(t => {
-                    tempsMap[t.name] = t.config;
+                    tempsMap[t.id] = { 
+                        id: t.id,
+                        name: t.name, 
+                        config: t.config, 
+                        user_id: t.user_id,
+                        owner_name: t.owner?.nombre || 'Desconocido'
+                    };
                 });
                 setUserTemplates(tempsMap);
                 console.log("Sincronización completada.");
@@ -145,12 +173,25 @@ export default function PreSaleGenerator() {
 
     const saveProject = async () => {
         if (!user) { alert("Debes iniciar sesión para guardar proyectos."); return; }
-        const name = prompt("Nombre del proyecto a guardar (sincronizará con la nube):", selectedProjectKey || `Proyecto ${new Date().toLocaleDateString()}`);
+        
+        const currentProj = savedProjects[selectedProjectId];
+        const isOwner = currentProj ? (currentProj.user_id === user.id) : true;
+        
+        let initialName = selectedProjectId ? savedProjects[selectedProjectId].name : `Proyecto ${new Date().toLocaleDateString()}`;
+        
+        // Si no es el dueño, forzamos un nombre nuevo para crear una copia
+        if (!isOwner) {
+            initialName = `${initialName} (Copia)`;
+        }
+
+        const name = prompt(isOwner ? "Nombre del proyecto:" : "Guardar como copia propia (Nuevo Nombre):", initialName);
         if (!name) return;
 
         setIsSaving(true);
         try {
-            const { error } = await supabase
+            // Siempre usamos upsert con user.id y name. Si es un nombre nuevo, creará uno nuevo.
+            // Si es el dueño y es el mismo nombre, sobrescribirá.
+            const { data, error } = await supabase
                 .from('presale_projects')
                 .upsert({
                     user_id: user.id,
@@ -158,36 +199,50 @@ export default function PreSaleGenerator() {
                     config: config,
                     items: selectedItems,
                     updated_at: new Date().toISOString()
-                }, { onConflict: 'user_id,name' });
+                }, { onConflict: 'user_id,name' })
+                .select();
 
             if (error) throw error;
             
-            // Actualizar estado local
+            const savedItem = data[0];
+            const newProj = { 
+                id: savedItem.id,
+                name: savedItem.name, 
+                config: savedItem.config, 
+                items: savedItem.items, 
+                date: savedItem.updated_at, 
+                user_id: savedItem.user_id,
+                owner_name: profile?.nombre || 'Yo'
+            };
+
             setSavedProjects(prev => ({
                 ...prev,
-                [name]: { config, items: selectedItems, date: new Date().toISOString() }
+                [savedItem.id]: newProj
             }));
-            setSelectedProjectKey(name);
-            alert('Proyecto guardado y sincronizado exitosamente.');
+            setSelectedProjectId(savedItem.id);
+            alert('Proyecto guardado exitosamente.');
         } catch (err) {
-            alert('Error al guardar en Supabase: ' + err.message);
+            alert('Error al guardar: ' + err.message);
         } finally {
             setIsSaving(false);
         }
     };
 
     const loadProject = () => {
-        if (!selectedProjectKey || !savedProjects[selectedProjectKey]) return;
-        const proj = savedProjects[selectedProjectKey];
-        if (proj.config) setConfig(proj.config);
-        if (proj.items) setSelectedItems(proj.items);
+        if (!selectedProjectId || !savedProjects[selectedProjectId]) return;
+        const proj = savedProjects[selectedProjectId];
+        if (proj.config) setConfig(JSON.parse(JSON.stringify(proj.config))); // Deep copy for individual state
+        if (proj.items) setSelectedItems(JSON.parse(JSON.stringify(proj.items)));
         setStatusMessage("✓ PROYECTO CARGADO");
         setTimeout(() => setStatusMessage(""), 3000);
     };
 
     const loadTemplate = () => {
-        if (!selectedTemplateKey || !userTemplates[selectedTemplateKey]) return;
-        const tpl = userTemplates[selectedTemplateKey];
+        if (!selectedTemplateId || !userTemplates[selectedTemplateId]) return;
+        const tpl = userTemplates[selectedTemplateId].config;
+        
+        // Importante: No mezclar, aplicar valores limpios de la plantilla
+        // pero manteniendo los que no vienen en ella (si los hay)
         setConfig(prev => ({...prev, ...tpl}));
         
         // Aplicar descuento de la plantilla a los ítems actuales
@@ -201,26 +256,34 @@ export default function PreSaleGenerator() {
     };
 
     const deleteProject = async () => {
-        if (!selectedProjectKey || !user) return;
-        if (!window.confirm(`¿Seguro que deseas eliminar permanentemente el proyecto "${selectedProjectKey}" de la nube?`)) return;
+        if (!selectedProjectId || !user) return;
+        const proj = savedProjects[selectedProjectId];
+        
+        if (proj.user_id !== user.id) {
+            alert("No puedes borrar proyectos de otras personas.");
+            return;
+        }
+
+        if (!window.confirm(`¿Seguro que deseas eliminar el proyecto "${proj.name}"?`)) return;
         
         setIsSaving(true);
         try {
             const { error } = await supabase
                 .from('presale_projects')
                 .delete()
-                .eq('user_id', user.id)
-                .eq('name', selectedProjectKey);
+                .eq('id', selectedProjectId);
 
             if (error) throw error;
 
-            const next = { ...savedProjects };
-            delete next[selectedProjectKey];
-            setSavedProjects(next);
-            setSelectedProjectKey('');
-            alert('Proyecto eliminado de la nube.');
+            setSavedProjects(prev => {
+                const next = { ...prev };
+                delete next[selectedProjectId];
+                return next;
+            });
+            setSelectedProjectId('');
+            alert('Proyecto eliminado.');
         } catch (err) {
-            alert('Error al eliminar de Supabase: ' + err.message);
+            alert('Error al eliminar: ' + err.message);
         } finally {
             setIsSaving(false);
         }
@@ -228,27 +291,45 @@ export default function PreSaleGenerator() {
 
     const saveCurrentAsTemplate = async () => {
         if (!user) return;
-        const name = prompt("Nombre de la plantilla a guardar en la nube:", selectedTemplateKey || "Mi Nueva Plantilla");
+        
+        const currentTpl = userTemplates[selectedTemplateId];
+        const isOwner = currentTpl ? (currentTpl.user_id === user.id) : true;
+        const isDefault = currentTpl?.isDefault;
+
+        let initialName = selectedTemplateId && !isDefault ? userTemplates[selectedTemplateId].name : "Mi Nueva Plantilla";
+        if (selectedTemplateId && (isDefault || !isOwner)) initialName = `${initialName} (Copia)`;
+
+        const name = prompt(isOwner && !isDefault ? "Nombre de la plantilla:" : "Guardar como copia propia (Nuevo Nombre):", initialName);
         if (!name) return;
 
         setIsSaving(true);
         try {
-            const { error } = await supabase
+            const { data, error } = await supabase
                 .from('presale_templates')
                 .upsert({
                     user_id: user.id,
                     name: name,
                     config: config
-                }, { onConflict: 'user_id,name' });
+                }, { onConflict: 'user_id,name' })
+                .select();
 
             if (error) throw error;
             
+            const savedItem = data[0];
+            const newTpl = { 
+                id: savedItem.id,
+                name: savedItem.name, 
+                config: savedItem.config, 
+                user_id: savedItem.user_id,
+                owner_name: profile?.nombre || 'Yo'
+            };
+
             setUserTemplates(prev => ({
                 ...prev,
-                [name]: config
+                [savedItem.id]: newTpl
             }));
-            setSelectedTemplateKey(name);
-            alert('Plantilla guardada y sincronizada.');
+            setSelectedTemplateId(savedItem.id);
+            alert('Plantilla guardada exitosamente.');
         } catch (err) {
             alert('Error al guardar plantilla: ' + err.message);
         } finally {
@@ -257,27 +338,36 @@ export default function PreSaleGenerator() {
     };
 
     const deleteTemplate = async () => {
-        if (!selectedTemplateKey || !user || DEFAULT_TEMPLATES[selectedTemplateKey]) {
-            alert("No se pueden eliminar las plantillas por defecto.");
+        if (!selectedTemplateId || !user) return;
+        const tpl = userTemplates[selectedTemplateId];
+
+        if (tpl.isDefault) {
+            alert("No se pueden eliminar las plantillas del sistema.");
             return;
         }
-        if (!window.confirm(`¿Seguro que deseas eliminar la plantilla "${selectedTemplateKey}" de la nube?`)) return;
+        if (tpl.user_id !== user.id) {
+            alert("No puedes borrar plantillas de otras personas.");
+            return;
+        }
+
+        if (!window.confirm(`¿Seguro que deseas eliminar la plantilla "${tpl.name}"?`)) return;
         
         setIsSaving(true);
         try {
             const { error } = await supabase
                 .from('presale_templates')
                 .delete()
-                .eq('user_id', user.id)
-                .eq('name', selectedTemplateKey);
+                .eq('id', selectedTemplateId);
 
             if (error) throw error;
             
-            const next = { ...userTemplates };
-            delete next[selectedTemplateKey];
-            setUserTemplates(next);
-            setSelectedTemplateKey('');
-            alert('Plantilla eliminada de la nube.');
+            setUserTemplates(prev => {
+                const next = { ...prev };
+                delete next[selectedTemplateId];
+                return next;
+            });
+            setSelectedTemplateId('');
+            alert('Plantilla eliminada.');
         } catch (err) {
             alert('Error al eliminar plantilla: ' + err.message);
         } finally {
@@ -286,38 +376,27 @@ export default function PreSaleGenerator() {
     };
 
     const renameTemplate = async () => {
-        if (!selectedTemplateKey || !user || DEFAULT_TEMPLATES[selectedTemplateKey]) return;
-        const newName = prompt("Nuevo nombre para la plantilla:", selectedTemplateKey);
-        if (!newName || newName === selectedTemplateKey) return;
+        if (!selectedTemplateId || !user) return;
+        const tpl = userTemplates[selectedTemplateId];
+        if (tpl.isDefault || tpl.user_id !== user.id) return;
+
+        const newName = prompt("Nuevo nombre para la plantilla:", tpl.name);
+        if (!newName || newName === tpl.name) return;
         
         setIsSaving(true);
         try {
-            // En Supabase, para renombrar borramos el viejo y subimos el nuevo (o hacemos update si tuviéramos ID)
-            // Dado que el UNIQUE es (user_id, name), lo más limpio es upsert con el nuevo nombre
             const { error: upsertError } = await supabase
                 .from('presale_templates')
-                .upsert({
-                    user_id: user.id,
-                    name: newName,
-                    config: userTemplates[selectedTemplateKey]
-                }, { onConflict: 'user_id,name' });
+                .update({ name: newName })
+                .eq('id', selectedTemplateId);
 
             if (upsertError) throw upsertError;
 
-            // Borrar el anterior
-            await supabase
-                .from('presale_templates')
-                .delete()
-                .eq('user_id', user.id)
-                .eq('name', selectedTemplateKey);
-
-            const next = { ...userTemplates };
-            next[newName] = next[selectedTemplateKey];
-            delete next[selectedTemplateKey];
-            
-            setUserTemplates(next);
-            setSelectedTemplateKey(newName);
-            alert('Plantilla renombrada en la nube.');
+            setUserTemplates(prev => ({
+                ...prev,
+                [selectedTemplateId]: { ...prev[selectedTemplateId], name: newName }
+            }));
+            alert('Plantilla renombrada.');
         } catch (err) {
             alert('Error al renombrar plantilla: ' + err.message);
         } finally {
@@ -398,12 +477,12 @@ export default function PreSaleGenerator() {
 
     // AUTO-LOAD PROJECT WHEN SELECTED
     useEffect(() => {
-        if (selectedProjectKey && savedProjects[selectedProjectKey]) {
-            const proj = savedProjects[selectedProjectKey];
-            if (proj.config) setConfig(proj.config);
-            if (proj.items) setSelectedItems(proj.items);
+        if (selectedProjectId && savedProjects[selectedProjectId]) {
+            const proj = savedProjects[selectedProjectId];
+            if (proj.config) setConfig(JSON.parse(JSON.stringify(proj.config)));
+            if (proj.items) setSelectedItems(JSON.parse(JSON.stringify(proj.items)));
         }
-    }, [selectedProjectKey, savedProjects]);
+    }, [selectedProjectId, savedProjects]);
 
     // Filtro de búsqueda
     const searchResults = useMemo(() => {
@@ -739,30 +818,39 @@ export default function PreSaleGenerator() {
                         <div className="mb-4 bg-orange-50 p-3 rounded-xl border border-orange-200">
                             <div className="flex justify-between items-center mb-2">
                                 <label className="text-[10px] font-bold uppercase tracking-widest text-[#e68219] flex items-center gap-1">
-                                    <CheckCircle2 size={12} className="text-[#e68219]" /> Mis Proyectos (Mangas + Info)
+                                    <CheckCircle2 size={12} className="text-[#e68219]" /> Proyectos (Nube)
                                 </label>
                                 <div className="flex gap-1">
-                                    <button onClick={saveProject} className="text-[10px] font-bold bg-[#e68219] text-white px-2 py-1 rounded hover:bg-[#d47617] transition-colors">Guardar</button>
-                                    {selectedProjectKey && (
+                                    <button onClick={saveProject} className="text-[10px] font-bold bg-[#e68219] text-white px-2 py-1 rounded hover:bg-[#d47617] transition-colors">
+                                        {selectedProjectId && savedProjects[selectedProjectId]?.user_id !== user?.id ? "Guardar Copia" : "Guardar"}
+                                    </button>
+                                    {selectedProjectId && savedProjects[selectedProjectId]?.user_id === user?.id && (
                                         <button onClick={deleteProject} className="text-[10px] font-bold bg-white text-red-600 px-2 py-1 rounded border border-red-100 hover:bg-red-50">Borrar</button>
                                     )}
                                 </div>
                             </div>
                             <select 
-                                value={selectedProjectKey}
-                                onChange={(e) => setSelectedProjectKey(e.target.value)}
+                                value={selectedProjectId}
+                                onChange={(e) => setSelectedProjectId(e.target.value)}
                                 className="w-full text-xs font-bold border-2 border-orange-100 outline-none rounded-lg px-3 py-2 bg-white text-[#1b3a57] shadow-sm mb-2"
                             >
-                                <option value="">-- Proyectos Guardados --</option>
-                                {Object.keys(savedProjects).map(key => (
-                                    <option key={key} value={key}>{key} ({savedProjects[key].items?.length || 0} mangas)</option>
-                                ))}
+                                <option value="">-- Proyectos Disponibles --</option>
+                                <optgroup label="Mis Proyectos">
+                                    {Object.values(savedProjects).filter(p => p.user_id === user?.id).map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </optgroup>
+                                <optgroup label="Otros Proyectos (Solo Lectura)">
+                                    {Object.values(savedProjects).filter(p => p.user_id !== user?.id).map(p => (
+                                        <option key={p.id} value={p.id}>{p.name} (👤 {p.owner_name})</option>
+                                    ))}
+                                </optgroup>
                             </select>
                             <div className="flex gap-2">
                                 <button onClick={loadProject} className="flex-1 text-[10px] font-bold bg-[#e68219] text-white py-1.5 rounded-lg hover:bg-[#d47617] transition-all flex items-center justify-center gap-1">
                                     <Cloud size={12} /> CARGAR PROYECTO
                                 </button>
-                                <button onClick={() => { setSelectedProjectKey(''); setStatusMessage("NUEVO PROYECTO"); setTimeout(()=>setStatusMessage(""), 2000); }} className="px-3 text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all">
+                                <button onClick={() => { setSelectedProjectId(''); setStatusMessage("NUEVO PROYECTO"); setTimeout(()=>setStatusMessage(""), 2000); }} className="px-3 text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all">
                                     NUEVO
                                 </button>
                             </div>
@@ -774,11 +862,13 @@ export default function PreSaleGenerator() {
                         <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
                             <div className="flex justify-between items-center mb-2">
                                 <label className="text-[10px] font-bold uppercase tracking-widest text-[#1b3a57] flex items-center gap-1">
-                                    <Zap size={12} className="text-[#f5a800] fill-current" /> Mis Plantillas
+                                    <Zap size={12} className="text-[#f5a800] fill-current" /> Plantillas
                                 </label>
                                 <div className="flex gap-1">
-                                    <button onClick={saveCurrentAsTemplate} className="text-[10px] font-bold bg-[#1b3a57] text-white px-2 py-1 rounded hover:bg-[#132a41] transition-colors whitespace-nowrap">Guardar</button>
-                                    {selectedTemplateKey && (
+                                    <button onClick={saveCurrentAsTemplate} className="text-[10px] font-bold bg-[#1b3a57] text-white px-2 py-1 rounded hover:bg-[#132a41] transition-colors whitespace-nowrap">
+                                        {selectedTemplateId && !userTemplates[selectedTemplateId]?.isDefault && userTemplates[selectedTemplateId]?.user_id === user?.id ? "Guardar" : "Guardar Copia"}
+                                    </button>
+                                    {selectedTemplateId && !userTemplates[selectedTemplateId]?.isDefault && userTemplates[selectedTemplateId]?.user_id === user?.id && (
                                         <>
                                             <button onClick={renameTemplate} className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-1 rounded hover:bg-slate-300 transition-colors">Renombrar</button>
                                             <button onClick={deleteTemplate} className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors">Borrar</button>
@@ -787,21 +877,30 @@ export default function PreSaleGenerator() {
                                 </div>
                             </div>
                             <select 
-                                value={selectedTemplateKey}
-                                onChange={(e) => setSelectedTemplateKey(e.target.value)}
+                                value={selectedTemplateId}
+                                onChange={(e) => setSelectedTemplateId(e.target.value)}
                                 className="w-full text-xs font-bold border-2 border-slate-200 focus:border-[#f5a800] outline-none rounded-lg px-3 py-2 bg-white text-[#1b3a57] cursor-pointer shadow-sm transition-all mb-2"
                             >
-                                <option value="">-- Mis Plantillas Guardadas --</option>
-                                {Object.keys(userTemplates).map(key => (
-                                    <option key={key} value={key}>{key} ({userTemplates[key].discountPercent}%)</option>
-                                ))}
+                                <option value="">-- Plantillas Disponibles --</option>
+                                <optgroup label="SISTEMA">
+                                    {Object.values(userTemplates).filter(t => t.isDefault).map(t => (
+                                        <option key={t.name} value={t.name}>{t.name}</option>
+                                    ))}
+                                </optgroup>
+                                <optgroup label="Mis Plantillas">
+                                    {Object.values(userTemplates).filter(t => !t.isDefault && t.user_id === user?.id).map(t => (
+                                        <option key={t.id} value={t.id}>{t.name}</option>
+                                    ))}
+                                </optgroup>
+                                <optgroup label="Plantillas de Otros">
+                                    {Object.values(userTemplates).filter(t => !t.isDefault && t.user_id !== user?.id).map(t => (
+                                        <option key={t.id} value={t.id}>{t.name} (👤 {t.owner_name})</option>
+                                    ))}
+                                </optgroup>
                             </select>
                             <div className="flex gap-2">
                                 <button onClick={loadTemplate} className="flex-1 text-[10px] font-bold bg-[#1b3a57] text-white py-1.5 rounded-lg hover:bg-[#132435] transition-all flex items-center justify-center gap-1">
-                                    <Zap size={12} className="fill-white" /> CARGAR PLANTILLA
-                                </button>
-                                <button onClick={() => { setSelectedTemplateKey(''); setStatusMessage("ESTILO LIBRE"); setTimeout(()=>setStatusMessage(""), 2000); }} className="px-3 text-[10px] font-bold bg-white text-slate-500 border border-slate-200 py-1.5 rounded-lg hover:bg-slate-50 transition-all">
-                                    LIMPIAR
+                                    APLICAR DISEÑO
                                 </button>
                             </div>
                         </div>
@@ -859,9 +958,9 @@ export default function PreSaleGenerator() {
                                 ¿Faltan datos? Intentar migración manual de este navegador
                             </button>
                         </div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-border/40">
                     <h4 className="text-sm font-black text-[#1b3a57] uppercase mb-3 flex items-center gap-2">
