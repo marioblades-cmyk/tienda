@@ -228,32 +228,7 @@ export default function PreSaleGenerator() {
         }
     };
 
-    const loadProject = () => {
-        if (!selectedProjectId || !savedProjects[selectedProjectId]) return;
-        const proj = savedProjects[selectedProjectId];
-        if (proj.config) setConfig(JSON.parse(JSON.stringify(proj.config))); // Deep copy for individual state
-        if (proj.items) setSelectedItems(JSON.parse(JSON.stringify(proj.items)));
-        setStatusMessage("✓ PROYECTO CARGADO");
-        setTimeout(() => setStatusMessage(""), 3000);
-    };
 
-    const loadTemplate = () => {
-        if (!selectedTemplateId || !userTemplates[selectedTemplateId]) return;
-        const tpl = userTemplates[selectedTemplateId].config;
-        
-        // Importante: No mezclar, aplicar valores limpios de la plantilla
-        // pero manteniendo los que no vienen en ella (si los hay)
-        setConfig(prev => ({...prev, ...tpl}));
-        
-        // Aplicar descuento de la plantilla a los ítems actuales
-        const mult = (100 - tpl.discountPercent) / 100;
-        setSelectedItems(items => items.map(it => ({
-            ...it,
-            customPreventa: it.customPvp * mult
-        })));
-        setStatusMessage("✓ PLANTILLA APLICADA");
-        setTimeout(() => setStatusMessage(""), 3000);
-    };
 
     const deleteProject = async () => {
         if (!selectedProjectId || !user) return;
@@ -483,6 +458,20 @@ export default function PreSaleGenerator() {
             if (proj.items) setSelectedItems(JSON.parse(JSON.stringify(proj.items)));
         }
     }, [selectedProjectId, savedProjects]);
+
+    // AUTO-LOAD TEMPLATE WHEN SELECTED
+    useEffect(() => {
+        if (selectedTemplateId && userTemplates[selectedTemplateId]) {
+            const tpl = userTemplates[selectedTemplateId].config;
+            setConfig(prev => ({...prev, ...tpl}));
+            
+            const mult = (100 - tpl.discountPercent) / 100;
+            setSelectedItems(items => items.map(it => ({
+                ...it,
+                customPreventa: it.customPvp * mult
+            })));
+        }
+    }, [selectedTemplateId, userTemplates]);
 
     // Filtro de búsqueda
     const searchResults = useMemo(() => {
@@ -847,11 +836,8 @@ export default function PreSaleGenerator() {
                                 </optgroup>
                             </select>
                             <div className="flex gap-2">
-                                <button onClick={loadProject} className="flex-1 text-[10px] font-bold bg-[#e68219] text-white py-1.5 rounded-lg hover:bg-[#d47617] transition-all flex items-center justify-center gap-1">
-                                    <Cloud size={12} /> CARGAR PROYECTO
-                                </button>
-                                <button onClick={() => { setSelectedProjectId(''); setStatusMessage("NUEVO PROYECTO"); setTimeout(()=>setStatusMessage(""), 2000); }} className="px-3 text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all">
-                                    NUEVO
+                                <button onClick={() => { setSelectedProjectId(''); setStatusMessage("NUEVO PROYECTO"); setTimeout(()=>setStatusMessage(""), 2000); }} className="w-full text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all uppercase">
+                                    Nuevo Proyecto en Blanco
                                 </button>
                             </div>
                             {statusMessage && (
@@ -898,11 +884,6 @@ export default function PreSaleGenerator() {
                                     ))}
                                 </optgroup>
                             </select>
-                            <div className="flex gap-2">
-                                <button onClick={loadTemplate} className="flex-1 text-[10px] font-bold bg-[#1b3a57] text-white py-1.5 rounded-lg hover:bg-[#132435] transition-all flex items-center justify-center gap-1">
-                                    APLICAR DISEÑO
-                                </button>
-                            </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
