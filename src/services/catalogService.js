@@ -658,32 +658,68 @@ export const catalogService = {
     },
 
     /**
-     * Descarga una imagen remota y la persiste en Supabase Storage vinculada al producto
+     * Descarga una imagen remota o procesa un archivo local y lo persiste en Supabase Storage
      * @param {string} productId - ID del producto en el catálogo
-     * @param {string} remoteUrl - URL de la imagen externa
+     * @param {string|File|Blob} imageSource - URL de la imagen externa o un archivo local
      */
-    async persistProductImage(productId, remoteUrl) {
-        if (!productId || !remoteUrl) return null;
-        if (remoteUrl.includes('supabase.co/storage')) return remoteUrl; // Ya está persistida
+    async persistProductImage(productId, imageSource) {
+        if (!productId || !imageSource) return null;
+        
+        // Si ya es una URL de Supabase, no hacer nada
+        if (typeof imageSource === 'string' && imageSource.includes('supabase.co/storage')) return imageSource;
 
-        console.log(`📸 [INICIO] Persistiendo imagen para ${productId}: ${remoteUrl}`);
+        console.log(`📸 [INICIO] Persistiendo imagen para ${productId}...`);
         
         try {
-            // 1. Descargar la imagen usando un proxy
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(remoteUrl)}`;
-            console.log("🔗 Intentando descargar vía proxy...");
-            const response = await fetch(proxyUrl);
+            let blob;
+            let ext = 'jpg';
             
-            if (!response.ok) {
-                console.error("❌ Falló la descarga de la imagen incluso con proxy.");
-                throw new Error('No se pudo descargar la imagen.');
+            if (imageSource instanceof File || imageSource instanceof Blob) {
+                // CASO 1: Es un archivo local
+                console.log("📁 Procesando archivo local...");
+                blob = imageSource;
+                ext = imageSource.name?.split('.').pop() || 'jpg';
+            } else {
+                // CASO 2: Es una URL remota
+                console.log(`🔗 Descargando vía proxy principal: ${imageSource}`);
+                
+                // Intentar con una cadena de proxies (Weserv es el más potente para imágenes)
+                const proxies = [
+                    (url) => `https://images.weserv.nl/?url=${encodeURIComponent(url.replace(/^https?:\/\//, ''))}`,
+                    (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+                    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+                ];
+
+                let response;
+                let lastError;
+
+                for (const getProxy of proxies) {
+                    try {
+                        const proxyUrl = getProxy(imageSource);
+                        console.log(`📡 Probando puente: ${proxyUrl}`);
+                        response = await fetch(proxyUrl);
+                        if (response.ok) {
+                            console.log("✅ Puente exitoso!");
+                            break; 
+                        }
+                    } catch (e) {
+                        lastError = e;
+                    }
+                }
+                
+                if (!response || !response.ok) {
+                    console.error("❌ Fallaron todos los proxies de descarga.", lastError);
+                    throw new Error('No se pudo descargar la imagen por bloqueo del servidor de origen. Intenta subirla desde tu PC.');
+                }
+                
+                blob = await response.blob();
+                const contentType = response.headers.get('content-type') || 'image/jpeg';
+                ext = contentType.split('/')[1] || 'jpg';
             }
-            const blob = await response.blob();
-            console.log("✅ Imagen descargada correctamente (Blob obtenido)");
             
-            // 2. Determinar extensión
-            const contentType = response.headers.get('content-type') || 'image/jpeg';
-            const ext = contentType.split('/')[1] || 'jpg';
+            // Limpiar extensión
+            if (ext.includes('+')) ext = ext.split('+')[0]; // ej: svg+xml -> svg
+
             const fileName = `${productId}.${ext}`;
             const filePath = `products/${fileName}`;
 
@@ -695,14 +731,11 @@ export const catalogService = {
 
             if (uploadError) {
                 console.error("❌ ERROR EN STORAGE (SUPABASE):", uploadError);
-                if (uploadError.message.includes('not found')) {
-                    alert("⚠️ ERROR CRÍTICO: No existe el bucket 'catalog-images'. Por favor, créalo en tu panel de Supabase Storage.");
-                }
                 throw uploadError;
             }
             console.log("✅ Subida exitosa a Supabase Storage");
 
-            // 4. Obtener URL pública
+            // 4. Obtener URL pública e invalidar caché
             const { data: { publicUrl } } = supabase.storage
                 .from('catalog-images')
                 .getPublicUrl(filePath);
@@ -714,15 +747,9 @@ export const catalogService = {
                 .update({ imagen_url: publicUrl, updated_at: new Date().toISOString() })
                 .eq('product_id', productId);
 
-            if (dbError) {
-                console.error("❌ ERROR AL ACTUALIZAR DB:", dbError);
-                throw dbError;
-            }
+            if (dbError) throw dbError;
 
-            // 6. Invalidar caché local
             this.clearCache();
-            
-            console.log('✨ [FINALIZADO] Imagen persistida exitosamente:', publicUrl);
             return publicUrl;
         } catch (err) {
             console.error('❌ FALLO TOTAL EN persistProductImage:', err);
@@ -731,21 +758,226 @@ export const catalogService = {
     },
 
     /**
-     * Limpia todas las etiquetas de reimpresión de la base de datos y la caché
+     * Extrae imágenes de un texto HTML crudo siguiendo una lógica contextual avanzada.
+     * @param {string} html - Código fuente de la página cargada
+     * @param {string} baseUrl - URL base (opcional) para completar links relativos
      */
-    async clearAllReprintLabels() {
-        console.log('🧹 Limpiando todas las etiquetas de reimpresión...');
-        const { error } = await supabase
-            .from('catalogo_productos')
-            .update({ es_reimpresion: false })
-            .neq('es_reimpresion', false); // Selecciona todos los que NO son false (true o null)
+    extractFromRawHTML(html, baseUrl = "") {
+        if (!html) return [];
+        console.log(`🛠 [SMART SCAN] Iniciando extracción profunda (${html.length} caracteres)`);
 
-        if (error) {
-            console.error('❌ Error al limpiar etiquetas:', error);
-            throw error;
+        try {
+            // A. DETECTAR DOMINIO BASE AUTOMÁTICAMENTE
+            let detectedBaseUrl = baseUrl || "";
+            if (!detectedBaseUrl) {
+                const ogUrlMatch = html.match(/<meta\s+property="og:url"\s+content="([^"]+)"/i);
+                const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="([^"]+)"/i);
+                if (ogUrlMatch || canonicalMatch) {
+                    try {
+                        detectedBaseUrl = new URL(ogUrlMatch ? ogUrlMatch[1] : canonicalMatch[1]).origin;
+                    } catch (e) { /* silent */ }
+                }
+            }
+            
+            // Fallback para distribuidores conocidos
+            if (!detectedBaseUrl && (html.includes('ivrea') || html.includes('editorialivrea'))) {
+                detectedBaseUrl = "https://www.ivrea.com.ar";
+            }
+
+            // B. AYUDANTE DE LIMPIEZA
+            const decodeEntities = (s) => {
+                if (!s) return "";
+                return s.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/#\d+;/g, '');
+            };
+
+            const forbiddenLabels = [
+                'calendario de salidas', 'editorial ivrea', 'más info', 'mas info', 
+                'logotipo', 'banner', 'proximas', 'proximamente', 'ver más', 'ver mas', 
+                'home', 'contacto', 'quienes somos', 'donde comprar', 'archivo',
+                'novedades', 'reimpresiones', 'nuestra editorial', 'facebook', 'twitter', 'instagram'
+            ];
+
+            const isGenericOrGarbage = (l) => {
+                if (!l) return true;
+                const lower = l.toLowerCase();
+                if (lower.includes('<') || lower.includes('>') || lower.includes('{') || lower.includes('=') || lower.includes('class=')) return true;
+                if (lower.includes('window.') || lower.includes('.jpg') || lower.includes('.png')) return true;
+                return forbiddenLabels.some(f => lower.includes(f)) || l.length < 3 || l.length > 80;
+            };
+
+            // C. MOTOR DE EXTRACCIÓN MEJORADO (Regex para atributos múltiples en una sola etiqueta)
+            const imgTags = html.match(/<(img|source|a)[^>]+>/gi) || [];
+            
+            const results = [];
+            const processedUrls = new Set();
+            const processedFileNames = new Set();
+
+            for (const tag of imgTags) {
+                // 1. Extraer URL Priorizando lazyload (data-src > data-lazy-src > srcset > src)
+                const dataSrc = tag.match(/data-src=["']([^"'>]+)["']/i);
+                const dataLazy = tag.match(/data-lazy-src=["']([^"'>]+)["']/i);
+                const srcset = tag.match(/srcset=["']([^"'>\s]+)/i);
+                const src = tag.match(/src=["']([^"'>]+)["']/i);
+                const href = tag.match(/href=["']([^"'>]+\.(jpg|jpeg|png|webp)[^"'>]*)["']/i);
+
+                let rawUrl = (dataSrc ? dataSrc[1] : (dataLazy ? dataLazy[1] : (srcset ? srcset[1] : (src ? src[1] : (href ? href[1] : null)))));
+                
+                if (!rawUrl || rawUrl.startsWith('data:')) continue;
+
+                // Saltear placeholders conocidos
+                if (rawUrl.includes('dflazy') || rawUrl.includes('placeholder') || rawUrl.includes('loading') || rawUrl.includes('/blank.')) continue;
+
+                // 2. Limpiar URL
+                let finalUrl = rawUrl;
+                try {
+                    if (finalUrl.startsWith('//')) finalUrl = 'https:' + finalUrl;
+                    else if (finalUrl.startsWith('/') && detectedBaseUrl) finalUrl = detectedBaseUrl + finalUrl;
+                    else if (!finalUrl.startsWith('http') && detectedBaseUrl) finalUrl = detectedBaseUrl + '/' + finalUrl;
+                } catch (e) { continue; }
+
+                if (processedUrls.has(finalUrl)) continue;
+
+                // Filtro de miniaturas e iconos
+                const lowSrc = finalUrl.toLowerCase();
+                if (lowSrc.includes('pixel') || lowSrc.includes('logo') || lowSrc.includes('avatar') || 
+                    lowSrc.includes('icon') || lowSrc.includes('thumb-') || lowSrc.includes('/small/') || 
+                    lowSrc.includes('spinner') || lowSrc.includes('header') || lowSrc.includes('footer')) continue;
+
+                // 3. Extraer Nombre de Archivo para deduplicar
+                const fileName = finalUrl.split('/').pop().split('?')[0];
+                if (processedFileNames.has(fileName)) continue;
+
+                // 4. BÚSQUEDA DE TÍTULO EN CONTEXTO
+                let label = null;
+                const altMatch = tag.match(/alt=["']([^"']+)["']/i);
+                if (altMatch && !isGenericOrGarbage(decodeEntities(altMatch[1]))) {
+                    label = decodeEntities(altMatch[1]).trim();
+                }
+
+                if (!label) {
+                    const tagIdx = html.indexOf(tag);
+                    const ctxStart = Math.max(0, tagIdx - 500);
+                    const ctxEnd = Math.min(html.length, tagIdx + 700);
+                    const context = html.substring(ctxStart, ctxEnd);
+                    
+                    const headingMatches = context.match(/<(h[1-4]|strong|b)[^>]*>([^<]+)<\/\1>/gi);
+                    if (headingMatches) {
+                        for (const h of headingMatches) {
+                            const text = decodeEntities(h.replace(/<[^>]+>/g, '').trim());
+                            if (!isGenericOrGarbage(text)) {
+                                label = text;
+                                break; 
+                            }
+                        }
+                    }
+                }
+
+                // Fallback Limpio al Nombre de Archivo (ej: chainsawman01.jpg -> Chainsawman 01)
+                if (!label || isGenericOrGarbage(label)) {
+                    label = fileName.replace(/\.(jpg|jpeg|png|webp|gif)/i, '')
+                                   .replace(/[_-]/g, ' ')
+                                   .replace(/\d+x\d+/g, '') // Limpiar 135x200
+                                   .replace(/\d+w/g, '')    // Limpiar 135w
+                                   .replace(/\b[a-z]/g, (c) => c.toUpperCase());
+                }
+
+                // 5. Normalización final del label EXTRAÍDO
+                label = decodeEntities(label).replace(/[^\w\s#\-+]/g, ' ').replace(/\s+/g, ' ').trim();
+
+                if (label && !isGenericOrGarbage(label)) {
+                    let finalLabel = label;
+                    let counter = 1;
+                    while (results.some(r => r.label === finalLabel)) {
+                        finalLabel = `${label} #${counter}`;
+                        counter++;
+                    }
+
+                    results.push({ url: finalUrl, label: finalLabel });
+                    processedUrls.add(finalUrl);
+                    processedFileNames.add(fileName);
+                }
+            }
+
+            console.log(`✅ [SMART SCAN] Finalizado. ${results.length} imágenes útiles.`);
+            return results;
+        } catch (err) {
+            console.error('❌ Error parsing raw HTML:', err);
+            return [];
+        }
+    },
+
+    /**
+     * Calcula una puntuación de coincidencia entre dos strings (fuzzy match)
+     */
+    calculateMatchScore(str1, str2) {
+        if (!str1 || !str2) return 0;
+        
+        // 1. Normalización profunda
+        const normalize = (s) => {
+            let res = s.toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // quitar tildes
+                .replace(/#/g, ' ') // Tomo #1 -> Tomo 1
+                .replace(/[^\w\s]/gi, ' ') // quitar otros símbolos
+                .replace(/\s+/g, ' ')
+                .trim();
+            
+            // Normalizar números: "01" -> "1", "002" -> "2"
+            res = res.replace(/\b0+(\d+)\b/g, '$1');
+            return res;
+        };
+
+        const n1 = normalize(str1);
+        const n2 = normalize(str2);
+        
+        // 2. TOKENIZACIÓN ÉPICA (Manejo de palabras pegadas)
+        const getTokens = (s) => s.split(/\s+/).filter(w => w.length > 0);
+        const tokens1 = getTokens(n1);
+        const tokens2 = getTokens(n2);
+        
+        if (tokens1.length === 0 || tokens2.length === 0) return 0;
+        
+        let matches = 0;
+        
+        // 3. COMPARACIÓN CRUZADA (Incluso sub-palabras)
+        tokens1.forEach(t1 => {
+            if (tokens2.includes(t1)) {
+                matches += 2; // Coincidencia exacta de token (ej: "1" = "1")
+            } else {
+                // Chequear si una palabra contiene a la otra (ej: "chainsawman" contiene "chainsaw")
+                tokens2.forEach(t2 => {
+                    if (t1.length > 3 && t2.length > 3) {
+                        if (t1.includes(t2) || t2.includes(t1)) {
+                            matches += 1.2; // Coincidencia parcial fuerte
+                        }
+                    }
+                });
+            }
+        });
+
+        // Bono por secuencia
+        for (let i = 0; i < tokens1.length - 1; i++) {
+            const bigram = tokens1[i] + " " + tokens1[i+1];
+            if (n2.includes(bigram)) matches += 1;
         }
 
-        this.clearCache();
-        console.log('✅ Etiquetas y caché limpiadas.');
+        // 4. Verificación CRÍTICA de Números (Tomos)
+        const getNums = (s) => (s.match(/\d+/g) || []).map(n => parseInt(n).toString());
+        const nums1 = getNums(n1);
+        const nums2 = getNums(n2);
+        
+        let numMismatch = false;
+        if (nums1.length > 0 && nums2.length > 0) {
+            const hasCommonNum = nums1.some(num => nums2.includes(num));
+            if (!hasCommonNum) numMismatch = true;
+        }
+
+        // 5. Cálculo Final
+        // Calculamos score basado en el total de tokens posibles
+        const maxTokens = Math.max(tokens1.length, tokens2.length);
+        let score = (matches / (maxTokens * 2)) * 100;
+        
+        if (numMismatch) score *= 0.1; // Penalización máxima si el número de tomo no existe en el otro
+        
+        return Math.min(100, Math.ceil(score));
     }
 };

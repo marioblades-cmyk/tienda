@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
@@ -8,6 +8,7 @@ const CatalogUpdatedView = () => {
     // ESTADOS
     const [catalogData, setCatalogData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedSyncEditorial, setSelectedSyncEditorial] = useState('TODOS');
     const [searchQuery, setSearchQuery] = useState('');
     const [editorialFilter, setEditorialFilter] = useState('TODOS');
     const [categoryFilter, setCategoryFilter] = useState('TODOS');
@@ -21,7 +22,19 @@ const CatalogUpdatedView = () => {
     const [isUploading, setIsUploading] = useState(false);
     const [isBulkEditing, setIsBulkEditing] = useState(false);
     const [bulkItems, setBulkItems] = useState([]);
-    const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, active: false });
+    const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, active: false, stop: false });
+    
+    // Estados para el Detector y Sincronización Inteligente
+    const [foundImages, setFoundImages] = useState([]);
+    const [isScanning, setIsScanning] = useState(false);
+    const [scanningForItem, setScanningForItem] = useState(null);
+    const [isSmartSyncOpen, setIsSmartSyncOpen] = useState(false);
+    const [smartMatches, setSmartMatches] = useState([]);
+    const [isSmartProcessing, setIsSmartProcessing] = useState(false);
+    const [rawHtmlInput, setRawHtmlInput] = useState('');
+    const [showExpertMode, setShowExpertMode] = useState(false);
+    const [manualSearchIdx, setManualSearchIdx] = useState(null);
+    const [manualSearchQuery, setManualSearchQuery] = useState('');
 
 
     // CARGA DE DATOS
@@ -118,33 +131,193 @@ const CatalogUpdatedView = () => {
         setIsBulkEditing(true);
     };
 
-    const handleBulkPersist = async () => {
-        const toProcess = bulkItems.filter(item => (item.newUrl || item.newFile) && item.status !== 'success');
+    // --- MOTOR DE COLA EN SEGUNDO PLANO (WORKER) ---
+    const isWorkerRunning = useRef(false);
+    const bulkItemsRef = useRef([]);
+    const stopRef = useRef(false);
+
+    // Sincronizamos la referencia cada vez que el estado cambia
+    useEffect(() => {
+        bulkItemsRef.current = bulkItems;
+    }, [bulkItems]);
+
+    const startQueueWorker = async () => {
+        if (isWorkerRunning.current) return;
+        isWorkerRunning.current = true;
+        stopRef.current = false; // Resetear bandera al empezar
+        
+        console.log('🚀 Worker iniciado con', bulkItemsRef.current.length, 'ítems');
+
+        while (true) {
+            // Buscamos el siguiente pendiente directamente desde la referencia (evita stale closure)
+            const items = bulkItemsRef.current;
+            const nextItem = items.find(item => item.status === 'pending');
+            
+            if (!nextItem || stopRef.current) {
+                console.log(stopRef.current ? '🛑 Worker detenido por el usuario' : '✅ Worker finalizado');
+                break;
+            }
+
+            // Marcamos como syncing en el estado de React para la UI
+            setBulkItems(prev => prev.map(bi => bi.product_id === nextItem.product_id ? { ...bi, status: 'syncing' } : bi));
+
+            try {
+                // Sincronización real con el método correcto persistProductImage
+                console.log(`📡 Sincronizando: ${nextItem.titulo}...`);
+                await catalogService.persistProductImage(nextItem.product_id, nextItem.newFile || nextItem.newUrl);
+                
+                // Actualizamos a éxito
+                setBulkItems(prev => {
+                    const updated = prev.map(bi => bi.product_id === nextItem.product_id ? { ...bi, status: 'success' } : bi);
+                    const completed = updated.filter(i => i.status === 'success' || i.status === 'error').length;
+                    setBulkProgress(p => ({ ...p, current: completed, total: updated.length, active: updated.some(i => i.status === 'pending' || i.status === 'syncing') }));
+                    return updated;
+                });
+            } catch (err) {
+                console.error(`❌ Error en worker para ${nextItem.titulo}:`, err);
+                setBulkItems(prev => {
+                    const updated = prev.map(bi => bi.product_id === nextItem.product_id ? { ...bi, status: 'error' } : bi);
+                    const completed = updated.filter(i => i.status === 'success' || i.status === 'error').length;
+                    setBulkProgress(p => ({ ...p, current: completed, total: updated.length, active: updated.some(i => i.status === 'pending' || i.status === 'syncing') }));
+                    return updated;
+                });
+            }
+
+            // Pequeña pausa para no saturar y dejar que React respire
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        isWorkerRunning.current = false;
+        if (stopRef.current) setBulkProgress(p => ({ ...p, active: false }));
+        // Solo desactivamos el visor si todo terminó hace unos segundos o si el usuario lo prefiere
+        // Por ahora, lo mantenemos activo para que vea el 100%
+        loadCatalog(true);
+    };
+
+    const handleBulkPersist = () => {
+        const toProcess = bulkItems.filter(item => (item.newUrl || item.newFile) && item.status === 'pending');
         if (toProcess.length === 0) {
             alert('No hay cambios pendientes para sincronizar.');
             return;
         }
 
-        setBulkProgress({ current: 0, total: toProcess.length, active: true });
+        setBulkProgress(prev => ({ ...prev, active: true, total: bulkItems.length }));
+        startQueueWorker();
+    };
+
+    const processRawHtml = (html) => {
+        if (!html) return;
+        setIsScanning(true); // Reusamos para un pequeño delay visual
+        setIsSmartSyncOpen(true);
+        setSmartMatches([]);
         
-        for (let i = 0; i < toProcess.length; i++) {
-            const item = toProcess[i];
-            setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, status: 'syncing' } : bi));
-            
-            try {
-                await catalogService.persistProductImage(item.product_id, item.newFile || item.newUrl);
-                setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, status: 'success' } : bi));
-            } catch (err) {
-                console.error(`Error en lote para ${item.titulo}:`, err);
-                setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, status: 'error' } : bi));
+        try {
+            const htmlLower = html.toLowerCase();
+            let editorialToUse = selectedSyncEditorial;
+
+            // Auto-detección de Ivrea si está en "TODOS"
+            if (editorialToUse === 'TODOS' && (htmlLower.includes('ivrea') || htmlLower.includes('editorialivrea'))) {
+                editorialToUse = 'Ivrea';
+                setSelectedSyncEditorial('Ivrea');
             }
+
+            const externalDocs = catalogService.extractFromRawHTML(html);
             
-            setBulkProgress(prev => ({ ...prev, current: i + 1 }));
+            if (externalDocs.length === 0) {
+                alert('No encontramos imágenes en este código. Asegúrate de haber copiado todo el contenido (Ctrl+A).');
+                setIsScanning(false);
+                return;
+            }
+
+            // Filtrar catálogo por editorial si es necesario
+            const filteredCatalog = editorialToUse === 'TODOS' 
+                ? catalogData 
+                : catalogData.filter(i => (i.editorial || '').toUpperCase() === editorialToUse.toUpperCase());
+
+            // Realizar Fuzzy Match con el catálogo filtrado
+            const matches = externalDocs.map(ext => {
+                let bestMatch = null;
+                let topScore = 0;
+
+                filteredCatalog.forEach(item => {
+                    const score = catalogService.calculateMatchScore(ext.label, item.titulo);
+                    if (score > topScore) {
+                        topScore = score;
+                        bestMatch = item;
+                    }
+                });
+
+                let confidence = 'none';
+                if (topScore > 75) confidence = 'high';
+                else if (topScore > 35) confidence = 'medium';
+
+                return {
+                    extUrl: ext.url,
+                    extLabel: ext.label,
+                    catalogItem: bestMatch,
+                    score: topScore,
+                    confidence,
+                    selected: confidence === 'high' && !bestMatch.imagen_url
+                };
+            });
+
+            setSmartMatches(matches);
+            setShowExpertMode(false);
+            setRawHtmlInput(''); // Limpiar tras procesar
+        } catch (err) {
+            console.error('Error procesando HTML:', err);
+            alert('Error al procesar el código fuente.');
+        } finally {
+            setIsScanning(false);
+        }
+    };
+
+    const handleToggleMatch = (index) => {
+        const newMatches = [...smartMatches];
+        newMatches[index].selected = !newMatches[index].selected;
+        setSmartMatches(newMatches);
+    };
+
+    const handleBulkSelect = (type) => {
+        const newMatches = [...smartMatches];
+        newMatches.forEach(m => {
+            if (type === 'ALL') m.selected = true;
+            else if (type === 'NONE') m.selected = false;
+            else if (type === 'HIGH_CONFIDENCE') m.selected = (m.score >= 80);
+        });
+        setSmartMatches(newMatches);
+    };
+
+    const handleSmartPersist = () => {
+        const toSync = smartMatches.filter(m => m.selected && m.catalogItem);
+        if (toSync.length === 0) {
+            alert('No hay coincidencias seleccionadas para sincronizar.');
+            return;
         }
 
-        setBulkProgress(prev => ({ ...prev, active: false }));
-        await loadCatalog(true); // Recargar al terminar el lote
-        alert('✅ Proceso de lote finalizado.');
+        // MODO APILAR (Append): Sumamos los nuevos a la cola existente
+        const newBulkEntries = toSync.map(m => ({
+            ...m.catalogItem,
+            newUrl: m.extUrl,
+            newFile: null,
+            status: 'pending'
+        }));
+
+        setBulkItems(prev => {
+            const combined = [...prev, ...newBulkEntries];
+            const completed = combined.filter(i => i.status === 'success' || i.status === 'error').length;
+            setBulkProgress({
+                current: completed,
+                total: combined.length,
+                active: true,
+                stop: false
+            });
+            return combined;
+        });
+
+        setIsSmartSyncOpen(false);
+        // Iniciamos el worker si no está corriendo
+        setTimeout(startQueueWorker, 100);
     };
 
     // CATEGORÍAS SEGÚN EDITORIAL
@@ -341,6 +514,14 @@ const CatalogUpdatedView = () => {
                             onBlur={(e) => e.currentTarget.style.borderColor = '#f1f5f9'}
                         />
                     </div>
+
+                    <button 
+                        onClick={() => { setIsSmartSyncOpen(true); setShowExpertMode(true); }}
+                        className="bg-[#1b3a57] text-[#f5a800] px-6 py-3 rounded-xl font-black text-xs flex items-center gap-3 hover:bg-[#132a41] transition-all shadow-md group"
+                    >
+                        <ImageIcon size={16} className="group-hover:scale-110 transition-transform" />
+                        🚀 Sincronizador Experto (Bulk)
+                    </button>
                     
                     <select 
                         value={editorialFilter}
@@ -383,6 +564,7 @@ const CatalogUpdatedView = () => {
                         />
                         <span style={{ fontSize: '0.875rem', fontWeight: 700, color: reprintsOnlyFilter ? '#f07d2a' : '#64748b' }}>Solo Reimpresiones</span>
                     </label>
+
                 </div>
             </div>
 
@@ -481,13 +663,13 @@ const CatalogUpdatedView = () => {
                                             onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
                                         >
                                             {item.imagen_url ? (
-                                                <img 
-                                                    src={item.imagen_url.includes('supabase.co') 
-                                                        ? item.imagen_url 
-                                                        : `https://images.weserv.nl/?url=${encodeURIComponent(item.imagen_url.replace(/^https?:\/\//, ''))}&w=100&h=100&fit=cover`} 
-                                                    alt="" 
-                                                    className="w-full h-full object-cover" 
-                                                />
+                                            <img 
+                                                src={item.imagen_url.includes('supabase.co') 
+                                                    ? item.imagen_url 
+                                                    : `https://images.weserv.nl/?url=${encodeURIComponent(item.imagen_url.replace(/^https?:\/\//, ''))}&w=100&h=100&fit=cover`} 
+                                                alt="" 
+                                                className="w-full h-full object-cover" 
+                                            />
                                             ) : (
                                                 <div className="flex flex-col items-center">
                                                     <ImageIcon size={18} className="text-slate-300" />
@@ -649,9 +831,15 @@ const CatalogUpdatedView = () => {
                         
                         <div style={{ position: 'relative' }}>
                             <img 
-                                src={previewItem.imagen_url || ''} 
+                                src={previewItem.imagen_url?.includes('supabase.co') 
+                                    ? previewItem.imagen_url 
+                                    : `https://images.weserv.nl/?url=${encodeURIComponent((previewItem.imagen_url || '').replace(/^https?:\/\//, ''))}&w=800&fit=cover`} 
                                 style={{ maxWidth: '100%', maxHeight: '75vh', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', border: '4px solid white' }}
                                 alt="Vista previa"
+                                onError={(e) => {
+                                    e.target.onerror = null;
+                                    e.target.src = previewItem.imagen_url;
+                                }}
                             />
                             {!previewItem.imagen_url && (
                                 <div style={{ background: 'white', padding: '2rem', borderRadius: '16px', textAlign: 'center' }}>
@@ -713,17 +901,35 @@ const CatalogUpdatedView = () => {
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black uppercase text-slate-500 block">Opción 1: Pegar Enlace (URL)</label>
                                     <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            placeholder="https://ejemplo.com/manga.jpg"
-                                            className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:ring-2 focus:ring-[#f5a800] outline-none"
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && e.target.value) {
-                                                    handleImagePersist(editingImageItem, e.target.value);
-                                                }
-                                            }}
-                                            id="url-input"
-                                        />
+                                        <div className="relative flex-1">
+                                            <input 
+                                                type="text" 
+                                                placeholder="https://ejemplo.com/manga.jpg"
+                                                className="w-full text-xs border border-slate-200 rounded-lg pl-3 pr-10 py-2 bg-slate-50 focus:ring-2 focus:ring-[#f5a800] outline-none"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && e.target.value) {
+                                                        const val = e.target.value;
+                                                        if (val.includes('.jpg') || val.includes('.png') || val.includes('.webp')) {
+                                                            handleImagePersist(editingImageItem, val);
+                                                        } else {
+                                                            handleScanUrl('single', val);
+                                                        }
+                                                    }
+                                                }}
+                                                id="url-input"
+                                            />
+                                            <button 
+                                                onClick={() => {
+                                                    const val = document.getElementById('url-input').value;
+                                                    if (val) handleScanUrl('single', val);
+                                                }}
+                                                disabled={isScanning}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#f5a800] transition-colors"
+                                                title="Escanear fotos en el link"
+                                            >
+                                                {isScanning ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                                            </button>
+                                        </div>
                                         <button 
                                             disabled={isUploading}
                                             onClick={() => {
@@ -806,7 +1012,7 @@ const CatalogUpdatedView = () => {
                                     <span className="font-black text-sm">{Math.round((bulkProgress.current / bulkProgress.total) * 100)}%</span>
                                 </div>
                                 <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden">
-                                    <div className="bg-white h-full transition-all duration-300" style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}></div>
+                                    <div className="bg-white h-full transition-all duration-300" style={{ width: `${(bulkProgress.current / (bulkProgress.total || 1)) * 100}%` }}></div>
                                 </div>
                             </div>
                         )}
@@ -841,14 +1047,26 @@ const CatalogUpdatedView = () => {
                                             <td className="px-6 py-6">
                                                 <div className="flex flex-col gap-2">
                                                     <div className="flex gap-2">
-                                                        <input 
-                                                            type="text" 
-                                                            placeholder="Pegar URL de la imagen aquí..."
-                                                            value={item.newUrl}
-                                                            onChange={(e) => setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, newUrl: e.target.value, newFile: null } : bi))}
-                                                            disabled={bulkProgress.active || item.status === 'success'}
-                                                            className="flex-1 text-xs border border-slate-200 rounded-xl px-4 py-2.5 bg-white outline-none focus:ring-2 focus:ring-[#f5a800] disabled:opacity-50"
-                                                        />
+                                                        <div className="relative flex-1">
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="Pegar URL de la imagen aquí..."
+                                                                value={item.newUrl}
+                                                                onChange={(e) => setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, newUrl: e.target.value, newFile: null } : bi))}
+                                                                disabled={bulkProgress.active || item.status === 'success'}
+                                                                className="w-full text-xs border border-slate-200 rounded-xl pl-4 pr-10 py-2.5 bg-white outline-none focus:ring-2 focus:ring-[#f5a800] disabled:opacity-50"
+                                                            />
+                                                            {item.newUrl && item.status !== 'success' && (
+                                                                <button 
+                                                                    onClick={() => handleScanUrl(item, item.newUrl)}
+                                                                    disabled={isScanning}
+                                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#f5a800] transition-colors"
+                                                                    title="Escanear fotos en este link"
+                                                                >
+                                                                    {isScanning && scanningForItem?.product_id === item.product_id ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                         <label className={`px-4 py-2 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center gap-2 ${item.newFile ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${ (bulkProgress.active || item.status === 'success') ? 'opacity-30 cursor-default' : ''}`}>
                                                             {item.newFile ? '✓ Archivo' : 'Subir Archivo'}
                                                             <input 
@@ -885,19 +1103,390 @@ const CatalogUpdatedView = () => {
                         <div className="bg-white p-6 border-t flex justify-end gap-3 shadow-2xl">
                             <button 
                                 onClick={() => setIsBulkEditing(false)}
-                                disabled={bulkProgress.active}
-                                className="px-6 py-3 rounded-2xl font-black text-sm text-slate-500 hover:bg-slate-100 transition-colors disabled:opacity-30"
+                                className="px-6 py-3 rounded-2xl font-black text-sm text-slate-500 hover:bg-slate-100 transition-colors"
                             >
-                                Cancelar
+                                {bulkProgress.active ? 'Minimizar y Continuar' : 'Cancelar'}
                             </button>
+                            {!bulkProgress.active && (
+                                <button 
+                                    onClick={handleBulkPersist}
+                                    disabled={!bulkItems.some(i => (i.newUrl || i.newFile) && i.status === 'pending')}
+                                    className="bg-[#1b3a57] text-[#f5a800] px-10 py-3 rounded-2xl font-black text-sm flex items-center gap-3 hover:bg-[#132a41] transition-all shadow-lg hover:shadow-xl disabled:opacity-30"
+                                >
+                                    <ImageIcon size={18} /> 🚀 Sincronizar Todo al Catálogo
+                                </button>
+                            )}
+                            {bulkProgress.active && (
+                                <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl font-black text-xs uppercase animate-pulse border border-emerald-100">
+                                    <RefreshCw size={14} className="animate-spin" /> Procesando en segundo plano...
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* BARRA DE PROGRESO FLOTANTE (SEGUNDO PLANO) */}
+            {bulkProgress.active && (
+                <div 
+                    style={{ position: 'fixed', bottom: '100px', right: '24px', width: '300px', background: 'white', borderRadius: '16px', padding: '16px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)', zIndex: 10002, border: '1px solid #eef2f6' }}
+                    className="animate-in slide-in-from-right duration-300"
+                >
+                    <div className="flex justify-between items-center mb-3">
+                        <span className="font-black text-[10px] uppercase text-[#1b3a57] tracking-widest flex items-center gap-2">
+                            <RefreshCw size={12} className="animate-spin text-[#f07d2a]" /> En segundo plano
+                        </span>
+                        <button 
+                            onClick={() => {
+                                stopRef.current = true;
+                                setBulkProgress(prev => ({ ...prev, active: false }));
+                            }}
+                            className="bg-red-50 text-red-500 p-1.5 rounded-full hover:bg-red-100 transition-colors"
+                            title="Detener sincronización"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                    
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="font-bold text-xs text-slate-600">Sincronizando: {bulkProgress.current}/{bulkProgress.total}</span>
+                        <span className="font-black text-[11px] text-[#f07d2a]">{Math.round((bulkProgress.current / (bulkProgress.total || 1)) * 100)}%</span>
+                    </div>
+
+                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                        <div className="bg-[#f07d2a] h-full transition-all duration-300" style={{ width: `${(bulkProgress.current / (bulkProgress.total || 1)) * 100}%` }}></div>
+                    </div>
+                    
+                    <div className="flex gap-2 mt-4">
+                        <button 
+                            onClick={() => setIsBulkEditing(true)}
+                            className="flex-1 py-2 border border-slate-100 hover:bg-slate-50 rounded-xl text-[10px] font-black uppercase text-slate-400 transition-colors"
+                        >
+                            Ver detalle
+                        </button>
+                        {bulkItems.some(i => i.status === 'success') && (
                             <button 
-                                onClick={handleBulkPersist}
-                                disabled={bulkProgress.active || !bulkItems.some(i => (i.newUrl || i.newFile) && i.status !== 'success')}
-                                className="bg-[#1b3a57] text-[#f5a800] px-10 py-3 rounded-2xl font-black text-sm flex items-center gap-3 hover:bg-[#132a41] transition-all shadow-lg hover:shadow-xl disabled:opacity-30"
+                                onClick={() => {
+                                    const remaining = bulkItems.filter(i => i.status !== 'success');
+                                    setBulkItems(remaining);
+                                    setBulkProgress(prev => ({
+                                        ...prev,
+                                        current: remaining.filter(i => i.status === 'error').length,
+                                        total: remaining.length,
+                                        active: remaining.length > 0
+                                    }));
+                                }}
+                                className="px-3 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase hover:bg-emerald-100 transition-colors"
+                                title="Limpiar ítems terminados"
                             >
-                                {bulkProgress.active ? <RefreshCw size={18} className="animate-spin" /> : <ImageIcon size={18} />}
-                                🚀 Sincronizar Todo al Catálogo
+                                Limpiar
                             </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* DETECTOR DE IMÁGENES (Image Picker) */}
+            {foundImages.length > 0 && (
+                <div 
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)', zIndex: 10005, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}
+                    onClick={() => setFoundImages([])}
+                >
+                    <div 
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in duration-200"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="bg-[#1b3a57] p-6 text-white flex justify-between items-center">
+                            <div>
+                                <h3 className="font-black uppercase text-lg flex items-center gap-3">
+                                    <ImageIcon size={20} className="text-[#f5a800]" /> ¿Cuál de estas imágenes deseas usar?
+                                </h3>
+                                <p className="text-white/60 text-[10px] uppercase font-bold mt-1">Hemos detectado {foundImages.length} imágenes en el link proporcionado</p>
+                            </div>
+                            <button onClick={() => setFoundImages([])} className="text-white/40 hover:text-white p-2">
+                                <X size={24} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto bg-slate-50 flex-1">
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '16px' }}>
+                                {foundImages.map((u, i) => (
+                                    <div 
+                                        key={i}
+                                        onClick={() => {
+                                            if (scanningForItem === 'single') {
+                                                handleImagePersist(editingImageItem, u);
+                                            } else {
+                                                setBulkItems(prev => prev.map(bi => bi.product_id === scanningForItem.product_id ? { ...bi, newUrl: u, newFile: null } : bi));
+                                            }
+                                            setFoundImages([]);
+                                        }}
+                                        className="bg-white p-2 rounded-xl shadow-sm border-2 border-transparent hover:border-[#f5a800] hover:scale-105 transition-all cursor-pointer group flex flex-col"
+                                    >
+                                        <div className="aspect-[3/4] bg-slate-100 rounded-lg overflow-hidden mb-2 relative">
+                                            <img src={u} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                            <div className="absolute inset-0 bg-[#1b3a57]/0 group-hover:bg-[#1b3a57]/20 transition-all flex items-center justify-center">
+                                                <div className="bg-[#f5a800] text-[#1b3a57] font-black text-[9px] px-3 py-1 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-lg">ELEGIR</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* SMART SYNC MODAL */}
+            {isSmartSyncOpen && (
+                <div 
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', zIndex: 10100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}
+                >
+                    <div 
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="bg-[#1b3a57] p-6 text-white flex justify-between items-center">
+                            <div>
+                                <h3 className="font-black uppercase text-xl flex items-center gap-3">
+                                    <RotateCcw size={24} className="text-[#f5a800]" /> Sincronizador Experto
+                                </h3>
+                                <p className="text-white/60 text-xs mt-1 font-bold tracking-wider uppercase">Extracción masiva mediante código fuente (Ctrl+U)</p>
+                            </div>
+                            <button onClick={() => { setIsSmartSyncOpen(false); setShowExpertMode(false); }} className="text-white/40 hover:text-white p-2">
+                                <X size={28} />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto bg-slate-50 relative min-h-[400px]">
+                            {smartMatches.length === 0 && !isScanning && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-12 text-center bg-slate-50 z-10">
+                                    <div className="max-w-2xl mx-auto flex flex-col items-center">
+                                        <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 mb-6 w-full flex flex-col gap-4">
+                                            <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="bg-amber-100 text-amber-600 p-2 rounded-xl">
+                                                        <RotateCcw size={18} />
+                                                    </div>
+                                                    <h4 className="font-black text-[#1b3a57] text-sm uppercase tracking-tight">Filtro de Editorial para Match</h4>
+                                                </div>
+                                                <select 
+                                                    value={selectedSyncEditorial}
+                                                    onChange={(e) => setSelectedSyncEditorial(e.target.value)}
+                                                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-[#1b3a57] outline-none focus:ring-2 focus:ring-[#f5a800] transition-all"
+                                                >
+                                                    <option value="TODOS">🔍 Todas las Editoriales</option>
+                                                    {editorialesList.map(ed => (
+                                                        <option key={ed} value={ed}>{ed}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] font-black text-slate-400 uppercase">Paso 1</span>
+                                                    <p className="text-[11px] font-bold text-slate-600 leading-tight">Abre la web (ej: Ivrea)</p>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] font-black text-slate-400 uppercase">Paso 2</span>
+                                                    <p className="text-[11px] font-bold text-slate-600 leading-tight">Pulsa <code className="bg-slate-100 px-1 rounded text-[#f07d2a]">Ctrl+U</code></p>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] font-black text-slate-400 uppercase">Paso 3</span>
+                                                    <p className="text-[11px] font-bold text-slate-600 leading-tight"><code className="bg-slate-100 px-1 rounded text-[#f07d2a]">Ctrl+A</code> y <code className="bg-slate-100 px-1 rounded text-[#f07d2a]">Ctrl+C</code></p>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] font-black text-slate-400 uppercase">Paso 4</span>
+                                                    <p className="text-[11px] font-bold text-slate-600 leading-tight">Pega abajo y procesa</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <textarea 
+                                            className="w-full bg-white border-2 border-slate-200 rounded-3xl p-6 font-mono text-[11px] outline-none focus:border-[#f5a800] transition-colors resize-none shadow-inner mb-6 min-h-[180px]"
+                                            placeholder="Pega aquí el código fuente (HTML)..."
+                                            value={rawHtmlInput}
+                                            onChange={(e) => setRawHtmlInput(e.target.value)}
+                                        ></textarea>
+                                        
+                                        <button 
+                                            onClick={() => processRawHtml(rawHtmlInput)}
+                                            disabled={!rawHtmlInput.trim() || isScanning}
+                                            className="bg-[#f5a800] text-[#1b3a57] px-12 py-4 rounded-2xl font-black uppercase text-sm shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all disabled:opacity-30 flex items-center gap-3"
+                                        >
+                                            {isScanning ? <RefreshCw size={18} className="animate-spin" /> : <RotateCcw size={18} />}
+                                            Procesar Código y Sincronizar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {isScanning && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-20 text-center bg-white/80 backdrop-blur-sm z-20">
+                                    <RefreshCw size={48} className="animate-spin text-[#f5a800] mb-4" />
+                                    <h4 className="text-xl font-black text-[#1b3a57]">Procesando código localmente...</h4>
+                                    <p className="text-slate-400 max-w-md mx-auto mt-2">Estamos identificando las imágenes y buscando mejores coincidencias. Esto es instantáneo.</p>
+                                </div>
+                            )}
+
+                            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {smartMatches.map((match, idx) => (
+                                    <div key={idx} className={`bg-white rounded-2xl p-4 shadow-sm border-2 transition-all flex flex-col gap-4 ${match.selected ? 'border-[#f5a800] ring-4 ring-[#f5a800]/10' : 'border-transparent'}`}>
+                                        <div className="flex gap-4">
+                                            <div className="w-24 h-32 rounded-lg overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
+                                                <img 
+                                                    src={`https://images.weserv.nl/?url=${encodeURIComponent(match.extUrl.replace(/^https?:\/\//, ''))}&w=200&h=300&fit=cover`} 
+                                                    className="w-full h-full object-cover" 
+                                                    alt="" 
+                                                />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Extraído:</p>
+                                                    <div className="flex gap-1">
+                                                        {match.confidence === 'high' && <span className="text-[9px] font-black text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-full">MUY SEGURO</span>}
+                                                        {match.confidence === 'medium' && <span className="text-[9px] font-black text-amber-500 bg-amber-50 px-2 py-0.5 rounded-full">POSIBLE</span>}
+                                                        {match.confidence === 'none' && <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">BAJA COINCIDENCIA</span>}
+                                                        <button 
+                                                            onClick={() => {
+                                                                setManualSearchIdx(idx);
+                                                                setManualSearchQuery('');
+                                                            }}
+                                                            className="text-[9px] font-black bg-[#1b3a57] text-white px-2 py-0.5 rounded-full hover:bg-[#f5a800] transition-colors flex items-center gap-1"
+                                                            title="Vincular manualmente otro producto"
+                                                        >
+                                                            <Search size={10} /> BUSCAR
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <p className="font-bold text-xs text-[#1b3a57] leading-tight line-clamp-2 mb-3">{match.extLabel}</p>
+                                                
+                                                {manualSearchIdx === idx ? (
+                                                    <div className="bg-slate-100 p-2 rounded-xl border border-[#1b3a57]/10 animate-in fade-in zoom-in duration-200">
+                                                        <div className="flex gap-2 mb-2">
+                                                            <input 
+                                                                autoFocus
+                                                                type="text" 
+                                                                placeholder="Escribe título o ID..."
+                                                                value={manualSearchQuery}
+                                                                onChange={(e) => setManualSearchQuery(e.target.value)}
+                                                                className="flex-1 text-[10px] bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-[#f5a800]"
+                                                            />
+                                                            <button 
+                                                                onClick={() => setManualSearchIdx(null)}
+                                                                className="text-[10px] font-black text-red-500 p-1"
+                                                            >
+                                                                <X size={14} />
+                                                            </button>
+                                                        </div>
+                                                        {manualSearchQuery.length >= 3 && (
+                                                            <div className="max-h-32 overflow-y-auto flex flex-col gap-1">
+                                                                {catalogData
+                                                                    .filter(p => (p.titulo || '').toLowerCase().includes(manualSearchQuery.toLowerCase()) || (p.product_id || '').toLowerCase().includes(manualSearchQuery.toLowerCase()))
+                                                                    .slice(0, 10)
+                                                                    .map(p => (
+                                                                        <button 
+                                                                            key={p.product_id}
+                                                                            onClick={() => {
+                                                                                setSmartMatches(prev => prev.map((m, mIdx) => mIdx === idx ? { 
+                                                                                    ...m, 
+                                                                                    catalogItem: p, 
+                                                                                    score: 100, 
+                                                                                    confidence: 'high',
+                                                                                    selected: true 
+                                                                                } : m));
+                                                                                setManualSearchIdx(null);
+                                                                            }}
+                                                                            className="text-left py-1.5 px-2 hover:bg-white rounded-lg text-[9px] font-bold text-slate-600 transition-colors border border-transparent hover:border-slate-200"
+                                                                        >
+                                                                            {p.titulo} <span className="text-[8px] text-slate-300">({p.product_id})</span>
+                                                                        </button>
+                                                                    ))
+                                                                }
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        {match.catalogItem ? (
+                                                            <div className={`p-3 rounded-xl border ${match.confidence === 'high' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+                                                                <p className={`text-[10px] font-black uppercase mb-1 ${match.confidence === 'high' ? 'text-emerald-400' : 'text-amber-400'}`}>Match ({Math.round(match.score)}%):</p>
+                                                                <p className="font-black text-[11px] text-[#1b3a57] line-clamp-2">{match.catalogItem.titulo}</p>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 italic text-[10px] text-slate-400 font-bold">
+                                                                Sin recomendación ({Math.round(match.score)}%)
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-50">
+                                            <button 
+                                                onClick={() => {
+                                                    setSmartMatches(prev => prev.map((m, i) => i === idx ? { ...m, selected: !m.selected } : m));
+                                                }}
+                                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${match.selected ? 'bg-[#f5a800] text-[#1b3a57]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                            >
+                                                {match.selected ? '✓ Seleccionado' : 'Vincular Foto'}
+                                            </button>
+                                            {match.catalogItem?.imagen_url && (
+                                                <span className="text-[9px] font-black text-amber-600 bg-transparent border border-amber-200 px-2 py-1 rounded-md">YA TIENE IMAGEN</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="p-6 bg-white border-t flex justify-between items-center shadow-2xl">
+                            <div className="flex flex-col gap-2">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    {smartMatches.filter(m => m.selected).length} de {smartMatches.length} SELECCIONADOS
+                                </p>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => handleBulkSelect('ALL')} 
+                                        className="text-[9px] font-black uppercase text-[#1b3a57] border border-slate-200 px-2 py-1 rounded-md hover:bg-slate-50 transition-colors shadow-sm"
+                                    >
+                                        Seleccionar Todo
+                                    </button>
+                                    <button 
+                                        onClick={() => handleBulkSelect('NONE')} 
+                                        className="text-[9px] font-black uppercase text-slate-400 border border-slate-100 px-2 py-1 rounded-md hover:bg-slate-50 transition-colors"
+                                    >
+                                        Deseleccionar
+                                    </button>
+                                    <button 
+                                        onClick={() => handleBulkSelect('HIGH_CONFIDENCE')} 
+                                        className="text-[9px] font-black uppercase text-emerald-600 border border-emerald-100 bg-emerald-50 px-2 py-1 rounded-md hover:bg-emerald-100 transition-all shadow-sm"
+                                    >
+                                        Solo Confianza Alta
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex gap-4">
+                                <button 
+                                    onClick={() => {
+                                        if (smartMatches.length > 0) {
+                                            setSmartMatches([]);
+                                            setShowExpertMode(true);
+                                        } else {
+                                            setIsSmartSyncOpen(false);
+                                        }
+                                    }} 
+                                    className="px-6 py-3 font-black text-sm text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors"
+                                >
+                                    {smartMatches.length > 0 ? 'Limpiar y Volver' : 'Cancelar'}
+                                </button>
+                                <button 
+                                    onClick={handleSmartPersist}
+                                    disabled={smartMatches.filter(m => m.selected).length === 0}
+                                    className="bg-[#1b3a57] text-[#f5a800] px-10 py-3 rounded-2xl font-black text-sm flex items-center gap-3 hover:bg-[#132a41] transition-all shadow-lg disabled:opacity-30"
+                                >
+                                    <RotateCcw size={18} /> Sincronizar Seleccionados
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
