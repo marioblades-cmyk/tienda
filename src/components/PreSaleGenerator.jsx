@@ -6,89 +6,17 @@ import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 
 export default function PreSaleGenerator() {
-    const { user, profile } = useAuth();
+    const { user, profile, isAdmin } = useAuth();
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingProjects, setIsLoadingProjects] = useState(true);
-    const DEFAULT_TEMPLATES = {
-        'Preventas Clásicas': {
-            discountPercent: 20,
-            headerTag: 'EDICIÓN ESPECIAL',
-            headerTitle: 'PREVENTA',
-            headerSubtitle: 'ASEGURA TU PEDIDO • PRECIO ESPECIAL',
-            dividerText: '★ PRECIOS EXCLUSIVOS POR TIEMPO LIMITADO • ENVÍO A TODA BOLIVIA ★',
-            footerContact1: 'WHATSAPP: +591 XXXXXXXX',
-            footerContact2: 'FACEBOOK: Mangas Comics Bolivia Store',
-            footerContact3: 'LA PAZ, BOLIVIA',
-            deadlineDate: '28 / MAR',
-            deadlineTime: '20:00'
-        },
-        'Reimpresiones': {
-            discountPercent: 10,
-            headerTag: 'NUEVO STOCK',
-            headerTitle: 'REIMPRESIÓN',
-            headerSubtitle: 'VUELVEN TUS HISTORIAS FAVORITAS • STOCK LIMITADO',
-            dividerText: '★ LOS CLÁSICOS REGRESAN • ENVÍO A TODA BOLIVIA ★',
-            footerContact1: 'WHATSAPP: +591 XXXXXXXX',
-            footerContact2: 'FACEBOOK: Mangas Comics Bolivia Store',
-            footerContact3: 'LA PAZ, BOLIVIA',
-            deadlineDate: '30 / MAR',
-            deadlineTime: '20:00'
-        }
-    };
-
-    const [userTemplates, setUserTemplates] = useState({}); // { id: { name, config, owner_id, owner_name } }
+    const [dbError, setDbError] = useState(null);
+    const [userTemplates, setUserTemplates] = useState({});
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [savedProjects, setSavedProjects] = useState({}); // { id: { name, config, items, date, owner_id, owner_name } }
     const [selectedProjectId, setSelectedProjectId] = useState('');
 
-    const runMigration = async () => {
-        if (!user) return;
-        setStatusMessage("MIGRANDO DATOS...");
-        const localProjs = localStorage.getItem('presale_projects');
-        const localTemps = localStorage.getItem('presale_templates');
-        
-        let count = 0;
-        if (localProjs) {
-            try {
-                const parsed = JSON.parse(localProjs);
-                for (const [name, data] of Object.entries(parsed)) {
-                    await supabase.from('presale_projects').upsert({
-                        user_id: user.id,
-                        name: name,
-                        config: data.config,
-                        items: data.items,
-                        updated_at: data.date || new Date().toISOString()
-                    }, { onConflict: 'user_id,name' });
-                    count++;
-                }
-                localStorage.removeItem('presale_projects');
-            } catch (e) { console.error(e); }
-        }
-        
-        if (localTemps) {
-            try {
-                const parsed = JSON.parse(localTemps);
-                for (const [name, config] of Object.entries(parsed)) {
-                    if (DEFAULT_TEMPLATES[name]) continue;
-                    await supabase.from('presale_templates').upsert({
-                        user_id: user.id,
-                        name: name,
-                        config: config
-                    }, { onConflict: 'user_id,name' });
-                    count++;
-                }
-                localStorage.removeItem('presale_templates');
-            } catch (e) { console.error(e); }
-        }
-        
-        if (count > 0) {
-            alert(`¡Éxito! Se migraron ${count} elementos a la nube.`);
-            window.location.reload(); // Recargar para ver los cambios
-        } else {
-            alert("No se encontraron datos locales para migrar en este navegador.");
-            setStatusMessage("");
-        }
-    };
+
+
 
     // Carga inicial de proyectos y plantillas desde Supabase
     useEffect(() => {
@@ -98,14 +26,7 @@ export default function PreSaleGenerator() {
             console.log("Iniciando sincronización con Supabase...");
             setIsLoadingProjects(true);
             try {
-                // Ejecutar migración silenciosa automática
-                const localProjs = localStorage.getItem('presale_projects');
-                const localTemps = localStorage.getItem('presale_templates');
-                
-                if (localProjs || localTemps) {
-                    console.log("Detectados datos locales. Migrando...");
-                    await runMigration();
-                }
+
 
                 // --- CARGA NORMAL DE SUPABASE ---
                 // Seleccionar proyectos uniendo con el perfil para ver el dueño
@@ -120,14 +41,15 @@ export default function PreSaleGenerator() {
                 if (projError) throw projError;
                 const projsMap = {};
                 projectsData?.forEach(p => {
+                    const ownerName = Array.isArray(p.owner) ? p.owner[0]?.nombre : p.owner?.nombre;
                     projsMap[p.id] = { 
                         id: p.id,
-                        name: p.name, 
+                        name: p.name || 'Proyecto sin nombre', 
                         config: p.config, 
                         items: p.items, 
                         date: p.updated_at, 
                         user_id: p.user_id,
-                        owner_name: p.owner?.nombre || 'Desconocido'
+                        owner_name: ownerName || 'Desconocido'
                     };
                 });
                 setSavedProjects(projsMap);
@@ -143,26 +65,23 @@ export default function PreSaleGenerator() {
                 
                 if (tempError) throw tempError;
                 
-                // Las DEFAULT_TEMPLATES no tienen ID, usaremos su nombre como ID interno
                 const tempsMap = {};
-                Object.entries(DEFAULT_TEMPLATES).forEach(([name, cfg]) => {
-                    tempsMap[name] = { name, config: cfg, owner_name: 'SISTEMA', isDefault: true };
-                });
-
                 templatesData?.forEach(t => {
+                    const ownerName = Array.isArray(t.owner) ? t.owner[0]?.nombre : t.owner?.nombre;
                     tempsMap[t.id] = { 
                         id: t.id,
-                        name: t.name, 
+                        name: t.name || 'Plantilla sin nombre', 
                         config: t.config, 
                         user_id: t.user_id,
-                        owner_name: t.owner?.nombre || 'Desconocido'
+                        owner_name: ownerName || 'Desconocido'
                     };
                 });
                 setUserTemplates(tempsMap);
                 console.log("Sincronización completada.");
             } catch (err) {
                 console.error("Error al cargar datos de Supabase:", err);
-                setUserTemplates(DEFAULT_TEMPLATES);
+                setDbError(err.message || 'No se pudo conectar con la base de datos');
+                setUserTemplates({});
             } finally {
                 setIsLoadingProjects(false);
             }
@@ -234,8 +153,8 @@ export default function PreSaleGenerator() {
         if (!selectedProjectId || !user) return;
         const proj = savedProjects[selectedProjectId];
         
-        if (proj.user_id !== user.id) {
-            alert("No puedes borrar proyectos de otras personas.");
+        if (proj.user_id !== user.id && !isAdmin) {
+            alert("No tienes permisos para borrar proyectos de otras personas.");
             return;
         }
 
@@ -272,9 +191,9 @@ export default function PreSaleGenerator() {
         const isDefault = currentTpl?.isDefault;
 
         let initialName = selectedTemplateId && !isDefault ? userTemplates[selectedTemplateId].name : "Mi Nueva Plantilla";
-        if (selectedTemplateId && (isDefault || !isOwner)) initialName = `${initialName} (Copia)`;
+        if (selectedTemplateId && (isDefault || (!isOwner && !isAdmin))) initialName = `${initialName} (Copia)`;
 
-        const name = prompt(isOwner && !isDefault ? "Nombre de la plantilla:" : "Guardar como copia propia (Nuevo Nombre):", initialName);
+        const name = prompt((isOwner || isAdmin) && !isDefault ? "Nombre de la plantilla:" : "Guardar como copia propia (Nuevo Nombre):", initialName);
         if (!name) return;
 
         setIsSaving(true);
@@ -316,12 +235,12 @@ export default function PreSaleGenerator() {
         if (!selectedTemplateId || !user) return;
         const tpl = userTemplates[selectedTemplateId];
 
-        if (tpl.isDefault) {
-            alert("No se pueden eliminar las plantillas del sistema.");
+        if (tpl.isDefault && !isAdmin) {
+            alert("No se pueden eliminar las plantillas básicas del sistema.");
             return;
         }
-        if (tpl.user_id !== user.id) {
-            alert("No puedes borrar plantillas de otras personas.");
+        if (tpl.user_id !== user.id && !isAdmin) {
+            alert("No tienes permisos para borrar plantillas de otras personas.");
             return;
         }
 
@@ -353,7 +272,8 @@ export default function PreSaleGenerator() {
     const renameTemplate = async () => {
         if (!selectedTemplateId || !user) return;
         const tpl = userTemplates[selectedTemplateId];
-        if (tpl.isDefault || tpl.user_id !== user.id) return;
+        if (tpl.isDefault && !isAdmin) return;
+        if (tpl.user_id !== user.id && !isAdmin) return;
 
         const newName = prompt("Nuevo nombre para la plantilla:", tpl.name);
         if (!newName || newName === tpl.name) return;
@@ -381,7 +301,16 @@ export default function PreSaleGenerator() {
 
     // Configuración global del póster
     const [config, setConfig] = useState({
-        ...DEFAULT_TEMPLATES['Preventas Clásicas']
+        discountPercent: 20,
+        headerTag: 'EDICIÓN ESPECIAL',
+        headerTitle: 'PREVENTA',
+        headerSubtitle: 'ASEGURA TU PEDIDO • PRECIO ESPECIAL',
+        dividerText: '★ PRECIOS EXCLUSIVOS POR TIEMPO LIMITADO • ENVÍO A TODA BOLIVIA ★',
+        footerContact1: 'WHATSAPP: +591 XXXXXXXX',
+        footerContact2: 'FACEBOOK: Mangas Comics Bolivia Store',
+        footerContact3: 'LA PAZ, BOLIVIA',
+        deadlineDate: '',
+        deadlineTime: ''
     });
 
     // Estado del catálogo y búsqueda
@@ -473,6 +402,48 @@ export default function PreSaleGenerator() {
         }
     }, [selectedTemplateId, userTemplates]);
 
+    // NUEVO: PERSISTENCIA AUTOMÁTICA DE IMÁGENES AL CATÁLOGO
+    useEffect(() => {
+        const persistImages = async () => {
+            const itemsToPersist = selectedItems.filter(it => 
+                it.customImageUrl && 
+                it.customImageUrl.startsWith('http') && 
+                !it.customImageUrl.includes('supabase.co/storage') &&
+                !it._persisting
+            );
+
+            if (itemsToPersist.length === 0) return;
+
+            // Marcar como en proceso para evitar loops
+            setSelectedItems(prev => prev.map(it => {
+                const match = itemsToPersist.find(tp => tp.id === it.id);
+                return match ? { ...it, _persisting: true } : it;
+            }));
+
+            for (const item of itemsToPersist) {
+                try {
+                    console.log(`☁️ Intentando auto-persistir imagen para: ${item.titulo}`);
+                    const newUrl = await catalogService.persistProductImage(item.product_id, item.customImageUrl);
+                    
+                    if (newUrl) {
+                        setSelectedItems(prev => prev.map(it => 
+                            it.id === item.id ? { ...it, customImageUrl: newUrl, _persisting: false, _persisted: true } : it
+                        ));
+                    }
+                } catch (err) {
+                    console.error(`❌ Error auto-persistiendo ${item.titulo}:`, err);
+                    setSelectedItems(prev => prev.map(it => 
+                        it.id === item.id ? { ...it, _persisting: false, _persistError: true } : it
+                    ));
+                }
+            }
+        };
+
+        const timer = setTimeout(persistImages, 2000); // Debounce de 2 segundos tras escribir
+        return () => clearTimeout(timer);
+    }, [selectedItems]);
+
+
     // Filtro de búsqueda
     const searchResults = useMemo(() => {
         const edSearch = editorialFilter.trim().toUpperCase();
@@ -516,7 +487,7 @@ export default function PreSaleGenerator() {
         setSelectedItems(prev => [...prev, {
             ...item,
             id: crypto.randomUUID(),
-            customImageUrl: '',
+            customImageUrl: item.imagen_url || '',
             customPvp: pvp,
             customPreventa: preventa,
             overrideText: '',
@@ -691,9 +662,9 @@ export default function PreSaleGenerator() {
                         {/* Card Image Area (305px - Reduced to fit Considerations) */}
                         <div className="h-[305px] bg-[#4a708b] w-full relative shrink-0">
                             {item.customImageUrl ? (
-                                <img 
+                                 <img 
                                     src={
-                                        (item.customImageUrl.startsWith('blob:') || item.customImageUrl.startsWith('data:'))
+                                        (item.customImageUrl.startsWith('blob:') || item.customImageUrl.startsWith('data:') || item.customImageUrl.includes('supabase.co'))
                                             ? item.customImageUrl
                                             : `https://images.weserv.nl/?url=${encodeURIComponent(item.customImageUrl.replace(/^https?:\/\//, ''))}`
                                     } 
@@ -801,6 +772,18 @@ export default function PreSaleGenerator() {
                         <ImageIcon size={24} className="text-[#f5a800]" />
                         Generador de Preventas (Ed. Azul)
                     </h3>
+
+                    {/* MENSAJE DE ERROR DE SINCRONIZACIÓN */}
+                    {dbError && !isLoadingProjects && (
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+                            <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+                            <div className="text-[11px] leading-tight text-red-700">
+                                <p className="font-bold uppercase mb-1">Error de Sincronización</p>
+                                <p>No se pudo conectar con la base de datos completa. Por favor, asegúrate de haber ejecutado el script SQL en Supabase.</p>
+                                <p className="mt-1 font-mono text-[9px] bg-white/50 p-1 rounded">Detalle: {dbError}</p>
+                            </div>
+                        </div>
+                    )}
                     
                     <div className="space-y-4">
                         {/* SECCIÓN DE PROYECTOS */}
@@ -811,9 +794,9 @@ export default function PreSaleGenerator() {
                                 </label>
                                 <div className="flex gap-1">
                                     <button onClick={saveProject} className="text-[10px] font-bold bg-[#e68219] text-white px-2 py-1 rounded hover:bg-[#d47617] transition-colors">
-                                        {selectedProjectId && savedProjects[selectedProjectId]?.user_id !== user?.id ? "Guardar Copia" : "Guardar"}
+                                        {selectedProjectId && savedProjects[selectedProjectId]?.user_id !== user?.id && !isAdmin ? "Guardar Copia" : "Guardar"}
                                     </button>
-                                    {selectedProjectId && savedProjects[selectedProjectId]?.user_id === user?.id && (
+                                    {selectedProjectId && (savedProjects[selectedProjectId]?.user_id === user?.id || isAdmin) && (
                                         <button onClick={deleteProject} className="text-[10px] font-bold bg-white text-red-600 px-2 py-1 rounded border border-red-100 hover:bg-red-50">Borrar</button>
                                     )}
                                 </div>
@@ -836,9 +819,26 @@ export default function PreSaleGenerator() {
                                 </optgroup>
                             </select>
                             <div className="flex gap-2">
-                                <button onClick={() => { setSelectedProjectId(''); setStatusMessage("NUEVO PROYECTO"); setTimeout(()=>setStatusMessage(""), 2000); }} className="w-full text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all uppercase">
-                                    Nuevo Proyecto en Blanco
-                                </button>
+                                 <button onClick={() => { 
+                                     setSelectedProjectId(''); 
+                                     setSelectedItems([]);
+                                     setConfig({
+                                         discountPercent: 20,
+                                         headerTag: 'EDICIÓN ESPECIAL',
+                                         headerTitle: 'PREVENTA',
+                                         headerSubtitle: 'ASEGURA TU PEDIDO • PRECIO ESPECIAL',
+                                         dividerText: '★ PRECIOS EXCLUSIVOS POR TIEMPO LIMITADO • ENVÍO A TODA BOLIVIA ★',
+                                         footerContact1: 'WHATSAPP: +591 XXXXXXXX',
+                                         footerContact2: 'FACEBOOK: Mangas Comics Bolivia Store',
+                                         footerContact3: 'LA PAZ, BOLIVIA',
+                                         deadlineDate: '',
+                                         deadlineTime: ''
+                                     });
+                                     setStatusMessage("NUEVO PROYECTO"); 
+                                     setTimeout(()=>setStatusMessage(""), 2000); 
+                                 }} className="w-full text-[10px] font-bold bg-white text-orange-600 border border-orange-200 py-1.5 rounded-lg hover:bg-orange-50 transition-all uppercase">
+                                     Nuevo Proyecto en Blanco
+                                 </button>
                             </div>
                             {statusMessage && (
                                 <div className="text-[10px] font-black text-orange-600 animate-pulse mt-1 flex justify-center uppercase">{statusMessage}</div>
@@ -852,9 +852,9 @@ export default function PreSaleGenerator() {
                                 </label>
                                 <div className="flex gap-1">
                                     <button onClick={saveCurrentAsTemplate} className="text-[10px] font-bold bg-[#1b3a57] text-white px-2 py-1 rounded hover:bg-[#132a41] transition-colors whitespace-nowrap">
-                                        {selectedTemplateId && !userTemplates[selectedTemplateId]?.isDefault && userTemplates[selectedTemplateId]?.user_id === user?.id ? "Guardar" : "Guardar Copia"}
+                                        {selectedTemplateId && (isAdmin || userTemplates[selectedTemplateId]?.user_id === user?.id) ? "Guardar" : "Guardar Copia"}
                                     </button>
-                                    {selectedTemplateId && !userTemplates[selectedTemplateId]?.isDefault && userTemplates[selectedTemplateId]?.user_id === user?.id && (
+                                    {selectedTemplateId && (isAdmin || userTemplates[selectedTemplateId]?.user_id === user?.id) && (
                                         <>
                                             <button onClick={renameTemplate} className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-1 rounded hover:bg-slate-300 transition-colors">Renombrar</button>
                                             <button onClick={deleteTemplate} className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors">Borrar</button>
@@ -868,11 +868,7 @@ export default function PreSaleGenerator() {
                                 className="w-full text-xs font-bold border-2 border-slate-200 focus:border-[#f5a800] outline-none rounded-lg px-3 py-2 bg-white text-[#1b3a57] cursor-pointer shadow-sm transition-all mb-2"
                             >
                                 <option value="">-- Plantillas Disponibles --</option>
-                                <optgroup label="SISTEMA">
-                                    {Object.values(userTemplates).filter(t => t.isDefault).map(t => (
-                                        <option key={t.name} value={t.name}>{t.name}</option>
-                                    ))}
-                                </optgroup>
+
                                 <optgroup label="Mis Plantillas">
                                     {Object.values(userTemplates).filter(t => !t.isDefault && t.user_id === user?.id).map(t => (
                                         <option key={t.id} value={t.id}>{t.name}</option>
@@ -931,14 +927,7 @@ export default function PreSaleGenerator() {
                                      </div>
                                 </div>
                             </div>
-                        <div className="pt-2 flex justify-center">
-                            <button 
-                                onClick={runMigration}
-                                className="text-[9px] font-black text-slate-400 hover:text-[#f5a800] transition-colors border-b border-dotted border-slate-300 uppercase italic tracking-tighter"
-                            >
-                                ¿Faltan datos? Intentar migración manual de este navegador
-                            </button>
-                        </div>
+
                         </div>
                     </div>
                 </div>
@@ -1002,9 +991,14 @@ export default function PreSaleGenerator() {
                                     onClick={() => handleAddItem(item)}
                                     className="text-left px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-0 flex justify-between items-center group"
                                 >
-                                    <div className="min-w-0 pr-4">
-                                        <p className="font-bold text-sm text-[#1b3a57] truncate">{item.titulo}</p>
-                                        <p className="text-xs text-slate-500 font-mono truncate">{item.editorial} • {item.ean_oficial || 'S/EAN'}</p>
+                                    <div className="min-w-0 pr-4 flex items-center gap-2">
+                                        <div className="truncate">
+                                            <p className="font-bold text-sm text-[#1b3a57] truncate flex items-center gap-2">
+                                                {item.titulo}
+                                                {item.imagen_url && <ImageIcon size={14} className="text-green-500 shrink-0" title="Ya tiene imagen en catálogo" />}
+                                            </p>
+                                            <p className="text-xs text-slate-500 font-mono truncate">{item.editorial} • {item.ean_oficial || 'S/EAN'}</p>
+                                        </div>
                                     </div>
                                     <span className="shrink-0 text-xs font-bold text-[#f5a800] bg-[#f5a800]/10 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                                         + Añadir
@@ -1071,14 +1065,24 @@ export default function PreSaleGenerator() {
                                             <div className="col-span-2">
                                                 <label className="text-[10px] font-bold text-slate-500 block mb-1">Imagen de Portada</label>
                                                 <div className="flex gap-2">
-                                                    <input 
-                                                        type="text" 
-                                                        value={item.customImageUrl?.startsWith('blob:') ? '' : item.customImageUrl}
-                                                        onChange={(e) => handleUpdateItem(item.id, 'customImageUrl', e.target.value)}
-                                                        placeholder="Link jpg/png"
-                                                        disabled={item.customImageUrl?.startsWith('blob:')}
-                                                        className="w-full text-xs box-border px-2 py-1.5 border border-slate-200 rounded bg-slate-50 disabled:opacity-50"
-                                                    />
+                                                    <div className="relative flex-1">
+                                                        <input 
+                                                            type="text" 
+                                                            value={item.customImageUrl?.startsWith('blob:') ? '' : item.customImageUrl}
+                                                            onChange={(e) => handleUpdateItem(item.id, 'customImageUrl', e.target.value)}
+                                                            placeholder="Link jpg/png"
+                                                            disabled={item.customImageUrl?.startsWith('blob:')}
+                                                            className="w-full text-xs box-border pl-2 pr-6 py-1.5 border border-slate-200 rounded bg-slate-50 disabled:opacity-50"
+                                                        />
+                                                        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">
+                                                            {item._persisting && <Loader2 size={12} className="text-blue-500 animate-spin" />}
+                                                            {item._persisted && <Cloud size={12} className="text-green-500" title="Guardado en nube de MCB" />}
+                                                            {item._persistError && <AlertCircle size={12} className="text-red-400" title="Error: No se pudo auto-guardar" />}
+                                                            {item.customImageUrl?.includes('supabase.co/storage') && !item._persisting && !item._persisted && (
+                                                                <Cloud size={12} className="text-slate-400 opacity-50" />
+                                                            )}
+                                                        </div>
+                                                    </div>
                                                     <label className="bg-[#1b3a57] hover:bg-[#132a41] text-[#f5a800] px-3 py-1.5 rounded cursor-pointer transition-colors text-xs font-bold flex items-center justify-center whitespace-nowrap shadow-sm">
                                                         Subir Foto
                                                         <input 

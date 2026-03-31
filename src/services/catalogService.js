@@ -27,7 +27,8 @@ export const catalogService = {
             precio_n3_bs: 'pn3',
             precio_mayoreo_bs: 'pmb',
             es_reimpresion: 'er',
-            updated_at: 'u'
+            updated_at: 'u',
+            imagen_url: 'img'
         };
         const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
 
@@ -61,7 +62,7 @@ export const catalogService = {
 
         // 2. Si no hay caché o expiró, descargar de Supabase (SOLO COLUMNAS NECESARIAS)
         console.log('🚀 Descargando catálogo optimizado desde Supabase...');
-        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at';
+        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,imagen_url';
         
         let allItems = [];
         let from = 0;
@@ -654,6 +655,79 @@ export const catalogService = {
         this.clearCache();
         console.log(`✅ applyStoredPricing: ${payload.length} items actualizados con precios Bs.`);
         return { count: payload.length };
+    },
+
+    /**
+     * Descarga una imagen remota y la persiste en Supabase Storage vinculada al producto
+     * @param {string} productId - ID del producto en el catálogo
+     * @param {string} remoteUrl - URL de la imagen externa
+     */
+    async persistProductImage(productId, remoteUrl) {
+        if (!productId || !remoteUrl) return null;
+        if (remoteUrl.includes('supabase.co/storage')) return remoteUrl; // Ya está persistida
+
+        console.log(`📸 [INICIO] Persistiendo imagen para ${productId}: ${remoteUrl}`);
+        
+        try {
+            // 1. Descargar la imagen usando un proxy
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(remoteUrl)}`;
+            console.log("🔗 Intentando descargar vía proxy...");
+            const response = await fetch(proxyUrl);
+            
+            if (!response.ok) {
+                console.error("❌ Falló la descarga de la imagen incluso con proxy.");
+                throw new Error('No se pudo descargar la imagen.');
+            }
+            const blob = await response.blob();
+            console.log("✅ Imagen descargada correctamente (Blob obtenido)");
+            
+            // 2. Determinar extensión
+            const contentType = response.headers.get('content-type') || 'image/jpeg';
+            const ext = contentType.split('/')[1] || 'jpg';
+            const fileName = `${productId}.${ext}`;
+            const filePath = `products/${fileName}`;
+
+            // 3. Subir a Storage
+            console.log(`☁️ Subiendo a bucket 'catalog-images' en ruta: ${filePath}...`);
+            const { error: uploadError } = await supabase.storage
+                .from('catalog-images')
+                .upload(filePath, blob, { upsert: true });
+
+            if (uploadError) {
+                console.error("❌ ERROR EN STORAGE (SUPABASE):", uploadError);
+                if (uploadError.message.includes('not found')) {
+                    alert("⚠️ ERROR CRÍTICO: No existe el bucket 'catalog-images'. Por favor, créalo en tu panel de Supabase Storage.");
+                }
+                throw uploadError;
+            }
+            console.log("✅ Subida exitosa a Supabase Storage");
+
+            // 4. Obtener URL pública
+            const { data: { publicUrl } } = supabase.storage
+                .from('catalog-images')
+                .getPublicUrl(filePath);
+
+            // 5. Actualizar Catálogo en DB
+            console.log("🗄️ Actualizando registro en base de datos...");
+            const { error: dbError } = await supabase
+                .from('catalogo_productos')
+                .update({ imagen_url: publicUrl, updated_at: new Date().toISOString() })
+                .eq('product_id', productId);
+
+            if (dbError) {
+                console.error("❌ ERROR AL ACTUALIZAR DB:", dbError);
+                throw dbError;
+            }
+
+            // 6. Invalidar caché local
+            this.clearCache();
+            
+            console.log('✨ [FINALIZADO] Imagen persistida exitosamente:', publicUrl);
+            return publicUrl;
+        } catch (err) {
+            console.error('❌ FALLO TOTAL EN persistProductImage:', err);
+            throw err;
+        }
     },
 
     /**

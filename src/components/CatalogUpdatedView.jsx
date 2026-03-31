@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
 
@@ -16,6 +16,13 @@ const CatalogUpdatedView = () => {
     const [itemsToShow, setItemsToShow] = useState(50);
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [selectedForQuote, setSelectedForQuote] = useState(new Set());
+    const [previewItem, setPreviewItem] = useState(null);
+    const [editingImageItem, setEditingImageItem] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [isBulkEditing, setIsBulkEditing] = useState(false);
+    const [bulkItems, setBulkItems] = useState([]);
+    const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, active: false });
+
 
     // CARGA DE DATOS
     useEffect(() => {
@@ -83,6 +90,61 @@ const CatalogUpdatedView = () => {
             else next.add(productId);
             return next;
         });
+    };
+
+    const handleImagePersist = async (item, urlOrFile) => {
+        if (!item || !urlOrFile) return;
+        setIsUploading(true);
+        try {
+            await catalogService.persistProductImage(item.product_id, urlOrFile);
+            setEditingImageItem(null);
+            await loadCatalog(true); // Recargar para ver los cambios
+        } catch (err) {
+            console.error('Error al persistir imagen:', err);
+            alert('❌ No se pudo guardar la imagen: ' + err.message);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleOpenBulkEdit = () => {
+        const selected = catalogData.filter(i => selectedForQuote.has(i.product_id));
+        setBulkItems(selected.map(item => ({
+            ...item,
+            newUrl: '',
+            newFile: null,
+            status: 'pending' // pending, syncing, success, error
+        })));
+        setIsBulkEditing(true);
+    };
+
+    const handleBulkPersist = async () => {
+        const toProcess = bulkItems.filter(item => (item.newUrl || item.newFile) && item.status !== 'success');
+        if (toProcess.length === 0) {
+            alert('No hay cambios pendientes para sincronizar.');
+            return;
+        }
+
+        setBulkProgress({ current: 0, total: toProcess.length, active: true });
+        
+        for (let i = 0; i < toProcess.length; i++) {
+            const item = toProcess[i];
+            setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, status: 'syncing' } : bi));
+            
+            try {
+                await catalogService.persistProductImage(item.product_id, item.newFile || item.newUrl);
+                setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, status: 'success' } : bi));
+            } catch (err) {
+                console.error(`Error en lote para ${item.titulo}:`, err);
+                setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, status: 'error' } : bi));
+            }
+            
+            setBulkProgress(prev => ({ ...prev, current: i + 1 }));
+        }
+
+        setBulkProgress(prev => ({ ...prev, active: false }));
+        await loadCatalog(true); // Recargar al terminar el lote
+        alert('✅ Proceso de lote finalizado.');
     };
 
     // CATEGORÍAS SEGÚN EDITORIAL
@@ -352,6 +414,7 @@ const CatalogUpdatedView = () => {
                                         }}
                                     />
                                 </th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', borderBottom: '2px solid #f1f5f9', width: '60px' }}>Imagen</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>Producto</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>EAN (Limpio)</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>Editorial</th>
@@ -395,6 +458,42 @@ const CatalogUpdatedView = () => {
                                             onChange={() => toggleSelectForQuote(item.product_id)}
                                             style={{ width: '1.1rem', height: '1.1rem', accentColor: '#f07d2a', cursor: 'pointer' }}
                                         />
+                                    </td>
+                                    <td style={{ padding: '1.25rem 1rem' }}>
+                                        <div 
+                                            onClick={() => setPreviewItem(item)}
+                                            style={{ 
+                                                width: '44px', 
+                                                height: '44px', 
+                                                borderRadius: '8px', 
+                                                background: '#f1f5f9', 
+                                                overflow: 'hidden', 
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                border: '2px solid #e2e8f0',
+                                                transition: 'transform 0.2s, background 0.2s',
+                                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                                            }}
+                                            className="hover:bg-slate-200"
+                                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.1)')}
+                                            onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+                                        >
+                                            {item.imagen_url ? (
+                                                <img 
+                                                    src={item.imagen_url.includes('supabase.co') 
+                                                        ? item.imagen_url 
+                                                        : `https://images.weserv.nl/?url=${encodeURIComponent(item.imagen_url.replace(/^https?:\/\//, ''))}&w=100&h=100&fit=cover`} 
+                                                    alt="" 
+                                                    className="w-full h-full object-cover" 
+                                                />
+                                            ) : (
+                                                <div className="flex flex-col items-center">
+                                                    <ImageIcon size={18} className="text-slate-300" />
+                                                </div>
+                                            )}
+                                        </div>
                                     </td>
                                     <td style={{ padding: '1.25rem 1rem' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -509,17 +608,298 @@ const CatalogUpdatedView = () => {
                 <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: '#1a2d42', color: 'white', borderRadius: '999px', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', zIndex: 9999, border: '2px solid #f07d2a' }}>
                     <ShoppingCart size={18} style={{ color: '#f07d2a' }} />
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>{selectedForQuote.size} producto(s) seleccionado(s)</span>
-                    <button
-                        onClick={() => handleAddToQuote(catalogData.filter(i => selectedForQuote.has(i.product_id)))}
-                        style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: 'none', cursor: 'pointer' }}
-                    >
-                        Agregar a Cotización ➡
-                    </button>
+                    
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                            onClick={handleOpenBulkEdit}
+                            style={{ background: 'rgba(245, 168, 0, 0.2)', color: '#f5a800', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: '1.5px solid #f5a800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                            <ImageIcon size={14} /> Subir Imágenes
+                        </button>
+                        
+                        <button
+                            onClick={() => handleAddToQuote(catalogData.filter(i => selectedForQuote.has(i.product_id)))}
+                            style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: 'none', cursor: 'pointer' }}
+                        >
+                            Agregar a Cotización ➡
+                        </button>
+                    </div>
+
                     <button
                         onClick={() => setSelectedForQuote(new Set())}
                         style={{ opacity: 0.5, cursor: 'pointer', background: 'none', border: 'none', color: 'white', fontSize: '16px' }}
                         title="Deseleccionar todo"
                     >✕</button>
+                </div>
+            )}
+
+            {/* Modal de Vista Previa de Imagen (Restaurado) */}
+            {previewItem && (
+                <div 
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}
+                    onClick={() => setPreviewItem(null)}
+                >
+                    <div className="animate-in zoom-in duration-300" style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+                        <button 
+                            style={{ position: 'absolute', top: '-12px', right: '-12px', background: '#f07d2a', color: 'white', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 101 }}
+                            onClick={(e) => { e.stopPropagation(); setPreviewItem(null); }}
+                        >
+                            <X size={18} />
+                        </button>
+                        
+                        <div style={{ position: 'relative' }}>
+                            <img 
+                                src={previewItem.imagen_url || ''} 
+                                style={{ maxWidth: '100%', maxHeight: '75vh', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', border: '4px solid white' }}
+                                alt="Vista previa"
+                            />
+                            {!previewItem.imagen_url && (
+                                <div style={{ background: 'white', padding: '2rem', borderRadius: '16px', textAlign: 'center' }}>
+                                    <ImageIcon size={48} className="text-slate-200 mx-auto mb-2" />
+                                    <p className="text-slate-500 font-bold">Sin imagen asignada</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingImageItem(previewItem); setPreviewItem(null); }}
+                            style={{ 
+                                background: '#f07d2a', 
+                                color: 'white', 
+                                padding: '12px 24px', 
+                                borderRadius: '12px', 
+                                fontWeight: 800, 
+                                fontSize: '14px', 
+                                border: 'none', 
+                                cursor: 'pointer', 
+                                boxShadow: '0 8px 16px rgba(240,125,42,0.3)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}
+                        >
+                            <RefreshCw size={18} /> {previewItem.imagen_url ? 'Cambiar Imagen' : 'Agregar Imagen'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Carga de Imagen */}
+            {editingImageItem && (
+                <div 
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+                    onClick={() => !isUploading && setEditingImageItem(null)}
+                >
+                    <div 
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="bg-[#1b3a57] p-4 text-[#f5a800] flex justify-between items-center">
+                            <h3 className="font-black uppercase text-sm flex items-center gap-2">
+                                <ImageIcon size={18} /> Actualizar Imagen
+                            </h3>
+                            <button onClick={() => setEditingImageItem(null)} disabled={isUploading} className="text-white/50 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-4">
+                            <div className="text-center">
+                                <p className="text-[#1b3a57] font-bold text-base leading-tight mb-1">{editingImageItem.titulo}</p>
+                                <p className="text-slate-400 text-[10px] font-mono">{editingImageItem.product_id}</p>
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-500 block">Opción 1: Pegar Enlace (URL)</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            placeholder="https://ejemplo.com/manga.jpg"
+                                            className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:ring-2 focus:ring-[#f5a800] outline-none"
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && e.target.value) {
+                                                    handleImagePersist(editingImageItem, e.target.value);
+                                                }
+                                            }}
+                                            id="url-input"
+                                        />
+                                        <button 
+                                            disabled={isUploading}
+                                            onClick={() => {
+                                                const val = document.getElementById('url-input').value;
+                                                if (val) handleImagePersist(editingImageItem, val);
+                                            }}
+                                            className="bg-[#f5a800] text-[#1b3a57] px-4 py-2 rounded-lg font-black text-xs hover:bg-[#e09a00] transition-colors disabled:opacity-30 flex items-center gap-2"
+                                        >
+                                            {isUploading ? <RefreshCw size={14} className="animate-spin" /> : 'Sincronizar'}
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div className="relative border-t border-slate-100 pt-4 text-center">
+                                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-3 text-[10px] font-bold text-slate-300">O TAMBIÉN</span>
+                                    
+                                    <label className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-slate-200 rounded-xl hover:border-[#f5a800] hover:bg-orange-50 transition-all cursor-pointer group">
+                                        <div className="bg-slate-100 p-3 rounded-full group-hover:bg-[#f5a800]/20 transition-colors">
+                                            <ImageIcon size={24} className="text-slate-400 group-hover:text-[#f5a800]" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-xs font-black text-[#1b3a57]">Subir imagen desde PC</p>
+                                            <p className="text-[10px] text-slate-400">JPG, PNG, WEBP (Máx 5MB)</p>
+                                        </div>
+                                        <input 
+                                            type="file" 
+                                            accept="image/*" 
+                                            className="hidden" 
+                                            onChange={(e) => {
+                                                const file = e.target.files[0];
+                                                if (file) handleImagePersist(editingImageItem, file);
+                                            }}
+                                            disabled={isUploading}
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        {isUploading && (
+                            <div className="bg-blue-600 p-3 text-center animate-pulse">
+                                <p className="text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2">
+                                    <RefreshCw size={12} className="animate-spin" /> Procesando y subiendo a la nube...
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Carga de Imagen en Lote */}
+            {isBulkEditing && (
+                <div 
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.8)', backdropFilter: 'blur(8px)', zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}
+                    onClick={() => !bulkProgress.active && setIsBulkEditing(false)}
+                >
+                    <div 
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="bg-[#1b3a57] p-6 text-white flex justify-between items-center">
+                            <div>
+                                <h3 className="font-black uppercase text-xl flex items-center gap-3">
+                                    <ImageIcon size={24} className="text-[#f5a800]" /> Actualización Masiva de Imágenes
+                                </h3>
+                                <p className="text-white/60 text-xs mt-1 font-bold tracking-wider uppercase">Procesando {bulkItems.length} productos seleccionados</p>
+                            </div>
+                            <button onClick={() => setIsBulkEditing(false)} disabled={bulkProgress.active} className="text-white/40 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full">
+                                <X size={28} />
+                            </button>
+                        </div>
+
+                        {bulkProgress.active && (
+                            <div className="bg-[#f07d2a] p-4 text-white">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="font-black text-xs uppercase tracking-widest flex items-center gap-2">
+                                        <RefreshCw size={14} className="animate-spin" /> 
+                                        Sincronizando con la nube... ({bulkProgress.current} de {bulkProgress.total})
+                                    </span>
+                                    <span className="font-black text-sm">{Math.round((bulkProgress.current / bulkProgress.total) * 100)}%</span>
+                                </div>
+                                <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden">
+                                    <div className="bg-white h-full transition-all duration-300" style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}></div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex-1 overflow-y-auto p-0 custom-scrollbar bg-slate-50">
+                            <table className="w-full border-collapse text-left">
+                                <thead className="sticky top-0 bg-white shadow-sm z-20">
+                                    <tr>
+                                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b">Manga / Producto</th>
+                                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b">Configuración de Imagen</th>
+                                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b w-[120px] text-center">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {bulkItems.map((item, bIdx) => (
+                                        <tr key={item.product_id} className="border-b border-slate-100 hover:bg-white transition-colors">
+                                            <td className="px-6 py-6">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-12 h-12 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
+                                                        {item.imagen_url ? (
+                                                            <img src={item.imagen_url} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <div className="w-full h-full flex items-center justify-center text-slate-300"><ImageIcon size={20} /></div>
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-black text-[#1b3a57] text-sm leading-tight mb-1">{item.titulo}</p>
+                                                        <p className="text-[10px] text-slate-400 font-mono tracking-tighter uppercase">{item.editorial} • {item.product_id}</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-6">
+                                                <div className="flex flex-col gap-2">
+                                                    <div className="flex gap-2">
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="Pegar URL de la imagen aquí..."
+                                                            value={item.newUrl}
+                                                            onChange={(e) => setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, newUrl: e.target.value, newFile: null } : bi))}
+                                                            disabled={bulkProgress.active || item.status === 'success'}
+                                                            className="flex-1 text-xs border border-slate-200 rounded-xl px-4 py-2.5 bg-white outline-none focus:ring-2 focus:ring-[#f5a800] disabled:opacity-50"
+                                                        />
+                                                        <label className={`px-4 py-2 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center gap-2 ${item.newFile ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${ (bulkProgress.active || item.status === 'success') ? 'opacity-30 cursor-default' : ''}`}>
+                                                            {item.newFile ? '✓ Archivo' : 'Subir Archivo'}
+                                                            <input 
+                                                                type="file" 
+                                                                className="hidden" 
+                                                                accept="image/*"
+                                                                disabled={bulkProgress.active || item.status === 'success'}
+                                                                onChange={(e) => {
+                                                                    const f = e.target.files[0];
+                                                                    if (f) setBulkItems(prev => prev.map(bi => bi.product_id === item.product_id ? { ...bi, newFile: f, newUrl: '' } : bi));
+                                                                }}
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                    {(item.newUrl || item.newFile) && item.status !== 'success' && (
+                                                        <div className="text-[10px] text-[#f07d2a] font-bold flex items-center gap-1 ml-1 animate-pulse">
+                                                            <Info size={10} /> Pendiente de sincronización
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-6 text-center">
+                                                {item.status === 'pending' && <div className="text-slate-300 text-xs font-bold">---</div>}
+                                                {item.status === 'syncing' && <RefreshCw size={18} className="animate-spin text-blue-500 mx-auto" />}
+                                                {item.status === 'success' && <div className="bg-green-100 text-green-600 p-2 rounded-full inline-flex"><CheckCircle2 size={18} /></div>}
+                                                {item.status === 'error' && <div className="bg-red-100 text-red-600 p-2 rounded-full inline-flex" title="Intenta de nuevo"><AlertCircle size={18} /></div>}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="bg-white p-6 border-t flex justify-end gap-3 shadow-2xl">
+                            <button 
+                                onClick={() => setIsBulkEditing(false)}
+                                disabled={bulkProgress.active}
+                                className="px-6 py-3 rounded-2xl font-black text-sm text-slate-500 hover:bg-slate-100 transition-colors disabled:opacity-30"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={handleBulkPersist}
+                                disabled={bulkProgress.active || !bulkItems.some(i => (i.newUrl || i.newFile) && i.status !== 'success')}
+                                className="bg-[#1b3a57] text-[#f5a800] px-10 py-3 rounded-2xl font-black text-sm flex items-center gap-3 hover:bg-[#132a41] transition-all shadow-lg hover:shadow-xl disabled:opacity-30"
+                            >
+                                {bulkProgress.active ? <RefreshCw size={18} className="animate-spin" /> : <ImageIcon size={18} />}
+                                🚀 Sincronizar Todo al Catálogo
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
