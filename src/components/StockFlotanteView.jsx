@@ -1,0 +1,326 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../services/supabase';
+import { 
+    Truck, Package, Calendar, Clock, ChevronRight, 
+    ChevronDown, AlertCircle, TrendingUp, ArrowUpRight,
+    Info, Activity
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+export default function ConfirmationInfoView() {
+    const [semanaDetails, setSemanaDetails] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [expandedWeek, setExpandedWeek] = useState(null);
+    const [globalStats, setGlobalStats] = useState({ fisico: 0, confirmado: 0, pendiente: 0 });
+    const [detailFilter, setDetailFilter] = useState('all'); // all, cuts, extras
+
+    useEffect(() => {
+        fetchDashboardData();
+    }, []);
+
+    const fetchDashboardData = async () => {
+        setLoading(true);
+        try {
+            // 1. Fetch Summary Stats
+            const { data: cat } = await supabase.from('catalogo_productos').select('stock_fisico');
+            const totalFisico = (cat || []).reduce((sum, p) => sum + (p.stock_fisico || 0), 0);
+
+            // 2. Fetch Weeks
+            const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false });
+
+            // 3. Fetch Master Confirmations and Receptions
+            const mastersRes = await supabase.from('master_confirmaciones').select('semana_id, datos_json');
+            const receptionsRes = await supabase.from('pedido_items_recepcion').select('semana_id, cantidad_recibida, titulo');
+            const ordersRes = await supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)');
+
+            const masters = mastersRes.data || [];
+            const receptions = receptionsRes.data || [];
+            const orders = ordersRes.data || [];
+
+            // Process stats per week
+            const details = (weeks || []).map(w => {
+                const master = masters.find(m => m.semana_id === w.id);
+                const masterData = master?.datos_json || [];
+                const weekReceptions = receptions.filter(r => r.semana_id === w.id) || [];
+                const weekOrders = orders.filter(o => o.pedido.semana_id === w.id) || [];
+
+                const totalOrdered = weekOrders.reduce((sum, o) => sum + (o.cantidad || 0), 0);
+                const totalConfirmed = masterData.reduce((sum, it) => sum + (it.cantidad || 0), 0);
+                const totalReceived = weekReceptions.reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
+
+                const pendiente = Math.max(0, totalOrdered - totalConfirmed);
+                const confirmadoFlotante = Math.max(0, totalConfirmed - totalReceived);
+                
+                // --- Merge Titles (Original vs Master) for Discrepancy detection ---
+                const allTitlesSet = new Set([
+                    ...weekOrders.map(o => (o.titulo || '').toLowerCase().trim()),
+                    ...masterData.map(m => (m.titulo || '').toLowerCase().trim())
+                ]);
+
+                const titleDetails = Array.from(allTitlesSet).map(itTitle => {
+                    if (!itTitle) return null;
+                    
+                    const ord = weekOrders.filter(o => (o.titulo || '').toLowerCase().trim() === itTitle);
+                    const mst = masterData.find(m => (m.titulo || '').toLowerCase().trim() === itTitle);
+                    
+                    const qtyOrdered = ord.reduce((s, x) => s + (x.cantidad || 0), 0);
+                    const qtyConfirmed = mst?.cantidad || 0;
+                    
+                    const rec = weekReceptions
+                        .filter(r => (r.titulo || '').toLowerCase().trim() === itTitle)
+                        .reduce((sum, r) => sum + r.cantidad_recibida, 0);
+
+                    return {
+                        titulo: mst?.titulo || ord[0]?.titulo || itTitle.toUpperCase(),
+                        pedido: qtyOrdered,
+                        confirmado: qtyConfirmed,
+                        received: rec,
+                        pending: Math.max(0, qtyConfirmed - rec),
+                        isExtra: qtyConfirmed > qtyOrdered,
+                        isCut: qtyConfirmed < qtyOrdered && qtyOrdered > 0,
+                        isMissing: qtyConfirmed === 0 && qtyOrdered > 0
+                    };
+                }).filter(Boolean).sort((a, b) => b.pedido - a.pedido);
+
+                const totalUnitsCut = titleDetails.reduce((sum, t) => sum + Math.max(0, t.pedido - t.confirmado), 0);
+                const totalUnitsExtra = titleDetails.reduce((sum, t) => sum + Math.max(0, t.confirmado - t.pedido), 0);
+
+                const fechaLlegada = w.fecha_estimada_llegada 
+                    ? new Date(w.fecha_estimada_llegada) 
+                    : new Date(new Date(w.created_at).getTime() + (22 * 24 * 60 * 60 * 1000));
+
+                const diasFaltantes = Math.ceil((fechaLlegada.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+
+                return {
+                    ...w,
+                    ordered: totalOrdered,
+                    confirmed: totalConfirmed,
+                    received: totalReceived,
+                    flotante: confirmadoFlotante,
+                    pendiente,
+                    titleDetails,
+                    totalUnitsCut,
+                    totalUnitsExtra,
+                    fechaEstimada: fechaLlegada,
+                    diasFaltantes,
+                    isPending: !master
+                };
+            }).sort((a, b) => {
+                // First by status (Pending first), then by date (Newest first)
+                if (a.isPending === b.isPending) {
+                    return new Date(b.created_at) - new Date(a.created_at);
+                }
+                return a.isPending ? -1 : 1;
+            });
+
+            setSemanaDetails(details);
+            setGlobalStats({
+                fisico: totalFisico,
+                confirmado: details.reduce((sum, d) => sum + d.flotante, 0),
+                pendiente: details.reduce((sum, d) => sum + d.pendiente, 0)
+            });
+
+        } catch (err) {
+            console.error("Error fetching dashboard data:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (loading) return (
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <Activity className="text-secondary animate-spin" size={48} />
+            <p className="text-xs font-black text-muted uppercase tracking-widest">Calculando Confirmaciones...</p>
+        </div>
+    );
+
+    return (
+        <div className="space-y-8 max-w-7xl mx-auto">
+            <h3 className="text-xl font-bold uppercase tracking-tight">Información de Confirmaciones</h3>
+            
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="glass p-8 rounded-3xl border border-border/40 shadow-xl relative overflow-hidden group">
+                    <div className="absolute -right-8 -top-8 w-32 h-32 bg-navy/5 rounded-full group-hover:scale-125 transition-transform" />
+                    <Package className="text-navy mb-4" size={32} />
+                    <div className="text-[11px] font-bold text-muted uppercase tracking-[0.2em] mb-1">Stock Físico Real</div>
+                    <div className="text-4xl font-display text-navy">{globalStats.fisico} <span className="text-sm font-mono text-muted uppercase">Uni</span></div>
+                    <p className="text-xs text-muted-2 mt-2">Unidades disponibles en estantería</p>
+                </div>
+
+                <div className="glass p-8 rounded-3xl border border-secondary/30 shadow-xl relative overflow-hidden group">
+                    <div className="absolute -right-8 -top-8 w-32 h-32 bg-secondary/5 rounded-full group-hover:scale-125 transition-transform" />
+                    <Truck className="text-secondary mb-4" size={32} />
+                    <div className="text-[11px] font-bold text-secondary uppercase tracking-[0.2em] mb-1">Flotante Confirmado</div>
+                    <div className="text-4xl font-display text-secondary">{globalStats.confirmado} <span className="text-sm font-mono text-muted uppercase">Uni</span></div>
+                    <p className="text-xs text-muted-2 mt-2">Confirmado por distribuidor y en tránsito</p>
+                </div>
+
+                <div className="glass p-8 rounded-3xl border border-accent/30 shadow-xl relative overflow-hidden group">
+                    <div className="absolute -right-8 -top-8 w-32 h-32 bg-accent/5 rounded-full group-hover:scale-125 transition-transform" />
+                    <Clock className="text-accent mb-4" size={32} />
+                    <div className="text-[11px] font-bold text-accent uppercase tracking-[0.2em] mb-1">Flotante Pedido</div>
+                    <div className="text-4xl font-display text-accent">{globalStats.pendiente} <span className="text-sm font-mono text-muted uppercase">Uni</span></div>
+                    <p className="text-xs text-muted-2 mt-2">Pedidos realizados aún no confirmados</p>
+                </div>
+            </div>
+
+            {/* Timeline / Active Orders */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-muted uppercase tracking-[0.3em] flex items-center gap-2">
+                        <Calendar size={16} className="text-primary" /> Próximos Arribos Estimados
+                    </h4>
+                    <span className="text-[10px] font-mono text-muted/60 uppercase tracking-widest bg-white/5 px-2 py-1 rounded">Basado en ciclo de 22 días</span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                    {semanaDetails.filter(d => (d.flotante > 0 || d.pendiente > 0 || d.isPending)).map((week, idx) => {
+                        const isExpanded = expandedWeek === week.id;
+                        return (
+                            <div key={idx} className={`glass rounded-2xl border border-border/40 transition-all group ${isExpanded ? 'ring-2 ring-secondary/20 shadow-2xl' : 'hover:border-secondary/40'}`}>
+                                <div 
+                                    className="p-6 cursor-pointer flex flex-col md:flex-row justify-between items-start md:items-center gap-6"
+                                    onClick={() => setExpandedWeek(isExpanded ? null : week.id)}
+                                >
+                                    <div className="flex items-center gap-6">
+                                        <div className={`p-4 rounded-2xl flex flex-col items-center justify-center min-w-[70px] ${week.diasFaltantes <= 7 ? 'bg-orange-100 text-orange-600' : 'bg-secondary/10 text-secondary'}`}>
+                                            <span className="text-xs font-black uppercase tracking-tighter leading-none">{week.fechaEstimada.toLocaleDateString('es', { month: 'short' })}</span>
+                                            <span className="text-2xl font-black font-display">{week.fechaEstimada.getDate()}</span>
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h5 className="text-lg font-bold text-navy uppercase tracking-tight">{week.nombre}</h5>
+                                                {isExpanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
+                                            </div>
+                                            <div className="flex items-center gap-3 mt-1">
+                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${week.diasFaltantes <= 0 ? 'bg-green-100 text-green-600' : (week.diasFaltantes <= 7 ? 'bg-orange-100 text-orange-600' : 'bg-sky/10 text-sky')}`}>
+                                                    {week.diasFaltantes <= 0 ? 'LISTO PARA LLEGAR' : (week.diasFaltantes === 1 ? 'LLEGA MAÑANA' : `LLEGA EN ~${week.diasFaltantes} DÍAS`)}
+                                                </span>
+                                                {week.isPending && (
+                                                    <span className="text-[10px] font-black bg-accent text-white px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                        <Clock size={10} /> BUSCANDO CONFIRMACIÓN
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-6 md:gap-10 w-full md:w-auto justify-between md:justify-end">
+                                        <div className="text-center">
+                                            <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Confirmado</div>
+                                            <div className="text-xl font-bold text-secondary">{week.confirmed}</div>
+                                        </div>
+                                        <div className="text-center">
+                                            <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Recortados</div>
+                                            <div className="text-xl font-bold text-red-500">-{week.totalUnitsCut}</div>
+                                        </div>
+                                        <div className="text-center">
+                                            <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Extras</div>
+                                            <div className="text-xl font-bold text-green-600">+{week.totalUnitsExtra}</div>
+                                        </div>
+                                        <div className="hidden md:block w-[120px] bg-white/10 h-2 rounded-full overflow-hidden relative border border-white/5">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <AnimatePresence>
+                                    {isExpanded && (
+                                        <motion.div 
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="border-t border-border/20 bg-secondary/5 overflow-hidden"
+                                        >
+                                            <div className="p-6">
+                                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                                                    <h6 className="text-[10px] font-black text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
+                                                        <Package size={14} /> Títulos en este despacho
+                                                    </h6>
+                                                    
+                                                    <div className="flex items-center gap-2 bg-white/50 p-1 rounded-xl border border-border/20 self-start">
+                                                        <button 
+                                                            onClick={() => setDetailFilter('all')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${detailFilter === 'all' ? 'bg-navy text-white shadow-md' : 'text-muted hover:bg-secondary/10'}`}
+                                                        >
+                                                            TODOS
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => setDetailFilter('cuts')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${detailFilter === 'cuts' ? 'bg-red-500 text-white shadow-md' : 'text-red-500 hover:bg-red-50'}`}
+                                                        >
+                                                            SOLO RECORTADOS
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => setDetailFilter('extras')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${detailFilter === 'extras' ? 'bg-green-600 text-white shadow-md' : 'text-green-600 hover:bg-green-50'}`}
+                                                        >
+                                                            SOLO EXTRAS
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm border-collapse">
+                                                        <thead>
+                                                            <tr className="text-[10px] font-bold text-secondary uppercase tracking-widest border-b border-border/20">
+                                                                <th className="px-4 py-3 text-left">Título</th>
+                                                                <th className="px-4 py-3 text-center">Pedido</th>
+                                                                <th className="px-4 py-3 text-center">Confirmado</th>
+                                                                <th className="px-4 py-3 text-center">Diferencia</th>
+                                                                <th className="px-4 py-3 text-right">Estado</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {week.titleDetails
+                                                                .filter(t => {
+                                                                    if (detailFilter === 'cuts') return t.isCut || t.isMissing;
+                                                                    if (detailFilter === 'extras') return t.isExtra;
+                                                                    return true;
+                                                                })
+                                                                .map((t, tIdx) => (
+                                                                    <tr key={tIdx} className="border-b border-border/10 hover:bg-white/40 transition-colors">
+                                                                        <td className="px-4 py-3">
+                                                                            <div className="font-bold text-navy truncate max-w-[300px]">{t.titulo}</div>
+                                                                        </td>
+                                                                        <td className="px-4 py-3 text-center font-mono font-bold text-muted-2">{t.pedido || 0}</td>
+                                                                        <td className="px-4 py-3 text-center font-black text-navy">{t.confirmado || 0}</td>
+                                                                        <td className={`px-4 py-3 text-center font-bold ${t.pedido > t.confirmado ? 'text-red-500' : (t.confirmado > t.pedido ? 'text-green-600' : 'text-muted-2')}`}>
+                                                                            {t.pedido > t.confirmado ? `-${t.pedido - t.confirmado}` : (t.confirmado > t.pedido ? `+${t.confirmado - t.pedido}` : '-')}
+                                                                        </td>
+                                                                        <td className="px-4 py-3 text-right">
+                                                                            {t.isMissing ? (
+                                                                                <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm animate-pulse whitespace-nowrap">RECORTADO TOTAL</span>
+                                                                            ) : t.isCut ? (
+                                                                                <span className="bg-orange-500 text-white text-[9px] font-black px-2 py-0.5 rounded whitespace-nowrap">RECORTADO</span>
+                                                                            ) : t.isExtra ? (
+                                                                                <span className="bg-green-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-[0_0_8px_rgba(22,163,74,0.4)] whitespace-nowrap">EXTRA</span>
+                                                                            ) : (
+                                                                                <span className="bg-blue-600/10 text-blue-600 text-[9px] font-black px-2 py-0.5 rounded">OK</span>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* General Info / Legend */}
+            <div className="p-6 bg-navy text-white/80 rounded-3xl border border-white/5 shadow-inner flex items-center gap-6">
+                <Info className="text-primary shrink-0" size={24} />
+                <div className="text-xs leading-relaxed">
+                    <strong className="text-white">Auditando discrepancias</strong>: En esta vista, comparamos tus pedidos iniciales contra el Excel maestro. Los ítems marcados como <span className="text-red-400 font-bold">RECORTADOS</span> son aquellos que pediste pero el distribuidor no enviará. Los ítems <span className="text-green-400 font-bold">EXTRAS</span> son mangas que no pediste originalmente pero vienen en camino.
+                </div>
+            </div>
+        </div>
+    );
+}

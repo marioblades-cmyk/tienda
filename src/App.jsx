@@ -13,10 +13,13 @@ import ComicAnalysisTool from './components/ComicAnalysisTool';
 import PriceAnalysisTool from './components/PriceAnalysisTool';
 import QuotationTool from './components/QuotationTool';
 import PreSaleGenerator from './components/PreSaleGenerator';
+import ReceptionManagement from './components/ReceptionManagement';
+import ConfirmationInfoView from './components/StockFlotanteView';
 import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
-    CheckCircle2, BookOpen, FileText, Image as ImageIcon
+    CheckCircle2, BookOpen, FileText, Image as ImageIcon,
+    Truck, BarChart3
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -50,13 +53,14 @@ function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
 function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, hasPendingChanges, user, profile }) {
     const adminItems = [
         { id: 'semanas', icon: Calendar, label: 'Semanas' },
-        { id: 'mis-pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
+        { id: 'confirmaciones-info', icon: LayoutDashboard, label: 'Información de Confirmaciones' },
         { id: 'consolidado', icon: LayoutDashboard, label: 'Consolidado' },
         { id: 'confirmaciones', icon: CheckCircle2, label: 'Confirmaciones' },
         { id: 'remitos', icon: Database, label: 'Gestión Integral' },
         { id: 'usuarios', icon: Users, label: 'Vendedores' },
         { id: 'entelequia', icon: BookOpen, label: 'Herramienta Editorial' },
         { id: 'precios', icon: Database, label: 'Análisis de Precios' },
+        { id: 'recepcion', icon: Truck, label: 'Recepción' },
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
@@ -138,11 +142,13 @@ const TAB_TITLES = {
     consolidado: 'Consolidado General',
     remitos: 'Remitos y Finanzas',
     confirmaciones: 'Base Master',
+    'confirmaciones-info': 'Información de Confirmaciones',
     'mis-pedidos': 'Mis Pedidos como Vendedor',
     pedidos: 'Mis Pedidos Semanales',
     usuarios: 'Gestión de Vendedores',
     precios: 'Análisis de Precios',
     'catalogo-actualizado': 'Catálogo Maestro Actualizado',
+    recepcion: 'Control de Recepción de Cajas',
     preventas: 'Generador de Preventas',
     cotizaciones: 'Generador de Cotizaciones',
     entelequia: 'Herramienta Editorial',
@@ -239,12 +245,13 @@ function Main() {
     // --- Tab content ---
     const currentContent = isAdmin ? (
         activeTab === 'semanas' ? <AdminWeeklyView /> :
+        activeTab === 'confirmaciones-info' ? <ConfirmationInfoView /> :
         activeTab === 'consolidado' ? <AdminConsolidatedView /> :
-        activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'confirmaciones' ? <AdminMasterView /> :
         activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
         activeTab === 'usuarios' ? <AdminUserManagement /> :
         activeTab === 'precios' ? <PriceAnalysisTool /> :
+        activeTab === 'recepcion' ? <ReceptionManagement /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :

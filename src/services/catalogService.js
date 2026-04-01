@@ -62,7 +62,7 @@ export const catalogService = {
 
         // 2. Si no hay caché o expiró, descargar de Supabase (SOLO COLUMNAS NECESARIAS)
         console.log('🚀 Descargando catálogo optimizado desde Supabase...');
-        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,imagen_url';
+        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,imagen_url,stock_fisico';
         
         let allItems = [];
         let from = 0;
@@ -245,6 +245,20 @@ export const catalogService = {
         
         // Al sincronizar nuevos datos, invalidamos la caché
         this.clearCache();
+    },
+
+    /**
+     * Actualiza el stock físico de un producto
+     */
+    async updateProductStock(productId, stock) {
+        const { error } = await supabase
+            .from('catalogo_productos')
+            .update({ stock_fisico: stock, updated_at: new Date().toISOString() })
+            .eq('product_id', productId);
+
+        if (error) throw error;
+        this.clearCache();
+        return true;
     },
 
     /**

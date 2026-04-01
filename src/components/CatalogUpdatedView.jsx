@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock } from 'lucide-react';
+import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
 
@@ -35,6 +36,12 @@ const CatalogUpdatedView = () => {
     const [showExpertMode, setShowExpertMode] = useState(false);
     const [manualSearchIdx, setManualSearchIdx] = useState(null);
     const [manualSearchQuery, setManualSearchQuery] = useState('');
+    const [editingStock, setEditingStock] = useState(null); // {productId, value}
+    const [editingMinStock, setEditingMinStock] = useState(null); // {productId, value}
+    const [isUpdatingStock, setIsUpdatingStock] = useState(false);
+    const [activeWeeks, setActiveWeeks] = useState([]);
+    const [showOnlyWithStock, setShowOnlyWithStock] = useState(false);
+    const [weekFilter, setWeekFilter] = useState('TODAS');
 
 
     // CARGA DE DATOS
@@ -57,7 +64,87 @@ const CatalogUpdatedView = () => {
         setIsLoading(true);
         try {
             const results = await catalogService.fetchFullCatalog(force);
-            setCatalogData(results);
+            
+            // --- NEW: Load Integrated Stock Data ---
+            const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false });
+            const [masters, receptions, allOrders] = await Promise.all([
+                supabase.from('master_confirmaciones').select('semana_id, datos_json'),
+                supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida'),
+                supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)')
+            ]);
+
+            const weekStats = (weeks || []).map(w => {
+                const master = masters.data?.find(m => m.semana_id === w.id);
+                const weekReceptions = (receptions.data || []).filter(r => r.semana_id === w.id);
+                const weekAllOrders = (allOrders.data || []).filter(o => o.pedido.semana_id === w.id);
+                
+                const totalConfirmed = (master?.datos_json || []).reduce((sum, it) => sum + (it.cantidad || 0), 0);
+                const totalReceived = weekReceptions.reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
+                const totalRequestedStore = weekAllOrders.filter(o => o.pedido.tipo === 'tienda').reduce((sum, o) => sum + (o.cantidad || 0), 0);
+
+                const fechaArribo = w.fecha_estimada_llegada 
+                    ? new Date(w.fecha_estimada_llegada)
+                    : new Date(new Date(w.created_at).getTime() + (22 * 24 * 60 * 60 * 1000));
+
+                return {
+                    ...w,
+                    masterData: master?.datos_json || [],
+                    receptionData: weekReceptions,
+                    allOrdersData: weekAllOrders,
+                    isConfirmed: !!master,
+                    floatingCount: master ? Math.max(0, totalConfirmed - totalReceived) : totalRequestedStore,
+                    fechaArribo
+                };
+            }).filter(w => w.floatingCount > 0);
+
+            setActiveWeeks(weekStats);
+
+            // Enrich catalog items with floating data
+            const enrichedResults = results.map(prod => {
+                const prodTitle = (prod.titulo || '').toLowerCase().trim();
+                const floatingByWeek = {};
+                
+                weekStats.forEach(week => {
+                    let qty = 0;
+                    
+                    if (week.isConfirmed) {
+                        // 1. Total confirmed by distributor (Total)
+                        const totalConfirmedForTitle = week.masterData
+                            .filter(it => (it.titulo || '').toLowerCase().trim() === prodTitle)
+                            .reduce((s, i) => s + (i.cantidad || 0), 0);
+                        
+                        // 2. Units requested by Sellers (Personal) - These are NOT store stock
+                        const sellerRequestedQty = week.allOrdersData
+                            .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'personal')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+                        
+                        // 3. What we already received specifically for this week
+                        const received = week.receptionData
+                            .filter(r => (r.titulo || '').toLowerCase().trim() === prodTitle)
+                            .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
+                        
+                        // Store stock is ALL confirmed units MINUS what was for sellers, MINUS what arrived.
+                        // This naturally handles "Extras" (unrequested items in Master) flowing to Store.
+                        qty = Math.max(0, (totalConfirmedForTitle - sellerRequestedQty) - received);
+                    } else {
+                        // Not confirmed yet: Show full TIENDA request Baseline
+                        qty = week.allOrdersData
+                            .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'tienda')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+                    }
+                    if (qty > 0) floatingByWeek[week.id] = { qty, isConfirmed: week.isConfirmed };
+                });
+
+                // Calculate TOTAL STOCK (Physical + All Floating)
+                const totalFloating = Object.values(floatingByWeek).reduce((sum, d) => sum + d.qty, 0);
+                const stockTotal = (prod.stock_fisico || 0) + totalFloating;
+
+                return { ...prod, floatingByWeek, stock_total: stockTotal };
+            });
+
+            setCatalogData(enrichedResults);
+            // --- END NEW ---
+
             const eds = [...new Set(results.map(i => i.editorial))].filter(Boolean).sort();
             setEditorialesList(eds);
         } catch (err) {
@@ -117,6 +204,27 @@ const CatalogUpdatedView = () => {
             alert('❌ No se pudo guardar la imagen: ' + err.message);
         } finally {
             setIsUploading(false);
+        }
+    };
+
+    const handleUpdateStock = async (productId, newStock, field = 'stock_fisico') => {
+        setIsUpdatingStock(true);
+        try {
+            const updates = { [field]: parseInt(newStock) || 0 };
+            const { error } = await supabase.from('catalogo_productos').update(updates).eq('product_id', productId);
+            if (error) throw error;
+            
+            setEditingStock(null);
+            setEditingMinStock(null);
+            // Update local state
+            setCatalogData(prev => prev.map(item => 
+                item.product_id === productId ? { ...item, ...updates } : item
+            ));
+        } catch (err) {
+            console.error('Error al actualizar inventario:', err);
+            alert('❌ No se pudo actualizar el valor.');
+        } finally {
+            setIsUpdatingStock(false);
         }
     };
 
@@ -365,6 +473,15 @@ const CatalogUpdatedView = () => {
                 if (!searchScope.some(v => v.includes(queryText))) return false;
             }
 
+            // 5. Filtro de Stock (Físico o Flotante)
+            if (showOnlyWithStock) {
+                const totalFlotante = Object.values(item.floatingByWeek || {}).reduce((s, d) => s + d.qty, 0);
+                if ((item.stock_fisico || 0) === 0 && totalFlotante === 0) return false;
+            }
+
+            // 6. Filtro por Semana Específica
+            if (weekFilter !== 'TODAS' && !item.floatingByWeek?.[weekFilter]) return false;
+
             return true;
         });
 
@@ -375,7 +492,7 @@ const CatalogUpdatedView = () => {
                 visible: filtered.length
             }
         };
-    }, [catalogData, editorialFilter, categoryFilter, debouncedSearch, reprintsOnlyFilter]);
+    }, [catalogData, editorialFilter, categoryFilter, debouncedSearch, reprintsOnlyFilter, showOnlyWithStock, weekFilter]);
 
     // EFECTO DEBOUNCE PARA BÚSQUEDA
     useEffect(() => {
@@ -565,6 +682,37 @@ const CatalogUpdatedView = () => {
                         <span style={{ fontSize: '0.875rem', fontWeight: 700, color: reprintsOnlyFilter ? '#f07d2a' : '#64748b' }}>Solo Reimpresiones</span>
                     </label>
 
+                    <label style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.75rem', 
+                        padding: '0.75rem 1.25rem', 
+                        background: showOnlyWithStock ? 'rgba(22, 163, 74, 0.05)' : '#f8fafc',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        border: showOnlyWithStock ? '2px solid rgba(22, 163, 74, 0.2)' : '2px solid transparent',
+                        transition: 'all 0.2s ease'
+                    }}>
+                        <input 
+                            type="checkbox"
+                            checked={showOnlyWithStock}
+                            onChange={(e) => setShowOnlyWithStock(e.target.checked)}
+                            style={{ width: '1.25rem', height: '1.25rem', accentColor: '#16a34a', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '0.875rem', fontWeight: 700, color: showOnlyWithStock ? '#16a34a' : '#64748b' }}>Solo con Stock</span>
+                    </label>
+
+                    <select 
+                        value={weekFilter}
+                        onChange={(e) => setWeekFilter(e.target.value)}
+                        style={{ padding: '0.75rem 1rem', borderRadius: '12px', border: '2px solid #f1f5f9', outline: 'none', fontSize: '0.9rem', background: 'white', fontWeight: 600, color: '#0f172a', minWidth: '220px' }}
+                    >
+                        <option value="TODAS">Ver Todas las Semanas</option>
+                        {activeWeeks.map(w => (
+                            <option key={w.id} value={w.id}>{w.nombre} (~{w.fechaArribo.toLocaleDateString('es', { day: 'numeric', month: 'short' })})</option>
+                        ))}
+                    </select>
+
                 </div>
             </div>
 
@@ -606,7 +754,20 @@ const CatalogUpdatedView = () => {
                                 <th style={{ padding: '1.25rem 1rem', color: '#16a34a', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N1 -10%</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#2563eb', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N2 -15%</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#7c3aed', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N3 -20%</th>
-                                <th style={{ padding: '1.25rem 1rem', color: '#334155', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>Mayoreo</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>Mayoreo</th>
+                                
+                                {/* DYNAMIC STOCK COLUMNS */}
+                                {activeWeeks.map(w => (
+                                    <th key={w.id} style={{ padding: '1.25rem 0.5rem', borderBottom: '2px solid #f1f5f9', textAlign: 'center', background: w.isConfirmed ? 'rgba(240, 125, 42, 0.03)' : 'rgba(37, 99, 235, 0.03)' }}>
+                                        <div style={{ fontSize: '0.6rem', color: w.isConfirmed ? '#f07d2a' : '#2563eb', fontWeight: 800 }}>{w.nombre}</div>
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#1e293b' }}>{w.fechaArribo.toLocaleDateString('es', { day: 'numeric', month: 'long' })}</div>
+                                    </th>
+                                ))}
+
+                                <th style={{ padding: '1.25rem 1rem', color: '#0f172a', fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'center' }}>Stock Físico</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'center' }}>Min.</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#16a34a', fontWeight: 900, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'center', background: 'rgba(22, 163, 74, 0.05)' }}>TOTAL</th>
+                                <th style={{ padding: '1.25rem 1rem', borderBottom: '2px solid #f1f5f9' }}></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -746,6 +907,125 @@ const CatalogUpdatedView = () => {
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 600, color: '#334155' }}>
                                         {item.precio_mayoreo_bs ? `BS ${item.precio_mayoreo_bs.toFixed(2)}` : '--'}
                                     </td>
+
+                                    {/* DYNAMIC STOCK DATA */}
+                                    {activeWeeks.map(w => {
+                                        const weekData = item.floatingByWeek?.[w.id];
+                                        return (
+                                            <td key={w.id} style={{ padding: '0.75rem 0.5rem', textAlign: 'center', background: 'transparent' }}>
+                                                {weekData ? (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                                        <span style={{ 
+                                                            background: weekData.isConfirmed ? '#f07d2a' : '#2563eb', 
+                                                            color: 'white', 
+                                                            fontSize: '0.75rem', 
+                                                            fontWeight: 900, 
+                                                            padding: '2px 6px', 
+                                                            borderRadius: '6px',
+                                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                                        }}>
+                                                            {weekData.isConfirmed ? '+' : '?'}{weekData.qty}
+                                                        </span>
+                                                        <span style={{ fontSize: '0.6rem', fontWeight: 700, color: weekData.isConfirmed ? '#f07d2a' : '#2563eb', marginTop: '2px' }}>
+                                                            {weekData.isConfirmed ? 'CONF' : 'PEDIDO'}
+                                                        </span>
+                                                    </div>
+                                                ) : <span style={{ opacity: 0.1 }}>-</span>}
+                                            </td>
+                                        );
+                                    })}
+
+                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'center' }}>
+                                        {isAdmin ? (
+                                            editingStock?.productId === item.product_id ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                                    <input 
+                                                        type="number" 
+                                                        autoFocus
+                                                        defaultValue={item.stock_fisico || 0}
+                                                        onFocus={(e) => e.target.select()}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.preventDefault();
+                                                                handleUpdateStock(item.product_id, e.target.value);
+                                                            }
+                                                            if (e.key === 'Escape') setEditingStock(null);
+                                                        }}
+                                                        onBlur={(e) => {
+                                                            // Only update if we didn't just close it via Enter/Escape
+                                                            if (editingStock?.productId === item.product_id) {
+                                                                handleUpdateStock(item.product_id, e.target.value);
+                                                            }
+                                                        }}
+                                                        style={{ width: '60px', padding: '4px', borderRadius: '4px', border: '2px solid #f07d2a', textAlign: 'center', fontWeight: 800, outline: 'none' }}
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div 
+                                                    onClick={() => setEditingStock({ productId: item.product_id, value: item.stock_fisico || 0 })}
+                                                    style={{ 
+                                                        background: (item.stock_fisico || 0) > 0 ? 'rgba(15, 23, 42, 0.05)' : 'rgba(239, 68, 68, 0.1)', 
+                                                        color: (item.stock_fisico || 0) > 0 ? '#0f172a' : '#ef4444',
+                                                        padding: '0.4rem 0.8rem', 
+                                                        borderRadius: '8px', 
+                                                        cursor: 'pointer',
+                                                        fontWeight: 800,
+                                                        fontSize: '0.9rem',
+                                                        display: 'inline-block',
+                                                        minWidth: '40px',
+                                                        border: '1px dashed transparent'
+                                                    }}
+                                                    onMouseEnter={e => e.currentTarget.style.borderColor = '#f07d2a'}
+                                                    onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
+                                                >
+                                                    {item.stock_fisico || 0}
+                                                </div>
+                                            )
+                                        ) : (
+                                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{item.stock_fisico || 0}</div>
+                                        )}
+                                    </td>
+                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'center' }}>
+                                        {isAdmin ? (
+                                            editingMinStock?.productId === item.product_id ? (
+                                                <input 
+                                                    type="number" 
+                                                    autoFocus
+                                                    defaultValue={item.stock_minimo || 0}
+                                                    onFocus={(e) => e.target.select()}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            handleUpdateStock(item.product_id, e.target.value, 'stock_minimo');
+                                                        }
+                                                        if (e.key === 'Escape') setEditingMinStock(null);
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        if (editingMinStock?.productId === item.product_id) {
+                                                            handleUpdateStock(item.product_id, e.target.value, 'stock_minimo');
+                                                        }
+                                                    }}
+                                                    style={{ width: '60px', padding: '4px', borderRadius: '4px', border: '2px solid #64748b', textAlign: 'center', fontWeight: 800, outline: 'none' }}
+                                                />
+                                            ) : (
+                                                <div 
+                                                    onClick={() => setEditingMinStock({ productId: item.product_id, value: item.stock_minimo || 0 })}
+                                                    style={{ color: '#64748b', opacity: 0.5, cursor: 'pointer', fontSize: '0.8rem' }}
+                                                >
+                                                    {item.stock_minimo || 0}
+                                                </div>
+                                            )
+                                        ) : (
+                                            <span style={{ color: '#64748b', opacity: 0.5 }}>{item.stock_minimo || 0}</span>
+                                        )}
+                                    </td>
+
+                                    <td style={{ padding: '1.25rem 1rem', textAlign: 'center', background: 'rgba(22, 163, 74, 0.02)' }}>
+                                        <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#16a34a' }}>
+                                            {(item.stock_fisico || 0) + Object.values(item.floatingByWeek || {}).reduce((sum, f) => sum + (f.qty || 0), 0)}
+                                        </div>
+                                    </td>
+
                                     <td style={{ padding: '1.25rem 0.75rem' }}>
                                         <button
                                             title="Agregar a Cotización"
