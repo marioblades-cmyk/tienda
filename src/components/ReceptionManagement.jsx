@@ -15,6 +15,8 @@ export default function ReceptionManagement() {
     const [orderBreakdown, setOrderBreakdown] = useState({});
     const [receivedCounts, setReceivedCounts] = useState({});
     const [searchTerm, setSearchTerm] = useState('');
+    const [vendorFilter, setVendorFilter] = useState('');
+    const [hideComplete, setHideComplete] = useState(false);
     const [expandedItem, setExpandedItem] = useState(null);
     const [skipStockUpdate, setSkipStockUpdate] = useState(false);
 
@@ -98,12 +100,95 @@ export default function ReceptionManagement() {
         }
     };
 
+    const allVendors = useMemo(() => {
+        const vendors = new Set();
+        Object.values(orderBreakdown).forEach(arr => {
+            arr.forEach(item => {
+                if (item.tipo === 'tienda') {
+                    vendors.add('Tienda');
+                } else if (item.vendedor) {
+                    vendors.add(item.vendedor);
+                }
+            });
+        });
+        return Array.from(vendors).sort();
+    }, [orderBreakdown]);
+
     const filteredItems = useMemo(() => {
-        if (!searchTerm) return masterItems;
-        return masterItems.filter(it => 
-            it.titulo.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-    }, [masterItems, searchTerm]);
+        let result = masterItems;
+
+        if (searchTerm) {
+            result = result.filter(it => 
+                it.titulo.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+        }
+
+        if (vendorFilter) {
+            result = result.filter(it => {
+                const key = it.titulo.toLowerCase().trim();
+                const bd = orderBreakdown[key] || [];
+                if (vendorFilter === 'Tienda') {
+                    return bd.some(b => b.tipo === 'tienda');
+                }
+                return bd.some(b => b.vendedor === vendorFilter);
+            });
+        }
+
+        if (hideComplete) {
+            result = result.filter(it => {
+                const key = it.titulo.toLowerCase().trim();
+                const inputVal = receivedCounts[key] || '';
+                const confirmedQty = it.cantidad || 0;
+                const missingQty = Math.max(0, confirmedQty - (parseInt(inputVal) || 0));
+                return missingQty <= 0; // if it's already full, we want to FILTER IT OUT. Wait... if hideComplete is true, we want to SHOW only missing > 0.
+            });
+        }
+
+        return result;
+    }, [masterItems, searchTerm, vendorFilter, hideComplete, receivedCounts, orderBreakdown]);
+
+    const handleQuantityChange = (key, val, confirmedQty) => {
+        if (val === '') {
+            setReceivedCounts({...receivedCounts, [key]: ''});
+            return;
+        }
+
+        const numVal = parseInt(val);
+        if (isNaN(numVal)) return;
+
+        if (numVal > confirmedQty) {
+            if (window.confirm(`⚠️ Excepción detectada ⚠️\n\n¿Confirmar que ingresaron ${numVal} unidades cuando solo se confirmaron ${confirmedQty} para este título?`)) {
+                setReceivedCounts({...receivedCounts, [key]: numVal.toString()});
+            } else {
+                setReceivedCounts({...receivedCounts, [key]: confirmedQty.toString()});
+            }
+        } else {
+            setReceivedCounts({...receivedCounts, [key]: numVal.toString()});
+        }
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const allInputs = Array.from(document.querySelectorAll('input[data-reception-input="true"]'));
+            const currentIndex = allInputs.indexOf(e.target);
+            
+            setTimeout(() => {
+                const newInputs = Array.from(document.querySelectorAll('input[data-reception-input="true"]'));
+                let nextIndex = currentIndex + 1;
+                
+                const stillInDOM = newInputs.includes(e.target);
+                if (!stillInDOM) {
+                    nextIndex = currentIndex;
+                }
+
+                if (nextIndex < newInputs.length) {
+                    newInputs[nextIndex].focus();
+                    newInputs[nextIndex].select();
+                }
+            }, 50);
+        }
+    };
 
     const handleSaveReception = async () => {
         const itemsToSave = Object.entries(receivedCounts)
@@ -278,16 +363,39 @@ export default function ReceptionManagement() {
                     </div>
                 ) : (
                     <div className="space-y-4">
-                        {/* Search Bar */}
-                        <div className="relative">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
-                            <input 
-                                type="text" 
-                                placeholder="Buscar título en la caja..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full bg-white border border-border/40 p-4 pl-12 rounded-2xl text-sm font-bold shadow-sm focus:border-secondary outline-none transition-all"
-                            />
+                        {/* Filters */}
+                        <div className="flex flex-col md:flex-row gap-4">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar título en la caja..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full bg-white border border-border/40 p-4 pl-12 rounded-2xl text-sm font-bold shadow-sm focus:border-secondary outline-none transition-all"
+                                />
+                            </div>
+                            
+                            <select
+                                value={vendorFilter}
+                                onChange={(e) => setVendorFilter(e.target.value)}
+                                className="bg-white border border-border/40 p-4 rounded-2xl text-sm font-bold focus:border-secondary outline-none transition-all md:w-64"
+                            >
+                                <option value="">Todos los destinos</option>
+                                {allVendors.map(v => (
+                                    <option key={v} value={v}>{v}</option>
+                                ))}
+                            </select>
+
+                            <label className="flex items-center gap-3 bg-white border border-border/40 px-5 py-4 rounded-2xl cursor-pointer hover:border-secondary/50 transition-colors">
+                                <input 
+                                    type="checkbox" 
+                                    checked={hideComplete}
+                                    onChange={(e) => setHideComplete(e.target.checked)}
+                                    className="accent-secondary w-5 h-5 rounded"
+                                />
+                                <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
+                            </label>
                         </div>
 
                         {/* Items Table */}
@@ -312,9 +420,18 @@ export default function ReceptionManagement() {
                                         const confirmedQty = it.cantidad || 0;
                                         const missingQty = Math.max(0, confirmedQty - (parseInt(inputVal) || 0));
 
+                                        let rowClass = 'transition-colors hover:bg-white/50 border-b border-border/10 ';
+                                        if (isExpanded) {
+                                            rowClass += 'bg-secondary/5 ';
+                                        } else if (missingQty === 0 && confirmedQty > 0) {
+                                            rowClass += 'bg-green-50/50 hover:bg-green-50 ';
+                                        } else if (missingQty < confirmedQty && parseInt(inputVal) > 0) {
+                                            rowClass += 'bg-orange-50/50 hover:bg-orange-50 ';
+                                        }
+
                                         return (
                                             <React.Fragment key={idx}>
-                                                <tr className={`transition-colors ${isExpanded ? 'bg-secondary/5' : 'hover:bg-white/50'}`}>
+                                                <tr className={rowClass}>
                                                     <td className="p-4">
                                                         <button 
                                                             onClick={() => setExpandedItem(isExpanded ? null : key)}
@@ -325,7 +442,6 @@ export default function ReceptionManagement() {
                                                     </td>
                                                     <td className="p-4">
                                                         <div className="font-bold text-navy">{it.titulo}</div>
-                                                        <div className="text-[10px] font-mono text-muted uppercase">Despacho ARS {it.precio_unitario?.toLocaleString()}</div>
                                                     </td>
                                                     <td className="p-4 text-center font-black text-navy text-lg">{confirmedQty}</td>
                                                     <td className="p-4">
@@ -341,16 +457,18 @@ export default function ReceptionManagement() {
                                                         <input 
                                                             type="number" 
                                                             min="0"
+                                                            data-reception-input="true"
                                                             placeholder="0"
                                                             value={inputVal}
-                                                            onChange={(e) => setReceivedCounts({...receivedCounts, [key]: e.target.value})}
+                                                            onChange={(e) => handleQuantityChange(key, e.target.value, confirmedQty)}
+                                                            onKeyDown={handleKeyDown}
                                                             className={`w-20 p-2 text-center rounded-xl border-2 font-black text-lg transition-all outline-none 
                                                                 ${inputVal ? 'border-secondary bg-secondary/10 text-secondary' : 'border-border/40 bg-background focus:border-secondary'}`}
                                                         />
                                                     </td>
                                                     <td className="p-4 text-center">
-                                                        <span className={`font-bold px-3 py-1 rounded-full text-xs ${missingQty > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                                            {missingQty > 0 ? `-${missingQty}` : 'Completo'}
+                                                        <span className={`font-bold px-3 py-1 rounded-full text-[10px] uppercase tracking-wider ${missingQty > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                                                            {missingQty > 0 ? `Faltan ${missingQty}` : 'Completo'}
                                                         </span>
                                                     </td>
                                                 </tr>
