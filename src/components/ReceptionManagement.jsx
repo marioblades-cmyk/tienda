@@ -14,6 +14,7 @@ export default function ReceptionManagement() {
     const [masterItems, setMasterItems] = useState([]);
     const [orderBreakdown, setOrderBreakdown] = useState({});
     const [receivedCounts, setReceivedCounts] = useState({});
+    const [alreadyReceived, setAlreadyReceived] = useState({});
     const [searchTerm, setSearchTerm] = useState('');
     const [vendorFilter, setVendorFilter] = useState('');
     const [hideComplete, setHideComplete] = useState(false);
@@ -73,11 +74,11 @@ export default function ReceptionManagement() {
                     receptionMap[key] = (receptionMap[key] || 0) + r.cantidad_recibida;
                 });
                 
-                // Initialize counts with 0 (or delta if we want to add to existing)
-                // Actually, let's just initialize the inputs as empty
+                setAlreadyReceived(receptionMap);
                 setReceivedCounts({});
             } else {
                 setMasterItems([]);
+                setAlreadyReceived({});
             }
 
             // Build breakdown
@@ -137,17 +138,19 @@ export default function ReceptionManagement() {
         if (hideComplete) {
             result = result.filter(it => {
                 const key = it.titulo.toLowerCase().trim();
+                const prevRec = alreadyReceived[key] || 0;
                 const inputVal = receivedCounts[key] || '';
                 const confirmedQty = it.cantidad || 0;
-                const missingQty = Math.max(0, confirmedQty - (parseInt(inputVal) || 0));
+                const totalNum = prevRec + (parseInt(inputVal) || 0);
+                const missingQty = Math.max(0, confirmedQty - totalNum);
                 return missingQty > 0;
             });
         }
 
         return result;
-    }, [masterItems, searchTerm, vendorFilter, hideComplete, receivedCounts, orderBreakdown]);
+    }, [masterItems, searchTerm, vendorFilter, hideComplete, receivedCounts, orderBreakdown, alreadyReceived]);
 
-    const handleQuantityChange = (key, val, confirmedQty) => {
+    const handleQuantityChange = (key, val, confirmedQty, prevReceived) => {
         if (val === '') {
             setReceivedCounts({...receivedCounts, [key]: ''});
             return;
@@ -156,11 +159,13 @@ export default function ReceptionManagement() {
         const numVal = parseInt(val);
         if (isNaN(numVal)) return;
 
-        if (numVal > confirmedQty) {
-            if (window.confirm(`⚠️ Excepción detectada ⚠️\n\n¿Confirmar que ingresaron ${numVal} unidades cuando solo se confirmaron ${confirmedQty} para este título?`)) {
+        const maxAllowed = Math.max(0, confirmedQty - prevReceived);
+
+        if (numVal > maxAllowed) {
+            if (window.confirm(`⚠️ Excepción detectada ⚠️\n\n¿Confirmar que ingresan ${numVal} unidades extra (ya se han recibido ${prevReceived} de los ${confirmedQty} confirmados)?`)) {
                 setReceivedCounts({...receivedCounts, [key]: numVal.toString()});
             } else {
-                setReceivedCounts({...receivedCounts, [key]: confirmedQty.toString()});
+                setReceivedCounts({...receivedCounts, [key]: maxAllowed.toString()});
             }
         } else {
             setReceivedCounts({...receivedCounts, [key]: numVal.toString()});
@@ -215,25 +220,24 @@ export default function ReceptionManagement() {
             if (insError) throw insError;
 
             // 2. Update physical stock in catalog
-            // We need to match by title (fuzzy) or EAN if available. 
-            // In master_confirmaciones we usually only have Title.
-            for (const item of itemsToSave) {
-                // This is a simplified stock update by title - might need EAN for precision
-                const { data: prod } = await supabase
-                    .from('catalogo_productos')
-                    .select('id, stock_fisico')
-                    .ilike('titulo', item.titulo)
-                    .maybeSingle();
-                
-                if (prod) {
-                    await supabase
+            if (!skipStockUpdate) {
+                for (const item of itemsToSave) {
+                    const { data: prod } = await supabase
                         .from('catalogo_productos')
-                        .update({ stock_fisico: (prod.stock_fisico || 0) + item.cantidad_recibida })
-                        .eq('id', prod.id);
+                        .select('id, stock_fisico')
+                        .ilike('titulo', item.titulo)
+                        .maybeSingle();
+                    
+                    if (prod) {
+                        await supabase
+                            .from('catalogo_productos')
+                            .update({ stock_fisico: (prod.stock_fisico || 0) + item.cantidad_recibida })
+                            .eq('id', prod.id);
+                    }
                 }
             }
 
-            alert("✅ Recepción guardada con éxito y stock actualizado.");
+            alert(skipStockUpdate ? "✅ Recepción guardada en el historial (sin afectar stock)." : "✅ Recepción guardada con éxito y stock actualizado.");
             setReceivedCounts({});
             fetchReceptionData(selectedSemana);
         } catch (err) {
@@ -416,14 +420,20 @@ export default function ReceptionManagement() {
                                         const key = it.titulo.toLowerCase().trim();
                                         const breakdown = orderBreakdown[key] || [];
                                         const isExpanded = expandedItem === key;
-                                        const inputVal = receivedCounts[key] || '';
+                                        
                                         const confirmedQty = it.cantidad || 0;
-                                        const missingQty = Math.max(0, confirmedQty - (parseInt(inputVal) || 0));
+                                        const prevReceived = alreadyReceived[key] || 0;
+                                        const inputVal = receivedCounts[key] || '';
+                                        
+                                        const isFullyReceivedBefore = prevReceived >= confirmedQty;
+
+                                        const totalNow = prevReceived + (parseInt(inputVal) || 0);
+                                        const missingQty = Math.max(0, confirmedQty - totalNow);
 
                                         let rowClass = 'transition-colors hover:bg-white/50 border-b border-border/10 ';
                                         if (isExpanded) {
                                             rowClass += 'bg-secondary/5 ';
-                                        } else if (missingQty === 0 && confirmedQty > 0) {
+                                        } else if (isFullyReceivedBefore || (missingQty === 0 && confirmedQty > 0)) {
                                             rowClass += 'bg-green-50/50 hover:bg-green-50 ';
                                         } else if (missingQty < confirmedQty && parseInt(inputVal) > 0) {
                                             rowClass += 'bg-orange-50/50 hover:bg-orange-50 ';
@@ -441,7 +451,10 @@ export default function ReceptionManagement() {
                                                         </button>
                                                     </td>
                                                     <td className="p-4">
-                                                        <div className="font-bold text-navy">{it.titulo}</div>
+                                                        <div className="font-bold text-navy flex items-center gap-2">
+                                                            {it.titulo}
+                                                            {isFullyReceivedBefore && <CheckCircle2 size={14} className="text-green-500" />}
+                                                        </div>
                                                     </td>
                                                     <td className="p-4 text-center font-black text-navy text-lg">{confirmedQty}</td>
                                                     <td className="p-4">
@@ -454,17 +467,26 @@ export default function ReceptionManagement() {
                                                         </div>
                                                     </td>
                                                     <td className="p-4 text-center">
-                                                        <input 
-                                                            type="number" 
-                                                            min="0"
-                                                            data-reception-input="true"
-                                                            placeholder="0"
-                                                            value={inputVal}
-                                                            onChange={(e) => handleQuantityChange(key, e.target.value, confirmedQty)}
-                                                            onKeyDown={handleKeyDown}
-                                                            className={`w-20 p-2 text-center rounded-xl border-2 font-black text-lg transition-all outline-none 
-                                                                ${inputVal ? 'border-secondary bg-secondary/10 text-secondary' : 'border-border/40 bg-background focus:border-secondary'}`}
-                                                        />
+                                                        {isFullyReceivedBefore ? (
+                                                            <div className="bg-green-100 text-green-700 font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1">
+                                                                <CheckCircle2 size={14} /> Ya Recibido ({prevReceived})
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center justify-center gap-1">
+                                                                {prevReceived > 0 && <span className="text-[10px] font-bold text-muted bg-white border border-border/40 px-1.5 py-1 rounded">Ya: {prevReceived}</span>}
+                                                                <input 
+                                                                    type="number" 
+                                                                    min="0"
+                                                                    data-reception-input="true"
+                                                                    placeholder="0"
+                                                                    value={inputVal}
+                                                                    onChange={(e) => handleQuantityChange(key, e.target.value, confirmedQty, prevReceived)}
+                                                                    onKeyDown={handleKeyDown}
+                                                                    className={`w-16 p-2 text-center rounded-xl border-2 font-black text-lg transition-all outline-none 
+                                                                        ${inputVal ? 'border-secondary bg-secondary/10 text-secondary' : 'border-border/40 bg-background focus:border-secondary'}`}
+                                                                />
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="p-4 text-center">
                                                         <span className={`font-bold px-3 py-1 rounded-full text-[10px] uppercase tracking-wider ${missingQty > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
