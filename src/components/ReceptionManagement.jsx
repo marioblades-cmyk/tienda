@@ -140,7 +140,7 @@ export default function ReceptionManagement() {
                 const inputVal = receivedCounts[key] || '';
                 const confirmedQty = it.cantidad || 0;
                 const missingQty = Math.max(0, confirmedQty - (parseInt(inputVal) || 0));
-                return missingQty <= 0; // if it's already full, we want to FILTER IT OUT. Wait... if hideComplete is true, we want to SHOW only missing > 0.
+                return missingQty > 0;
             });
         }
 
