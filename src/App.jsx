@@ -255,7 +255,9 @@ function Main() {
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
-        <ComicAnalysisTool />
+        activeTab === 'remitos' ? <RemitosManagement /> :
+        activeTab === 'entelequia' ? <ComicAnalysisTool /> :
+        <ComicAnalysisTool /> // Fallback
     ) : (
         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
