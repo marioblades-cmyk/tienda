@@ -53,9 +53,10 @@ function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
 // --- Sidebar content ---
 function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, hasPendingChanges, user, profile }) {
     const adminItems = [
+        { id: 'mis-pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
         { id: 'semanas', icon: Calendar, label: 'Semanas' },
-        { id: 'confirmaciones-info', icon: LayoutDashboard, label: 'Información de Confirmaciones' },
-        { id: 'consolidado', icon: LayoutDashboard, label: 'Consolidado' },
+        { id: 'confirmaciones-info', icon: BarChart3, label: 'Información de Confirmaciones' },
+        { id: 'consolidado', icon: Truck, label: 'Consolidado' },
         { id: 'confirmaciones', icon: CheckCircle2, label: 'Confirmaciones' },
         { id: 'remitos', icon: Database, label: 'Gestión Integral' },
         { id: 'usuarios', icon: Users, label: 'Vendedores' },
@@ -70,7 +71,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
 
     const sellerItems = [
         { id: 'pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
-        { id: 'confirmaciones-info', icon: LayoutDashboard, label: 'Información de Confirmaciones' },
+        { id: 'confirmaciones-info', icon: BarChart3, label: 'Información de Confirmaciones' },
         ...(isSocio ? [{ id: 'remitos', icon: Database, label: 'Gestión Integral' }] : []),
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
@@ -266,6 +267,7 @@ function Main() {
         <ComicAnalysisTool /> // Fallback
     ) : (
         activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
+        activeTab === 'confirmaciones-info' ? <ConfirmationInfoView /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
