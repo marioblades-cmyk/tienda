@@ -8,7 +8,7 @@ import AdminConsolidatedView from './components/AdminConsolidatedView';
 import AdminUserManagement from './components/AdminUserManagement';
 import SellerDashboard from './components/SellerDashboard';
 import RemitosManagement from './components/RemitosManagement';
-// import AdminMasterView from './components/AdminMasterView';
+import AdminMasterView from './components/AdminMasterView';
 import ComicAnalysisTool from './components/ComicAnalysisTool';
 import PriceAnalysisTool from './components/PriceAnalysisTool';
 import QuotationTool from './components/QuotationTool';
@@ -160,11 +160,8 @@ const TAB_TITLES = {
 };
 
 function Main() {
-    console.log("=== MAIN COMPONENT INICIANDO ===");
     const { user, profile, loading, isAdmin, isSocio } = useAuth();
-    console.log("Auth cargado:", { user, profile, loading, isAdmin, isSocio });
     const { hasPendingChanges } = useCatalogStatus();
-    console.log("Catalog status cargado:", { hasPendingChanges });
     const [showRegister, setShowRegister] = useState(false);
     const [activeTab, setActiveTab] = useState('pedidos');
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -180,19 +177,12 @@ function Main() {
     // --- Loading ---
     if (loading) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center" style={{ backgroundColor: '#1a2d42' }}>
+            <div className="min-h-screen flex flex-col items-center justify-center bg-background">
                 <motion.div
                     animate={{ rotate: 360 }}
                     transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                    className="w-16 h-16 border-4 border-white/20 border-t-[#f5a800] rounded-full mb-6"
+                    className="w-12 h-12 border-4 border-slate-200 border-t-primary rounded-full mb-6"
                 />
-                <h2 className="text-white font-bold text-xl uppercase tracking-widest animate-pulse font-display">
-                    Conectando con Supabase...
-                </h2>
-                <p className="text-white/50 text-xs mt-2 font-mono">
-                    Si ves esto por más de 5 segundos, revisa tu conexión.
-                </p>
-                <button onClick={() => window.location.reload()} className="mt-8 px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 text-xs">Forzar Recarga</button>
             </div>
         );
     }
@@ -262,7 +252,7 @@ function Main() {
         activeTab === 'semanas' ? <AdminWeeklyView /> :
         activeTab === 'confirmaciones-info' ? <ConfirmationInfoView /> :
         activeTab === 'consolidado' ? <AdminConsolidatedView /> :
-// activeTab === 'confirmaciones' ? <AdminMasterView /> :
+        activeTab === 'confirmaciones' ? <AdminMasterView /> :
         activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
         activeTab === 'usuarios' ? <AdminUserManagement /> :
         activeTab === 'precios' ? <PriceAnalysisTool /> :
@@ -389,7 +379,6 @@ class ErrorBoundary extends React.Component {
 }
 
 export default function App() {
-    console.log("=== APP COMPONENT MONTADO ===");
     return (
         <ErrorBoundary>
             <AuthProvider>
