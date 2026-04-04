@@ -106,18 +106,18 @@ const CatalogUpdatedView = () => {
             
             // --- NEW: Load Integrated Stock Data ---
             const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false });
-            const [masters, receptions, allOrders, clientItems] = await Promise.all([
+            const [masters, receptions, allOrders, { data: floatingSummary }] = await Promise.all([
                 supabase.from('master_confirmaciones').select('semana_id, datos_json'),
                 supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida'),
                 supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)'),
-                supabase.from('cliente_items').select('semana_id, titulo, estado')
+                supabase.rpc('get_floating_stock_summary')
             ]);
 
             const weekStats = (weeks || []).map(w => {
                 const master = masters.data?.find(m => m.semana_id === w.id);
                 const weekReceptions = (receptions.data || []).filter(r => r.semana_id === w.id);
                 const weekAllOrders = (allOrders.data || []).filter(o => o.pedido.semana_id === w.id);
-                const weekClientOrders = (clientItems.data || []).filter(c => c.semana_id === w.id);
+                const weekFloatingSummary = (floatingSummary || []).filter(c => c.semana_id === w.id);
                 
                 const totalConfirmed = (master?.datos_json || []).reduce((sum, it) => sum + (it.cantidad || 0), 0);
                 const totalReceived = weekReceptions.reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
@@ -132,7 +132,7 @@ const CatalogUpdatedView = () => {
                     masterData: master?.datos_json || [],
                     receptionData: weekReceptions,
                     allOrdersData: weekAllOrders,
-                    clientOrdersData: weekClientOrders,
+                    floatingSummary: weekFloatingSummary,
                     isConfirmed: !!master,
                     floatingCount: master ? Math.max(0, totalConfirmed - totalReceived) : totalRequestedStore,
                     fechaArribo
@@ -165,14 +165,10 @@ const CatalogUpdatedView = () => {
                             .filter(r => (r.titulo || '').toLowerCase().trim() === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
                         
-                        // 4. Client Reservations (Floating confirmed/allocated bounds)
-                        const clientReserved = week.clientOrdersData
-                            .filter(c => {
-                                const st = c.estado || '';
-                                return (c.titulo || '').toLowerCase().trim() === prodTitle && 
-                                       (st === `CONFIRMADO ${week.nombre}` || st === 'ADJUDICADO' || st === `PEDIDO ${week.nombre}`);
-                            })
-                            .length;
+                        // 4. Client Reservations (Floating confirmed/allocated bounds) - From Anonymous RPC
+                        const clientReserved = week.floatingSummary
+                            .filter(c => (c.titulo || '').toLowerCase().trim() === prodTitle)
+                            .reduce((s, c) => s + (c.reservado || 0), 0);
                         
                         // Store stock is ALL confirmed units MINUS what was for sellers, MINUS what arrived, MINUS CLIENT ASSIGNED.
                         // This naturally handles "Extras" (unrequested items in Master) flowing to Store.
@@ -183,14 +179,10 @@ const CatalogUpdatedView = () => {
                             .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'tienda')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // Pending Client Waitlist for this unconfirmed week
-                        const clientWaitlist = week.clientOrdersData
-                            .filter(c => {
-                                const st = c.estado || '';
-                                return (c.titulo || '').toLowerCase().trim() === prodTitle && 
-                                       (st === `PEDIDO ${week.nombre}` || st === 'PEDIDO');
-                            })
-                            .length;
+                        // Pending Client Waitlist for this unconfirmed week - From Anonymous RPC
+                        const clientWaitlist = week.floatingSummary
+                            .filter(c => (c.titulo || '').toLowerCase().trim() === prodTitle)
+                            .reduce((s, c) => s + (c.reservado || 0), 0);
                         
                         qty = Math.max(0, storeTotal - clientWaitlist);
                     }

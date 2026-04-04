@@ -71,7 +71,7 @@ export default function ConfirmationInfoView() {
             const [receptions, orders, cItems] = await Promise.all([
                 fetchAll('pedido_items_recepcion', 'semana_id, cantidad_recibida, titulo'),
                 fetchAll('pedido_items', 'cantidad, titulo, pedido:pedidos(semana_id, tipo)'),
-                fetchAll('cliente_items', '*, clientes(nombre)')
+                fetchAll('cliente_items', '*, clientes(nombre), vendedores(nombre)')
             ]);
 
             setClientItems(cItems || []);

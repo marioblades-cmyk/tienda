@@ -890,15 +890,10 @@ export default function ClientOrdersView() {
                                                 // Restore stock if it was physically in store
                                                 // Restore stock if it was physically in store or already ordered to provider
                                                 let shouldRestore = false;
-                                                if ((it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (it.catalog_id || it.product_id)) {
+                                                // Solo devolvemos a Stock Físico si el ítem ya estaba realmente en el edificio (EN TIENDA)
+                                                // Los ítems en tránsito (PEDIDO/ADJUDICADO) se liberan automáticamente en el stock flotante del catálogo
+                                                if (it.estado === 'EN TIENDA' && (it.catalog_id || it.product_id)) {
                                                     shouldRestore = true;
-                                                } else if (it.estado === 'RESERVA' && it.semana_id) {
-                                                    // If reservation, check if week is already "Ordered" or "Received"
-                                                    const { data: sem } = await supabase.from('semanas').select('estado').eq('id', it.semana_id).maybeSingle();
-                                                    if (sem && (sem.estado === 'PEDIDA' || sem.estado === 'RECIBIDA')) {
-                                                        shouldRestore = true;
-                                                        console.log(`📦 Semana ${sem.estado}: devolviendo unidad a stock físico (era preventa consolidada).`);
-                                                    }
                                                 }
 
                                                 if (shouldRestore && (it.catalog_id || it.product_id)) {
