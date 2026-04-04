@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
@@ -42,6 +42,40 @@ const CatalogUpdatedView = () => {
     const [activeWeeks, setActiveWeeks] = useState([]);
     const [showOnlyWithStock, setShowOnlyWithStock] = useState(false);
     const [weekFilter, setWeekFilter] = useState('TODAS');
+    const [isResetting, setIsResetting] = useState(false);
+
+    // RESET GLOBAL DE STOCK (Admin Only)
+    const handleGlobalStockReset = async () => {
+        if (!isAdmin) return;
+        
+        const firstConfirm = window.confirm('⚠️ ¿ESTÁS SEGURO? Esta acción pondrá el STOCK FÍSICO de TODOS los productos en 0.');
+        if (!firstConfirm) return;
+        
+        const secondConfirm = window.confirm('❗ ÚLTIMA ADVERTENCIA: Esta acción no se puede deshacer. ¿Realmente quieres vaciar todo el inventario físico?');
+        if (!secondConfirm) return;
+
+        setIsResetting(true);
+        try {
+            const { error } = await supabase
+                .from('catalogo_productos')
+                .update({ stock_fisico: 0 })
+                .neq('id', '00000000-0000-0000-0000-000000000000'); // Dummy filter for matching all
+
+            if (error) throw error;
+
+            console.log('🧹 Limpiando caché tras reset global...');
+            localStorage.removeItem('mcb_catalog_full_cache');
+            localStorage.removeItem('mcb_catalog_cache_time');
+            
+            alert('✅ ÉXITO: Todo el stock físico ha sido reseteado a 0.');
+            loadCatalog(true);
+        } catch (err) {
+            console.error('Error en reset global:', err);
+            alert('❌ ERROR: No se pudo resetear el stock: ' + err.message);
+        } finally {
+            setIsResetting(false);
+        }
+    };
 
 
     // CARGA DE DATOS
@@ -62,6 +96,11 @@ const CatalogUpdatedView = () => {
 
     const loadCatalog = async (force = false) => {
         setIsLoading(true);
+        if (force) {
+            console.log('🧹 Limpiando caché local por solicitud forzosa...');
+            localStorage.removeItem('mcb_catalog_full_cache');
+            localStorage.removeItem('mcb_catalog_cache_time');
+        }
         try {
             const results = await catalogService.fetchFullCatalog(force);
             
@@ -207,19 +246,36 @@ const CatalogUpdatedView = () => {
         }
     };
 
-    const handleUpdateStock = async (productId, newStock, field = 'stock_fisico') => {
+    const handleUpdateStock = async (id, newStock, field = 'stock_fisico') => {
+        if (id === undefined || id === null) return;
+        const val = parseInt(newStock);
+        if (isNaN(val)) return;
+
         setIsUpdatingStock(true);
         try {
-            const updates = { [field]: parseInt(newStock) || 0 };
-            const { error } = await supabase.from('catalogo_productos').update(updates).eq('product_id', productId);
-            if (error) throw error;
+            if (field === 'stock_fisico') {
+                await catalogService.updateProductStock(id, val);
+            } else {
+                const updates = { [field]: val };
+                const { error } = await supabase.from('catalogo_productos').update(updates).eq('id', id);
+                if (error) throw error;
+                catalogService.clearCache();
+            }
             
+            // Update local state
+            setCatalogData(prev => prev.map(item => {
+                if (item.id === id) {
+                    const nextItem = { ...item, [field]: val };
+                    const totalFlotante = Object.values(nextItem.floatingByWeek || {}).reduce((s, d) => s + d.qty, 0);
+                    nextItem.stock_total = (nextItem.stock_fisico || 0) + totalFlotante;
+                    return nextItem;
+                }
+                return item;
+            }));
+
+            // CERRAR EDICIÓN SOLO TRAS ÉXITO
             setEditingStock(null);
             setEditingMinStock(null);
-            // Update local state
-            setCatalogData(prev => prev.map(item => 
-                item.product_id === productId ? { ...item, ...updates } : item
-            ));
         } catch (err) {
             console.error('Error al actualizar inventario:', err);
             alert('❌ No se pudo actualizar el valor.');
@@ -475,8 +531,7 @@ const CatalogUpdatedView = () => {
 
             // 5. Filtro de Stock (Físico o Flotante)
             if (showOnlyWithStock) {
-                const totalFlotante = Object.values(item.floatingByWeek || {}).reduce((s, d) => s + d.qty, 0);
-                if ((item.stock_fisico || 0) === 0 && totalFlotante === 0) return false;
+                if ((item.stock_fisico || 0) <= 0) return false;
             }
 
             // 6. Filtro por Semana Específica
@@ -577,6 +632,34 @@ const CatalogUpdatedView = () => {
                             >
                                 <RotateCcw size={16} className={isLoading ? 'animate-spin' : ''} />
                                 Forzar Recarga
+                            </button>
+                        )}
+
+                        {isAdmin && (
+                            <button 
+                                onClick={handleGlobalStockReset}
+                                disabled={isLoading || isResetting}
+                                title="RESETEAR TODO EL STOCK A 0 (Acción Crítica)"
+                                style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.5rem', 
+                                    padding: '0.625rem 1rem', 
+                                    borderRadius: '12px', 
+                                    border: '1px solid #fee2e2', 
+                                    background: '#7f1d1d', 
+                                    cursor: 'pointer', 
+                                    fontWeight: 700, 
+                                    fontSize: '0.875rem',
+                                    transition: 'all 0.2s ease',
+                                    color: 'white',
+                                    boxShadow: '0 4px 12px rgba(127, 29, 29, 0.2)'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#991b1b'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#7f1d1d'}
+                            >
+                                <Zap size={16} style={{ fill: 'currentColor' }} />
+                                Reset Stock 0
                             </button>
                         )}
 
@@ -947,14 +1030,14 @@ const CatalogUpdatedView = () => {
                                                         onKeyDown={(e) => {
                                                             if (e.key === 'Enter') {
                                                                 e.preventDefault();
-                                                                handleUpdateStock(item.product_id, e.target.value);
+                                                                handleUpdateStock(item.id, e.target.value);
                                                             }
                                                             if (e.key === 'Escape') setEditingStock(null);
                                                         }}
                                                         onBlur={(e) => {
                                                             // Only update if we didn't just close it via Enter/Escape
                                                             if (editingStock?.productId === item.product_id) {
-                                                                handleUpdateStock(item.product_id, e.target.value);
+                                                                handleUpdateStock(item.id, e.target.value);
                                                             }
                                                         }}
                                                         style={{ width: '60px', padding: '4px', borderRadius: '4px', border: '2px solid #f07d2a', textAlign: 'center', fontWeight: 800, outline: 'none' }}
@@ -996,13 +1079,13 @@ const CatalogUpdatedView = () => {
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Enter') {
                                                             e.preventDefault();
-                                                            handleUpdateStock(item.product_id, e.target.value, 'stock_minimo');
+                                                            handleUpdateStock(item.id, e.target.value, 'stock_minimo');
                                                         }
                                                         if (e.key === 'Escape') setEditingMinStock(null);
                                                     }}
                                                     onBlur={(e) => {
                                                         if (editingMinStock?.productId === item.product_id) {
-                                                            handleUpdateStock(item.product_id, e.target.value, 'stock_minimo');
+                                                            handleUpdateStock(item.id, e.target.value, 'stock_minimo');
                                                         }
                                                     }}
                                                     style={{ width: '60px', padding: '4px', borderRadius: '4px', border: '2px solid #64748b', textAlign: 'center', fontWeight: 800, outline: 'none' }}

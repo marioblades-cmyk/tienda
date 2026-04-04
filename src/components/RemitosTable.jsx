@@ -762,6 +762,23 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         showToast(`Plan de pagos #${newPlan.id} generado correctamente.`, 'success');
     };
 
+    const handleAddSelectedToExistingPlan = async (planId) => {
+        const toAdd = availSocioItems.filter(it => selectedSocioItems[`${it.remId}-${it.type}`]);
+        if (toAdd.length === 0) return showToast('Selecciona al menos un ítem.', 'error');
+
+        const newPlans = plans.map(p => {
+            if (p.id === planId) {
+                return { ...p, items: [...p.items, ...toAdd] };
+            }
+            return p;
+        });
+
+        setSelectedSocioItems({});
+        setPlans(newPlans);
+        await savePlans(newPlans, nplan);
+        showToast(`Ítems agregados al Plan #${planId}`, 'success');
+    };
+
     const handleAddPagoPlan = async (pid) => {
         const newPlans = [...plans];
         const p = newPlans.find(x => x.id === pid);
@@ -1872,6 +1889,36 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                             return s + (item ? item.amount : 0);
                                         }, 0))}
                                     </div>
+                                    {plans.length > 0 && (
+                                        <select
+                                            disabled={!Object.keys(selectedSocioItems).some(k => selectedSocioItems[k])}
+                                            onChange={e => {
+                                                if (e.target.value) handleAddSelectedToExistingPlan(Number(e.target.value));
+                                                e.target.value = '';
+                                            }}
+                                            style={{ 
+                                                background: Object.keys(selectedSocioItems).some(k => selectedSocioItems[k]) ? '#fff' : 'rgba(255,255,255,0.5)', 
+                                                color: 'var(--navy)', 
+                                                border: 'none', 
+                                                padding: '6px 12px', 
+                                                borderRadius: '6px', 
+                                                fontSize: '0.8rem', 
+                                                fontWeight: 'bold', 
+                                                cursor: Object.keys(selectedSocioItems).some(k => selectedSocioItems[k]) ? 'pointer' : 'not-allowed', 
+                                                outline: 'none' 
+                                            }}
+                                            title="Debes seleccionar al menos un item para agregar a un plan"
+                                        >
+                                            <option value="">Agregar a plan...</option>
+                                            {plans.filter(p => {
+                                                let t = p.items.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+                                                let pg = (p.pagos || []).reduce((s, px) => s + (parseFloat(px.monto) || 0), 0);
+                                                return (t - pg) >= 0.01 || t === 0;
+                                            }).map(p => (
+                                                <option key={p.id} value={p.id}>+ Plan #{p.id} ({p.fecha})</option>
+                                            ))}
+                                        </select>
+                                    )}
                                     <button onClick={handleGeneratePlan} style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '6px 16px', cursor: 'pointer', borderRadius: '6px', fontWeight: 'bold', fontSize: '0.8rem', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', transition: 'transform 0.2s' }} onMouseOver={e => e.currentTarget.style.transform = 'scale(1.02)'} onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}>+ Generar Plan</button>
                                 </div>
                             </div>

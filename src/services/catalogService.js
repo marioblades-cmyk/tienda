@@ -28,7 +28,9 @@ export const catalogService = {
             precio_mayoreo_bs: 'pmb',
             es_reimpresion: 'er',
             updated_at: 'u',
-            imagen_url: 'img'
+            imagen_url: 'img',
+            stock_fisico: 'sf',
+            stock_minimo: 'sm'
         };
         const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
 
@@ -250,11 +252,11 @@ export const catalogService = {
     /**
      * Actualiza el stock físico de un producto
      */
-    async updateProductStock(productId, stock) {
+    async updateProductStock(id, stock) {
         const { error } = await supabase
             .from('catalogo_productos')
             .update({ stock_fisico: stock, updated_at: new Date().toISOString() })
-            .eq('product_id', productId);
+            .eq('id', id);
 
         if (error) throw error;
         this.clearCache();
@@ -669,6 +671,26 @@ export const catalogService = {
         this.clearCache();
         console.log(`✅ applyStoredPricing: ${payload.length} items actualizados con precios Bs.`);
         return { count: payload.length };
+    },
+
+    /**
+     * Resetea el flag 'es_reimpresion' de TODA la tabla catalogo_productos.
+     * Útil antes de cargar una nueva lista semanal de IVREA.
+     */
+    async clearAllReprintLabels() {
+        console.log('🧹 Limpiando todas las etiquetas de reimpresión del catálogo maestro...');
+        const { error } = await supabase
+            .from('catalogo_productos')
+            .update({ es_reimpresion: false })
+            .eq('es_reimpresion', true); // Solo los que están marcados, para ahorrar recursos
+
+        if (error) {
+            console.error('❌ Error al limpiar reimpresiones:', error);
+            throw error;
+        }
+        
+        this.clearCache();
+        return true;
     },
 
     /**

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth, AuthProvider } from './hooks/useAuth';
 import Login from './components/Login';
@@ -8,7 +8,7 @@ import AdminConsolidatedView from './components/AdminConsolidatedView';
 import AdminUserManagement from './components/AdminUserManagement';
 import SellerDashboard from './components/SellerDashboard';
 import RemitosManagement from './components/RemitosManagement';
-import AdminMasterView from './components/AdminMasterView';
+// import AdminMasterView from './components/AdminMasterView';
 import ComicAnalysisTool from './components/ComicAnalysisTool';
 import PriceAnalysisTool from './components/PriceAnalysisTool';
 import QuotationTool from './components/QuotationTool';
@@ -19,11 +19,12 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3
+    Truck, BarChart3, ShoppingBag
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
 import CatalogUpdatedView from './components/CatalogUpdatedView';
+import ClientOrdersView from './components/ClientOrdersView';
 
 // --- Nav item ---
 function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
@@ -64,14 +65,17 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
+        { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
     ];
 
     const sellerItems = [
         { id: 'pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
+        { id: 'confirmaciones-info', icon: LayoutDashboard, label: 'Información de Confirmaciones' },
         ...(isSocio ? [{ id: 'remitos', icon: Database, label: 'Gestión Integral' }] : []),
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
+        { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
     ];
 
     const items = isAdmin ? adminItems : sellerItems;
@@ -151,12 +155,16 @@ const TAB_TITLES = {
     recepcion: 'Control de Recepción de Cajas',
     preventas: 'Generador de Preventas',
     cotizaciones: 'Generador de Cotizaciones',
+    clientes: 'Pedidos de Clientes',
     entelequia: 'Herramienta Editorial',
 };
 
 function Main() {
+    console.log("=== MAIN COMPONENT INICIANDO ===");
     const { user, profile, loading, isAdmin, isSocio } = useAuth();
+    console.log("Auth cargado:", { user, profile, loading, isAdmin, isSocio });
     const { hasPendingChanges } = useCatalogStatus();
+    console.log("Catalog status cargado:", { hasPendingChanges });
     const [showRegister, setShowRegister] = useState(false);
     const [activeTab, setActiveTab] = useState('pedidos');
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -172,12 +180,19 @@ function Main() {
     // --- Loading ---
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
+            <div className="min-h-screen flex flex-col items-center justify-center" style={{ backgroundColor: '#1a2d42' }}>
                 <motion.div
                     animate={{ rotate: 360 }}
                     transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                    className="w-12 h-12 border-4 border-border border-t-accent rounded-full"
+                    className="w-16 h-16 border-4 border-white/20 border-t-[#f5a800] rounded-full mb-6"
                 />
+                <h2 className="text-white font-bold text-xl uppercase tracking-widest animate-pulse font-display">
+                    Conectando con Supabase...
+                </h2>
+                <p className="text-white/50 text-xs mt-2 font-mono">
+                    Si ves esto por más de 5 segundos, revisa tu conexión.
+                </p>
+                <button onClick={() => window.location.reload()} className="mt-8 px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 text-xs">Forzar Recarga</button>
             </div>
         );
     }
@@ -247,7 +262,7 @@ function Main() {
         activeTab === 'semanas' ? <AdminWeeklyView /> :
         activeTab === 'confirmaciones-info' ? <ConfirmationInfoView /> :
         activeTab === 'consolidado' ? <AdminConsolidatedView /> :
-        activeTab === 'confirmaciones' ? <AdminMasterView /> :
+// activeTab === 'confirmaciones' ? <AdminMasterView /> :
         activeTab === 'mis-pedidos' ? <SellerDashboard isAdmin={isAdmin} /> :
         activeTab === 'usuarios' ? <AdminUserManagement /> :
         activeTab === 'precios' ? <PriceAnalysisTool /> :
@@ -255,6 +270,7 @@ function Main() {
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
+        activeTab === 'clientes' ? <ClientOrdersView /> :
         activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback
@@ -263,6 +279,7 @@ function Main() {
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
+        activeTab === 'clientes' ? <ClientOrdersView /> :
         <SellerDashboard isAdmin={isAdmin} />
     );
 
@@ -342,10 +359,42 @@ function Main() {
     );
 }
 
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null, errorInfo: null };
+    }
+    static getDerivedStateFromError(error) {
+        return { hasError: true };
+    }
+    componentDidCatch(error, errorInfo) {
+        this.setState({ error, errorInfo });
+        console.error("ErrorBoundary atrapó un error:", error, errorInfo);
+    }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: '20px', background: '#ffebee', color: '#c62828' }}>
+                    <h2>Algo salió mal en React.</h2>
+                    <details style={{ whiteSpace: 'pre-wrap' }}>
+                        {this.state.error && this.state.error.toString()}
+                        <br />
+                        {this.state.errorInfo && this.state.errorInfo.componentStack}
+                    </details>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 export default function App() {
+    console.log("=== APP COMPONENT MONTADO ===");
     return (
-        <AuthProvider>
-            <Main />
-        </AuthProvider>
+        <ErrorBoundary>
+            <AuthProvider>
+                <Main />
+            </AuthProvider>
+        </ErrorBoundary>
     );
 }

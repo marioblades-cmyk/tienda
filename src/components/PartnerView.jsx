@@ -97,6 +97,45 @@ export default function PartnerView() {
         }
     };
 
+    const handleAddToExistingPlan = async (planId) => {
+        if (selectedItems.length === 0 || !planId) return;
+
+        const itemsToInsert = selectedItems.map(it => ({
+            plan_id: planId,
+            rem_id: it.rem_id,
+            tipo: it.tipo,
+            label: it.label,
+            nro: it.nro,
+            amount: it.amount
+        }));
+
+        const { error } = await supabase.from('remitos_plan_items').insert(itemsToInsert);
+
+        if (!error) {
+            setSelectedItems([]);
+            fetchData();
+        } else {
+            console.error("Error adding to plan:", error);
+            alert("Error al agregar items al plan");
+        }
+    };
+
+    const handleRemoveItemFromPlan = async (planId, remId, tipo) => {
+        if (!window.confirm("¿Seguro que deseas eliminar este item del plan?")) return;
+        
+        const { error } = await supabase
+            .from('remitos_plan_items')
+            .delete()
+            .match({ plan_id: planId, rem_id: remId, tipo: tipo });
+            
+        if (!error) {
+            fetchData();
+        } else {
+            console.error("Error deleting item from plan:", error);
+            alert("Error al eliminar el item");
+        }
+    };
+
     const toggleExpand = (id) => {
         setExpandedPlanes(prev => ({ ...prev, [id]: !prev[id] }));
     };
@@ -119,13 +158,29 @@ export default function PartnerView() {
                             <p className="text-[10px] font-bold text-sky uppercase">Total Seleccionado</p>
                             <p className="text-lg font-bold text-navy font-mono-numbers">BS {totalSelected.toLocaleString()}</p>
                         </div>
-                        <button
-                            disabled={selectedItems.length === 0}
-                            onClick={handleCreatePlan}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold transition-all shadow-lg ${selectedItems.length > 0 ? 'bg-accent text-white hover:scale-105 active:scale-95' : 'bg-background text-muted grayscale cursor-not-allowed'}`}
-                        >
-                            <Plus size={16} /> GENERAR NUEVO PLAN
-                        </button>
+                        <div className="flex gap-2">
+                            {planes.length > 0 && selectedItems.length > 0 && (
+                                <select 
+                                    className="px-4 py-3 rounded-xl border-2 border-sky/30 bg-white text-xs font-bold text-navy outline-none cursor-pointer hover:border-sky/60 transition-colors shadow-sm"
+                                    onChange={(e) => {
+                                        if(e.target.value) handleAddToExistingPlan(e.target.value);
+                                        e.target.value = '';
+                                    }}
+                                >
+                                    <option value="">AGREGAR A PLAN EXISTENTE...</option>
+                                    {planes.map(p => (
+                                        <option key={p.id} value={p.id}>PLAN #{p.id} - {p.fecha}</option>
+                                    ))}
+                                </select>
+                            )}
+                            <button
+                                disabled={selectedItems.length === 0}
+                                onClick={handleCreatePlan}
+                                className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold transition-all shadow-lg ${selectedItems.length > 0 ? 'bg-accent text-white hover:scale-105 active:scale-95' : 'bg-background text-muted grayscale cursor-not-allowed'}`}
+                            >
+                                <Plus size={16} /> GENERAR NUEVO PLAN
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -224,7 +279,7 @@ export default function PartnerView() {
                                             <div className="space-y-4">
                                                 <h5 className="text-[10px] font-black text-navy uppercase tracking-widest border-b border-navy/10 pb-2">Desglose de Ítems</h5>
                                                 {plan.items.map((it, idx) => (
-                                                    <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl border border-border/20 shadow-sm">
+                                                    <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl border border-border/20 shadow-sm group/item">
                                                         <div className="flex items-center gap-3">
                                                             <div className="bg-navy/5 p-2 rounded-lg text-navy"><Tag size={12} /></div>
                                                             <div>
@@ -232,7 +287,16 @@ export default function PartnerView() {
                                                                 <p className="text-xs font-bold text-navy truncate max-w-[180px]">{it.label}</p>
                                                             </div>
                                                         </div>
-                                                        <span className="text-xs font-mono-numbers font-bold text-navy">BS {parseFloat(it.amount).toLocaleString()}</span>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-xs font-mono-numbers font-bold text-navy">BS {parseFloat(it.amount).toLocaleString()}</span>
+                                                            <button 
+                                                                onClick={() => handleRemoveItemFromPlan(plan.id, it.rem_id, it.tipo)}
+                                                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover/item:opacity-100"
+                                                                title="Eliminar del plan"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>

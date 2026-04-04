@@ -612,12 +612,28 @@ const ComicAnalysisTool = () => {
 
             setItemsAusentes(prev => ({
                 ...prev,
-                [editorial]: prev[editorial].filter(it => it.product_id !== itemId)
+                [editorial]: (prev[editorial] || []).filter(it => it.product_id !== itemId)
             }));
 
         } catch (err) {
             console.error("Error al borrar item:", err);
             alert("Error al borrar el item del maestro.");
+        }
+    };
+    
+    const handleClearReprints = async () => {
+        if (!isAdmin) return;
+        if (!confirm('¿Deseas quitar la etiqueta de REIMPRESIÓN de todos los productos del catálogo?')) return;
+        
+        setIsSyncing(true);
+        try {
+            await catalogService.clearAllReprintLabels();
+            alert('✅ Todas las etiquetas de reimpresión han sido removidas.');
+            await fetchCatalog(true);
+        } catch (err) {
+            alert('Error: ' + err.message);
+        } finally {
+            setIsSyncing(false);
         }
     };
 
@@ -767,9 +783,36 @@ const ComicAnalysisTool = () => {
 
         setIsSyncing(true);
         try {
-            const result = await catalogService.syncWithMaster(sheetsData, user.id, isViewingHistory ? historyReportName : lastFileName);
+            // Intentar detectar semana abierta para limpieza inteligente de reimpresiones
+            let currentSemanaId = null;
+            const { data: openWeeks } = await supabase.from('semanas').select('id').eq('estado', 'ABIERTA').limit(1);
+            if (openWeeks?.length > 0) currentSemanaId = openWeeks[0].id;
+
+            const result = await catalogService.syncWithMaster(
+                sheetsData, 
+                user.id, 
+                isViewingHistory ? historyReportName : lastFileName,
+                currentSemanaId
+            );
+            
             if (result.success) {
                 alert(`✅ Sincronización exitosa. Se actualizaron ${result.count} productos.`);
+                
+                // Marcar items como sincronizados localmente para limpiar los badges de la UI
+                const updatedSheets = { ...sheetsData };
+                Object.keys(updatedSheets).forEach(k => {
+                    if (updatedSheets[k].items) {
+                        updatedSheets[k].items = updatedSheets[k].items.map(i => ({ ...i, comparison: 'sin_cambios' }));
+                    }
+                    if (updatedSheets[k].report) {
+                        updatedSheets[k].report.cambios = { nuevos: 0, precios: 0, eans: 0, categorias: 0 };
+                    }
+                });
+                setSheetsData(updatedSheets);
+
+                // Notificar que se sincronizó el catálogo para actualizar el indicador del Sidebar
+                window.dispatchEvent(new CustomEvent('catalog-status-changed'));
+
                 // Recargar catálogo para ver reflejados los cambios
                 await fetchCatalog(true); 
             }
@@ -1541,10 +1584,19 @@ const ComicAnalysisTool = () => {
                             >
                                 <RefreshCw size={16} /> EXCEL COMPLETO
                             </button>
+                            {isAdmin && (
+                                <button
+                                    className="comic-btn-ghost flex items-center gap-2 border-comic-destructive/30 text-comic-destructive hover:bg-comic-destructive/10"
+                                    onClick={handleClearReprints}
+                                    title="Quitar etiqueta de reimpresión a todo el catálogo"
+                                >
+                                    <Trash2 size={16} /> LIMPIAR ETIQUETAS
+                                </button>
+                            )}
                             <button
                                 className="comic-btn-primary flex items-center gap-2"
                                 style={{ background: 'var(--comic-primary)', padding: '0.5rem 1rem' }}
-                                onClick={handleSync}
+                                onClick={handleManualSync}
                                 disabled={isSyncing}
                             >
                                 <ArrowUpCircle size={16} className={isSyncing ? 'animate-bounce' : ''} />

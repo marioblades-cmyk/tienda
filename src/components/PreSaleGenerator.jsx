@@ -554,10 +554,11 @@ export default function PreSaleGenerator() {
                 setStatusMessage(`PAGINANDO... (${i + 1}/${numPages})`);
                 
                 const options = {
-                    scale: 3, // Máxima calidad
+                    scale: 2, // Calidad óptima (3 a veces causa cuelgues)
                     useCORS: true,
-                    allowTaint: true,
+                    allowTaint: false,
                     backgroundColor: '#1b3a57',
+                    logging: true, // Para ver detalles en la consola si algo falla
                     // CORRECCION DEFINITIVA DE OFFSET:
                     x: 0,
                     y: 0,
@@ -575,11 +576,12 @@ export default function PreSaleGenerator() {
                     }
                 };
 
+                const projName = savedProjects[selectedProjectId]?.name?.replace(/\s+/g, '_') || 'Pagina';
                 const canvas = await html2canvas(node, options);
                 const image = canvas.toDataURL("image/jpeg", 0.95);
                 const link = document.createElement('a');
                 link.href = image;
-                link.download = `PREVENTA_${selectedProjectKey || 'Pagina'}_${i + 1}.jpg`;
+                link.download = `PREVENTA_${projName}_${i + 1}.jpg`;
                 link.click();
                 
                 await new Promise(r => setTimeout(r, 800));
@@ -587,8 +589,8 @@ export default function PreSaleGenerator() {
             setStatusMessage("✓ ¡EXPORTACIÓN EXITOSA!");
             setTimeout(() => setStatusMessage(""), 3000);
         } catch (err) {
-            console.error("Error export:", err);
-            alert("Error al generar imagen. Revisa la consola.");
+            console.error("Error detallado export:", err);
+            alert(`Falla técnica al generar imagen: ${err.message || 'CORS o Memoria insuficiente'}. Revisa la consola (F12).`);
         } finally {
             setIsExporting(false);
         }
@@ -1210,8 +1212,8 @@ export default function PreSaleGenerator() {
                 </div>
 
                 {/* HIDDEN EXPORT AREA (Always 1:1 Scale) */}
-                {/* Cambiado de position:fixed -5000px a absolute + hidden para evitar offsets de captura */}
-                <div style={{ position: 'absolute', top: 0, left: 0, opacity: 0, pointerEvents: 'none', zIndex: -1000, overflow: 'hidden', height: 0, width: 0 }}>
+                {/* Posicionado fuera de pantalla con tamaño real para captura correcta */}
+                <div style={{ position: 'fixed', left: '-5000px', top: '0', opacity: 0, pointerEvents: 'none', zIndex: -1000 }}>
                     {pages.map((pageItems, pageIndex) => (
                         <div key={pageIndex}>
                              <PosterPageContent pageItems={pageItems} pageIndex={pageIndex} idPrefix="export-page" />

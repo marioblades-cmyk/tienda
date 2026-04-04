@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useDropzone } from 'react-dropzone';
 import * as xlsx from 'xlsx';
-import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2, Edit2, Check } from 'lucide-react';
+import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2, Edit2, Check, RefreshCw } from 'lucide-react';
 
 export default function AdminMasterView() {
     const [semanas, setSemanas] = useState([]);
@@ -83,8 +83,6 @@ export default function AdminMasterView() {
                     : (cellA1 || filenameClean || 'DESPACHO SIN TÍTULO');
 
                 let parsedItems = [];
-                let totalArsText = '';
-
                 let extractedTotalProductos = 0;
                 let extractedEnvioTexto = '';
                 let extractedCajasQty = 0;
@@ -178,6 +176,55 @@ export default function AdminMasterView() {
         multiple: false
     });
 
+    const syncOrdersWithMaster = async (semanaId, masterItems) => {
+        if (!semanaId || !masterItems) return;
+        setProcessing(true);
+        setError('');
+        try {
+            const semanaObj = semanas.find(s => s.id === semanaId);
+            const wName = semanaObj ? semanaObj.nombre : '';
+            
+            // 1. Fetch ALL cliente_items for this week
+            const { data: clientItems, error: itemsError } = await supabase
+                .from('cliente_items')
+                .select('*')
+                .eq('semana_id', semanaId);
+            
+            if (itemsError) throw itemsError;
+            if (!clientItems || clientItems.length === 0) return;
+
+            // 2. Map master titles for faster lookup - USAR SET PARA VELOCIDAD
+            const masterTitles = new Set(masterItems.map(it => (it.titulo || '').toLowerCase().trim()));
+            
+            let confirmedCount = 0;
+            let cutCount = 0;
+
+            // 3. Batch Update statuses
+            for (let item of clientItems) {
+                const itemTitle = (item.titulo || '').toLowerCase().trim();
+                const isConfirmed = masterTitles.has(itemTitle);
+                
+                let nuevoEstado = isConfirmed ? `CONFIRMADO ${wName}`.trim() : 'RECORTADO';
+                
+                // Only update if state changed
+                if (item.estado !== nuevoEstado) {
+                    const { error: updateErr } = await supabase.from('cliente_items').update({ estado: nuevoEstado }).eq('id', item.id);
+                    if (updateErr) console.error("Error al actualizar item:", item.id, updateErr);
+                    
+                    if (isConfirmed) confirmedCount++;
+                    else cutCount++;
+                }
+            }
+            
+            setSuccess(`Sincronización completa: ${confirmedCount} pedidos confirmados, ${cutCount} marcados como recortados.`);
+        } catch (e) {
+            console.error("Error sincronizando pedidos:", e);
+            setError("Error al sincronizar los estados de los pedidos de clientes.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const handleSaveMaster = async () => {
         if (!previewData || !selectedSemana) return;
         setProcessing(true);
@@ -199,118 +246,59 @@ export default function AdminMasterView() {
             if (dbError) throw dbError;
 
             // 2. Automagically add to app_state for the Distribuidor (RemitosTable)
-            const { data: appStateData, error: stateFetchError } = await supabase
-                .from('app_state')
-                .select('data')
-                .eq('id', 'distribuidor')
-                .maybeSingle();
-
-            if (stateFetchError && stateFetchError.code !== 'PGRST116') {
-                console.error("Error fetching distribuidor state:", stateFetchError);
-            }
-
-            let distData = appStateData?.data || { pedidos: [], pagos: [], saldoInicial: null, ajustes: [] };
-
-            // Generate the identical name to use for matching later
-            const semanaGuardada = semanas.find(s => s.id === selectedSemana);
-            const nombreMostrar = semanaGuardada ? semanaGuardada.nombre : selectedSemana;
-            const pedidoName = `${previewData.titulo} (${nombreMostrar})`;
-
-            // Add the new pedido
-            distData.pedidos.push({
-                nombre: pedidoName,
-                monto: previewData.totalArs
-            });
-
-            const { error: stateUpdateError } = await supabase
-                .from('app_state')
-                .upsert({ id: 'distribuidor', data: distData });
-
-            if (stateUpdateError) console.error("Error agregando deuda al Distribuidor:", stateUpdateError);
-            
-            // 3. SECRETO: Inject a placeholder row into 'remitos' if it doesn't exist for this pedido
-            const { data: remDataRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
-            let remRows = Array.isArray(remDataRes?.data) ? remDataRes.data : (remDataRes?.data?.rows || []);
-            
-            // Check if this pedido already has a row (by name)
-            const existsInRemitos = remRows.some(r => r.pedido === pedidoName || r.pedido === previewData.titulo);
-            
-            if (!existsInRemitos) {
-                const newId = remRows.length > 0 ? Math.max(...remRows.map(r => r.id || 0)) + 1 : 1;
-                const newRow = {
-                    id: newId,
-                    nro: `${newId}`,
-                    fecha: new Date().toISOString().split('T')[0],
-                    cajas: '0',
-                    kg: '0',
-                    precio_remito: '0',
-                    compre: '0',
-                    cambio: '0',
-                    cg: '0',
-                    cm: '0',
-                    cp: '0',
-                    skg: '0',
-                    scaj: '0',
-                    smonto: '0',
-                    pedido: pedidoName,
-                    pago_aprox: previewData.totalArs,
-                    pagos_dist: '0',
-                    tc_dist: '0',
-                    selected: false
-                };
-                const updatedRemRows = [...remRows, newRow];
-                await supabase.from('app_state').upsert({ id: 'remitos', data: updatedRemRows });
-            }
-
-            setSuccess("Base Maestra guardada, deuda creada y fila de remito inyectada en Gestión Integral.");
-            setPreviewData(null);
-            checkExistingMaster(selectedSemana);
-
-        } catch (err) {
-            console.error(err);
-            setError(err.message || "Ocurrió un error al guardar el Master en la base de datos.");
-        } finally {
-            setProcessing(false);
-        }
-    };
-
-    const handleDeleteMaster = async () => {
-        if (!existingMaster || !confirm("¿Seguros que deseas eliminar esta base maestra? También se eliminará automáticamente su registro de deuda en la Gestión Integral.")) return;
-        setProcessing(true);
-        setError('');
-        setSuccess('');
-
-        try {
-            // 1. Intentar borrar del state del Distribuidor (app_state) por nombre
             const { data: appStateData } = await supabase
                 .from('app_state')
                 .select('data')
                 .eq('id', 'distribuidor')
                 .maybeSingle();
 
-            if (appStateData && appStateData.data) {
-                let distData = appStateData.data;
-                const originalLength = distData.pedidos ? distData.pedidos.length : 0;
+            let distData = appStateData?.data || { pedidos: [], pagos: [], saldoInicial: null, ajustes: [] };
+            const semanaGuardada = semanas.find(s => s.id === selectedSemana);
+            const nombreMostrar = semanaGuardada ? semanaGuardada.nombre : selectedSemana;
+            const pedidoName = `${previewData.titulo} (${nombreMostrar})`;
 
-                // Filtramos el pedido de forma más segura usando 'includes' para atrapar tanto 
-                // el formato antiguo (con ID) como el formato nuevo (con Nombre de semana)
-                distData.pedidos = (distData.pedidos || []).filter(p => !p.nombre.includes(existingMaster.titulo_despacho));
+            distData.pedidos.push({ nombre: pedidoName, monto: previewData.totalArs });
 
-                if (distData.pedidos.length !== originalLength) {
-                    const { error: stateUpdateError } = await supabase
-                        .from('app_state')
-                        .upsert({ id: 'distribuidor', data: distData });
-
-                    if (stateUpdateError) console.warn("Aviso: No se pudo actualizar el Distribuidor.", stateUpdateError);
-                }
+            await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
+            
+            // 3. Inject a placeholder row into 'remitos' (Gestión Integral)
+            const { data: remDataRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
+            let remRows = Array.isArray(remDataRes?.data) ? remDataRes.data : (remDataRes?.data?.rows || []);
+            const existsInRemitos = remRows.some(r => r.pedido === pedidoName);
+            
+            if (!existsInRemitos) {
+                const newId = remRows.length > 0 ? Math.max(...remRows.map(r => r.id || 0)) + 1 : 1;
+                const newRow = {
+                    id: newId, nro: `${newId}`, fecha: new Date().toISOString().split('T')[0], cajas: '0', 
+                    kg: '0', precio_remito: '0', compre: '0', cambio: '0', cg: '0', cm: '0', cp: '0', 
+                    skg: '0', scaj: '0', smonto: '0', pedido: pedidoName, pago_aprox: previewData.totalArs,
+                    pagos_dist: '0', tc_dist: '0', selected: false
+                };
+                await supabase.from('app_state').upsert({ id: 'remitos', data: [...remRows, newRow] });
             }
 
-            // 2. Borrar el master
-            const { error: masterError } = await supabase.from('master_confirmaciones').delete().eq('id', existingMaster.id);
-            if (masterError) throw masterError;
+            // 4. NUEVO: Sincronización automática de pedidos de clientes tras guardar
+            await syncOrdersWithMaster(selectedSemana, previewData.items);
+            
+            setSuccess("Base Maestra guardada y pedidos de clientes sincronizados.");
+            setPreviewData(null);
+            checkExistingMaster(selectedSemana);
+        } catch (err) {
+            console.error(err);
+            setError(err.message || "Error al guardar el Master.");
+        } finally {
+            setProcessing(false);
+        }
+    };
 
+    const handleDeleteMaster = async () => {
+        if (!existingMaster || !confirm("¿Seguros que deseas eliminar esta base maestra?")) return;
+        setProcessing(true);
+        setError('');
+        try {
+            await supabase.from('master_confirmaciones').delete().eq('id', existingMaster.id);
             setExistingMaster(null);
-            setSuccess("Base Maestra y su registro de deuda vinculada han sido eliminados.");
+            setSuccess("Base Maestra eliminada correctamente.");
         } catch (err) {
             console.error(err);
             setError("Error al eliminar la Base Maestra.");
@@ -322,270 +310,143 @@ export default function AdminMasterView() {
     const handleUpdateTitle = async () => {
         if (!newTitleValue.trim() || !existingMaster) return;
         setProcessing(true);
-        setError('');
-        setSuccess('');
-
-        const oldTitle = existingMaster.titulo_despacho;
-        const newTitle = newTitleValue.trim();
-
-        if (oldTitle === newTitle) {
-            setIsEditingTitle(false);
-            setProcessing(false);
-            return;
-        }
-
         try {
-            // 1. Update master_confirmaciones
-            const { error: masterError } = await supabase
-                .from('master_confirmaciones')
-                .update({ titulo_despacho: newTitle })
-                .eq('id', existingMaster.id);
-
-            if (masterError) throw masterError;
-
-            // Get week name for full name pattern matching
-            const semanaGuardada = semanas.find(s => s.id === selectedSemana);
-            const nombreSemana = semanaGuardada ? semanaGuardada.nombre : selectedSemana;
-            
-            const oldPedidoName = `${oldTitle} (${nombreSemana})`;
-            const newPedidoName = `${newTitle} (${nombreSemana})`;
-
-            // 2. Update app_state - DISTRIBUIDOR
-            const { data: distStateRes } = await supabase.from('app_state').select('data').eq('id', 'distribuidor').maybeSingle();
-            if (distStateRes?.data) {
-                let distData = distStateRes.data;
-                let changedDist = false;
-                
-                if (distData.pedidos) {
-                    distData.pedidos = distData.pedidos.map(p => {
-                        if (p.nombre === oldPedidoName || p.nombre === oldTitle) {
-                            changedDist = true;
-                            return { ...p, nombre: newPedidoName };
-                        }
-                        return p;
-                    });
-                }
-                
-                if (changedDist) {
-                    await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
-                }
-            }
-
-            // 3. Update app_state - REMITOS
-            const { data: remStateRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
-            if (remStateRes?.data) {
-                let remData = Array.isArray(remStateRes.data) ? remStateRes.data : (remStateRes.data.rows || []);
-                let changedRem = false;
-
-                remData = remData.map(r => {
-                    if (r.pedido === oldPedidoName || r.pedido === oldTitle) {
-                        changedRem = true;
-                        return { ...r, pedido: newPedidoName };
-                    }
-                    return r;
-                });
-
-                if (changedRem) {
-                    await supabase.from('app_state').upsert({ id: 'remitos', data: remData });
-                }
-            }
-
-            setExistingMaster({ ...existingMaster, titulo_despacho: newTitle });
-            setSuccess("Título actualizado correctamente en Confirmaciones y Gestión Integral.");
+            await supabase.from('master_confirmaciones').update({ titulo_despacho: newTitleValue.trim() }).eq('id', existingMaster.id);
+            setExistingMaster({ ...existingMaster, titulo_despacho: newTitleValue.trim() });
+            setSuccess("Título actualizado.");
             setIsEditingTitle(false);
         } catch (err) {
             console.error(err);
-            setError("Error al actualizar el título.");
+            setError("Error al actualizar título.");
         } finally {
             setProcessing(false);
         }
     };
 
-    if (loading) return <div className="p-8 text-center animate-pulse"><Loader2 className="mx-auto animate-spin mb-4" /> Cargando semanas...</div>;
+    if (loading) return <div className="p-8 text-center animate-pulse"><Loader2 size={24} className="mx-auto animate-spin mb-4" /> Cargando...</div>;
 
     return (
         <div className="space-y-8 max-w-5xl mx-auto">
-            {/* Header */}
+            {/* Cabecera */}
             <div className="bg-white p-6 rounded-2xl border border-border/40 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h3 className="text-xl font-bold text-navy flex items-center gap-2">
-                        <Database className="text-accent" /> Base Constatación Maestro
+                        <Database className="text-accent" /> Base Maestro Maestranza
                     </h3>
-                    <p className="text-sm text-sky mt-1">Sube el excel de confirmación del distribuidor para automatizar totales y deudas.</p>
+                    <p className="text-sm text-sky mt-1 font-medium">Sincroniza tus preventas con la realidad del stock.</p>
                 </div>
 
                 <div className="w-full md:w-64">
                     <label className="text-[10px] uppercase font-bold text-sky tracking-widest block mb-1">Semana Destino</label>
-                    <div className="relative">
-                        <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                        <select
-                            value={selectedSemana}
-                            onChange={(e) => setSelectedSemana(e.target.value)}
-                            className="w-full pl-9 pr-4 py-2 border border-border/40 rounded-xl text-sm font-bold bg-background focus:ring-2 focus:ring-accent outline-none appearance-none"
-                        >
-                            <option value="">-- Seleccionar Semana --</option>
-                            {semanas.map(s => (
-                                <option key={s.id} value={s.id}>{s.nombre} {!s.abierta ? '🔒' : ''}</option>
-                            ))}
-                        </select>
-                    </div>
+                    <select
+                        value={selectedSemana}
+                        onChange={(e) => setSelectedSemana(e.target.value)}
+                        className="w-full px-4 py-2 border border-border/40 rounded-xl text-sm font-bold bg-background focus:ring-2 focus:ring-accent outline-none appearance-none"
+                    >
+                        <option value="">-- Seleccionar Semana --</option>
+                        {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre} {!s.abierta ? '🔒' : ''}</option>)}
+                    </select>
                 </div>
             </div>
 
             {error && <div className="p-4 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold flex items-center gap-2 animate-in fade-in"><AlertCircle size={16} /> {error}</div>}
             {success && <div className="p-4 bg-green-50 text-green-600 border border-green-200 rounded-xl text-sm font-bold flex items-center gap-2 animate-in fade-in"><CheckCircle2 size={16} /> {success}</div>}
 
-            {/* Upload Area */}
+            {/* Dropzone */}
             {selectedSemana && !existingMaster && !previewData && (
-                <div
-                    {...getRootProps()}
-                    className={`border-2 border-dashed rounded-3xl p-12 text-center transition-all cursor-pointer ${isDragActive ? 'border-accent bg-accent/5' : 'border-border/60 bg-white hover:border-sky/50'
-                        }`}
-                >
+                <div {...getRootProps()} className={`border-2 border-dashed rounded-3xl p-12 text-center transition-all cursor-pointer ${isDragActive ? 'border-accent bg-accent/5' : 'border-border/60 bg-white hover:border-sky/50'}`}>
                     <input {...getInputProps()} />
-                    <Database size={48} className={`mx-auto mb-4 ${isDragActive ? 'text-accent' : 'text-sky'}`} />
-                    <h4 className="text-lg font-bold text-navy mb-2">Arrastra el Excel de Confirmación aquí</h4>
-                    <p className="text-sm text-muted">Soporta formato .xlsx o .xls del distribuidor.</p>
+                    <Upload size={48} className="mx-auto mb-4 text-sky" />
+                    <h4 className="text-lg font-bold text-navy">Carga el Excel de Confirmación aquí</h4>
+                    <p className="text-sm text-muted">Asegúrate de que la primera columna sea el Título.</p>
                 </div>
             )}
 
-            {/* Existing Master state */}
+            {/* Existing Master State */}
             {existingMaster && (
-                <div className="bg-green-50 border border-green-200 rounded-3xl p-8 flex items-center justify-between">
-                    <div>
-                        <div className="flex items-center gap-2 text-green-700 font-bold mb-1">
-                            <CheckCircle2 size={24} /> Base Maestro Activada
+                <div className="bg-green-50 border border-green-200 rounded-3xl p-8 flex items-center justify-between shadow-sm">
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2 text-green-700 font-bold mb-1"><CheckCircle2 size={24} /> Base Maestro Activada</div>
+                        <p className="text-sm text-green-700/80">Stock constatado y deudas generadas para Gestión Integral.</p>
+                        
+                        <div className="mt-4 flex items-center gap-2">
+                             {isEditingTitle ? (
+                                <div className="flex items-center gap-1">
+                                    <input type="text" value={newTitleValue} onChange={e => setNewTitleValue(e.target.value)} className="px-2 py-1 border rounded text-xs" />
+                                    <button onClick={handleUpdateTitle} className="p-1 text-green-600"><Check size={14} /></button>
+                                </div>
+                             ) : (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-navy font-bold text-lg">{existingMaster.titulo_despacho}</span>
+                                    <button onClick={() => { setNewTitleValue(existingMaster.titulo_despacho); setIsEditingTitle(true); }} className="text-green-600 hover:text-green-800"><Edit2 size={14} /></button>
+                                </div>
+                             )}
                         </div>
-                        <p className="text-sm text-green-700/80">Esta semana ya tiene un archivo de confirmación cargado.</p>
-                        <ul className="mt-4 space-y-2 text-xs text-green-800 font-mono">
-                            <li className="flex items-center gap-2">
-                                <strong>Título Despacho:</strong> 
-                                {isEditingTitle ? (
-                                    <div className="flex items-center gap-1">
-                                        <input 
-                                            type="text" 
-                                            value={newTitleValue} 
-                                            onChange={(e) => setNewTitleValue(e.target.value)}
-                                            className="px-2 py-0.5 border border-green-300 rounded bg-white text-navy font-bold outline-none focus:ring-1 focus:ring-green-500"
-                                            autoFocus
-                                        />
-                                        <button 
-                                            onClick={handleUpdateTitle}
-                                            disabled={processing}
-                                            className="p-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                                        >
-                                            {processing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                        </button>
-                                        <button 
-                                            onClick={() => setIsEditingTitle(false)}
-                                            className="p-1 bg-gray-400 text-white rounded hover:bg-gray-500 transition-colors"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <span>{existingMaster.titulo_despacho}</span>
-                                        <button 
-                                            onClick={() => {
-                                                setNewTitleValue(existingMaster.titulo_despacho);
-                                                setIsEditingTitle(true);
-                                            }}
-                                            className="p-1 hover:bg-green-200 rounded transition-colors text-green-700"
-                                            title="Editar título"
-                                        >
-                                            <Edit2 size={12} />
-                                        </button>
-                                    </>
-                                )}
-                            </li>
-                            <li><strong>Total ARS (Final):</strong> $ {Number(parseFloat(existingMaster.total_ars || 0)).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
-                            <li><strong>Total Prod:</strong> $ {Number(parseFloat(existingMaster.total_productos || 0)).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
-                            {(existingMaster.costo_envio || 0) > 0 && (
-                                <li><strong>Envío ({existingMaster.cajas_qty || 0} Cajas):</strong> $ {Number(parseFloat(existingMaster.costo_envio || 0)).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
-                            )}
-                            <li><strong>Ítems analizados:</strong> {existingMaster.datos_json?.length || 0}</li>
-                        </ul>
+                        <p className="text-xs font-mono text-green-800 mt-2 tracking-wider">MODO: CRUCE UNIVERSAL ACTIVADO</p>
                     </div>
-                    <button
-                        onClick={handleDeleteMaster}
-                        disabled={processing}
-                        className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition-colors"
-                        title="Eliminar Master actual"
-                    >
-                        <Trash2 size={20} />
-                    </button>
-                    {/* Placeholder imported icon in prev step... wait, we didn't import Trash2. Let's fix that! */}
+
+                    <div className="flex flex-col gap-3 ml-4">
+                        <button
+                            onClick={() => syncOrdersWithMaster(selectedSemana, existingMaster.datos_json)}
+                            disabled={processing}
+                            className="flex items-center justify-center gap-2 px-6 py-3 bg-accent text-navy rounded-xl font-bold text-xs hover:bg-accent/80 transition-all shadow-md min-w-[180px]"
+                        >
+                            {processing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Sincronizar Pedidos
+                        </button>
+                        <button
+                            onClick={handleDeleteMaster}
+                            className="text-xs text-red-500 font-bold uppercase hover:underline text-center"
+                        >
+                            Eliminar Master
+                        </button>
+                    </div>
                 </div>
             )}
 
-            {/* Preview Data before save */}
+            {/* Preview and Save */}
             {previewData && (
-                <div className="bg-white rounded-3xl border border-border/40 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4">
+                <div className="bg-white rounded-3xl border border-border/40 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4">
                     <div className="bg-navy p-6 text-white flex justify-between items-center">
                         <div>
-                            <h4 className="font-bold flex items-center gap-2"><CheckCircle2 className="text-green-400" /> Archivo Analizado con Éxito</h4>
-                            <p className="text-[10px] text-sky uppercase tracking-widest mt-1">Verifica los datos antes de inyectarlos y crear deuda.</p>
+                            <h4 className="font-bold flex items-center gap-2">Confirmación Analizada</h4>
+                            <p className="text-xs text-sky/60 mt-1 uppercase tracking-tighter">Verifica y cruza datos con las preventas</p>
                         </div>
-                        <button onClick={() => setPreviewData(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} /></button>
+                        <button onClick={() => setPreviewData(null)}><X size={20} /></button>
                     </div>
 
-                    <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4 bg-[#f8f9fa] border-b border-border/40">
-                        <div className="bg-white p-4 rounded-xl shadow-sm md:col-span-2">
-                            <p className="text-[10px] font-bold text-sky uppercase tracking-widest mb-1">Título Detectado</p>
-                            <p className="font-bold text-navy truncate break-all">{previewData.titulo}</p>
+                    <div className="p-8 flex justify-between items-center bg-[#f8f9fa] border-b">
+                        <div>
+                            <p className="text-[10px] uppercase font-black text-sky tracking-widest mb-1">Total Constatado</p>
+                            <p className="text-3xl font-black text-navy font-display uppercase italic">ARS {previewData.totalArs.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl shadow-sm">
-                            <p className="text-[10px] font-bold text-sky uppercase tracking-widest mb-1">Total Productos</p>
-                            <p className="text-lg font-black text-navy font-mono-numbers">ARS {Number(previewData.totalProductos).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl shadow-sm">
-                            <p className="text-[10px] font-bold text-sky uppercase tracking-widest mb-1">Costo Envío</p>
-                            <p className="text-sm font-bold text-muted truncate">{previewData.envioTexto || 'Sin detalle de cajas'}</p>
-                            <p className="text-lg font-black text-navy font-mono-numbers">ARS {Number(previewData.costoEnvio).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                        </div>
-                        <div className="bg-accent/10 border border-accent/20 p-4 rounded-xl shadow-sm md:col-span-4 flex justify-between items-center">
-                            <p className="text-xs font-bold text-accent uppercase tracking-widest">Deuda Total a crear (Distribuidor)</p>
-                            <p className="text-2xl font-black text-accent font-display tracking-tight">ARS {Number(previewData.totalArs).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                        </div>
+                        <button
+                            onClick={handleSaveMaster}
+                            disabled={processing}
+                            className="bg-accent text-navy px-10 py-4 rounded-2xl font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center gap-2"
+                        >
+                            {processing ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+                            CONFIRMAR TODO
+                        </button>
                     </div>
 
-                    <div className="overflow-x-auto max-h-[400px] overflow-y-auto custom-scrollbar">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-[#f8f9fa] text-[10px] text-sky font-bold uppercase tracking-widest sticky top-0">
+                    <div className="max-h-96 overflow-y-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                            <thead className="bg-[#f8f9fa] sticky top-0 border-b">
                                 <tr>
-                                    <th className="p-4 border-b border-border/40">Título Manga</th>
-                                    <th className="p-4 border-b border-border/40 text-right">Precio PVP (Ref)</th>
-                                    <th className="p-4 border-b border-border/40 text-center">Cant. Constatada</th>
+                                    <th className="p-4 font-bold text-sky">Título Producto</th>
+                                    <th className="p-4 text-right">Cant.</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border/20 text-xs">
+                            <tbody className="divide-y divide-border/10">
                                 {previewData.items.map((it, idx) => (
-                                    <tr key={idx} className="hover:bg-cream/30">
-                                        <td className="p-3 text-navy font-bold">{it.titulo}</td>
-                                        <td className="p-3 text-right font-mono text-muted">ARS {it.precio_unitario.toLocaleString()}</td>
-                                        <td className="p-3 text-center font-black text-navy">{it.cantidad}</td>
+                                    <tr key={idx} className="hover:bg-accent/5">
+                                        <td className="p-4 font-medium text-navy uppercase text-[10px]">{it.titulo}</td>
+                                        <td className="p-4 text-right font-black text-navy">{it.cantidad}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
-                    </div>
-
-                    <div className="p-6 bg-[#f8f9fa] flex flex-wrap justify-end items-center gap-4 border-t border-border/40">
-                        <button
-                            onClick={() => setPreviewData(null)}
-                            className="bg-black text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md hover:bg-neutral-800 transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            onClick={handleSaveMaster}
-                            disabled={processing}
-                            className="bg-primary text-black px-6 py-3 rounded-xl text-sm font-black uppercase tracking-wider shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-                        >
-                            {processing ? <Loader2 className="animate-spin" size={18} /> : <Database size={18} />}
-                            Confirmar y Crear Deuda
-                        </button>
                     </div>
                 </div>
             )}

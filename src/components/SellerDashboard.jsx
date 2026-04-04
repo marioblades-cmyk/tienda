@@ -13,6 +13,7 @@ export default function SellerDashboard({ isAdmin }) {
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [isDragging, setIsDragging] = useState({ personal: false, tienda: false });
+    const [validationResult, setValidationResult] = useState(null); // { items, type, discrepancies, file }
 
     // Modo simulación admin
     const [vendedoresList, setVendedoresList] = useState([]);
@@ -101,13 +102,89 @@ export default function SellerDashboard({ isAdmin }) {
         setUploading(true);
 
         try {
-            const items = await readExcelRaw(file);
-            if (items.length === 0) {
+            const excelItems = await readExcelRaw(file);
+            if (excelItems.length === 0) {
                 alert('El archivo no contiene items con cantidades > 0 o el formato es incorrecto.');
                 setUploading(false);
                 return;
             }
 
+            const currentVendorId = (isAdmin && simulatedVendorId) ? simulatedVendorId : user.id;
+
+            // --- VALIDATION LOGIC ---
+            // 1. Fetch DB Items for this week and seller
+            const { data: dbItems, error: dbErr } = await supabase
+                .from('cliente_items')
+                .select('*')
+                .eq('semana_id', semanaActual.id)
+                .eq('vendedor_id', currentVendorId);
+
+            if (dbErr) throw dbErr;
+
+            // 2. Group DB items by title
+            const dbGrouped = {};
+            (dbItems || []).forEach(i => {
+                const key = i.titulo.toLowerCase().trim();
+                dbGrouped[key] = (dbGrouped[key] || 0) + 1;
+            });
+
+            // 3. Group Excel items by title
+            const excelGrouped = {};
+            excelItems.forEach(i => {
+                const key = i.titulo.toLowerCase().trim();
+                excelGrouped[key] = (excelGrouped[key] || 0) + i.cantidad;
+            });
+
+            // 4. Compare
+            const discrepancies = [];
+            const allTitles = new Set([...Object.keys(dbGrouped), ...Object.keys(excelGrouped)]);
+
+            allTitles.forEach(key => {
+                const dbQty = dbGrouped[key] || 0;
+                const exQty = excelGrouped[key] || 0;
+                const titleOrig = excelItems.find(i => i.titulo.toLowerCase().trim() === key)?.titulo 
+                                 || dbItems.find(i => i.titulo.toLowerCase().trim() === key)?.titulo;
+
+                if (dbQty > exQty) {
+                    discrepancies.push({
+                        titulo: titleOrig,
+                        tipo: 'FALTANTE',
+                        msg: `Faltan ${dbQty - exQty} unidades para cubrir pedidos de clientes.`,
+                        severity: 'error',
+                        dbQty, exQty
+                    });
+                } else if (exQty > dbQty) {
+                    discrepancies.push({
+                        titulo: titleOrig,
+                        tipo: 'EXCESO',
+                        msg: tipo === 'tienda' ? `Para Stock de Tienda.` : `Pidiendo ${exQty - dbQty} unidades extra para Stock.`,
+                        severity: tipo === 'tienda' ? 'info' : 'warning',
+                        dbQty, exQty
+                    });
+                }
+            });
+
+            setValidationResult({
+                items: excelItems,
+                tipo,
+                discrepancies: discrepancies.sort((a,b) => (a.severity === 'error' ? -1 : 1)),
+                fileInfo: { name: file.name, size: file.size }
+            });
+
+        } catch (err) {
+            console.error(err);
+            alert('Error: ' + translateError(err));
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const commitUpload = async () => {
+        if (!validationResult || !semanaActual || !user) return;
+        setUploading(true);
+        const { items, tipo, fileInfo } = validationResult;
+
+        try {
             const finalVendorId = (isAdmin && simulatedVendorId) ? simulatedVendorId : user.id;
             const finalVendorName = (isAdmin && simulatedVendorName) ? simulatedVendorName : (profile.nombre || user.user_metadata?.nombre);
 
@@ -117,7 +194,7 @@ export default function SellerDashboard({ isAdmin }) {
                     semana_id: semanaActual.id,
                     vendedor_id: finalVendorId,
                     vendedor_nombre: finalVendorName,
-                    archivo_nombre: file.name,
+                    archivo_nombre: fileInfo.name,
                     tipo: tipo
                 }, { onConflict: 'semana_id, vendedor_id, tipo' })
                 .select()
@@ -134,6 +211,7 @@ export default function SellerDashboard({ isAdmin }) {
             if (itemsError) throw itemsError;
 
             alert(`Pedido de tipo ${tipo.toUpperCase()} cargado con éxito (${items.length} items).`);
+            setValidationResult(null);
             fetchSemanaYPedidos();
         } catch (err) {
             console.error(err);
@@ -319,43 +397,109 @@ export default function SellerDashboard({ isAdmin }) {
 
                         {semanaActual.abierta && (
                             <div className="lg:col-span-2 space-y-6">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {['personal', 'tienda'].map(tipo => (
-                                        <div
-                                            key={tipo}
-                                            onDragOver={(e) => onDragOver(e, tipo)}
-                                            onDragLeave={() => onDragLeave(tipo)}
-                                            onDrop={(e) => onDrop(e, tipo)}
-                                            className={`glass p-8 rounded-2xl border-2 border-dashed transition-all group relative overflow-hidden ${isDragging[tipo] ? 'border-accent bg-accent/5 scale-[1.02]' : 'border-border hover:border-accent'
-                                                }`}
-                                        >
-                                            {uploading && <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10"><div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin"></div></div>}
-
-                                            <div className="relative z-0">
-                                                <div className="text-3xl mb-4 group-hover:scale-110 transition-transform">
-                                                    {tipo === 'personal' ? '👤' : '🏪'}
-                                                </div>
-                                                <h3 className="text-xl font-bold mb-1 uppercase tracking-tight">
-                                                    PEDIDO {tipo === 'personal' ? 'MI PEDIDO' : 'DE TIENDA'}
+                                {validationResult ? (
+                                    <div className="glass p-8 rounded-3xl border-2 border-secondary/50 bg-secondary/5 animate-in zoom-in-95 duration-300">
+                                        <div className="flex justify-between items-start mb-6">
+                                            <div>
+                                                <h3 className="text-2xl font-black text-navy flex items-center gap-2">
+                                                    <CheckCircle className="text-secondary" /> REVISIÓN DE EXCEL
                                                 </h3>
-                                                <p className="text-xs font-mono text-muted mb-6">
-                                                    {tipo === 'personal' ? 'Tus unidades para clientes.' : 'Unidades para stock de tienda Física.'}
+                                                <p className="text-xs text-muted mt-1 uppercase font-mono tracking-tighter">
+                                                    Archivo: {validationResult.fileInfo.name} ({validationResult.tipo})
                                                 </p>
-
-                                                <label className="flex items-center justify-center gap-3 w-full bg-surface border border-border group-hover:border-accent group-hover:text-accent font-bold py-3 rounded cursor-pointer transition-all">
-                                                    <Upload size={18} />
-                                                    SUBIR O ARRASTRAR EXCEL
-                                                    <input
-                                                        type="file"
-                                                        className="hidden"
-                                                        accept=".xlsx,.xls"
-                                                        onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0], tipo)}
-                                                    />
-                                                </label>
                                             </div>
+                                            <button 
+                                                onClick={() => setValidationResult(null)}
+                                                className="text-muted hover:text-error transition-colors px-4 py-2 text-xs font-black uppercase"
+                                            >
+                                                Cancelar
+                                            </button>
                                         </div>
-                                    ))}
-                                </div>
+
+                                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                                            {validationResult.discrepancies.length === 0 ? (
+                                                <div className="bg-emerald-500/10 border border-emerald-500/20 p-6 rounded-2xl text-center">
+                                                    <span className="text-3xl mb-2 block">✨</span>
+                                                    <h4 className="text-emerald-700 font-bold">¡Todo perfecto!</h4>
+                                                    <p className="text-xs text-emerald-600/70">Las cantidades del Excel coinciden exactamente con tus pedidos de clientes.</p>
+                                                </div>
+                                            ) : (
+                                                validationResult.discrepancies.map((d, idx) => (
+                                                    <div 
+                                                        key={idx} 
+                                                        className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
+                                                            d.severity === 'error' ? 'bg-red-50 border-red-100 text-red-700' : 
+                                                            (d.severity === 'warning' ? 'bg-orange-50 border-orange-100 text-orange-700' : 'bg-blue-50 border-blue-100 text-blue-700')
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`p-2 rounded-lg ${d.severity === 'error' ? 'bg-red-200' : (d.severity === 'warning' ? 'bg-orange-200' : 'bg-blue-200')}`}>
+                                                                {d.severity === 'error' ? <AlertCircle size={14} /> : <FileText size={14} />}
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-[10px] font-black uppercase opacity-60 leading-none mb-1">{d.tipo}</div>
+                                                                <div className="font-bold text-sm leading-tight">{d.titulo}</div>
+                                                                <div className="text-xs opacity-80">{d.msg}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right shrink-0">
+                                                            <div className="text-[10px] uppercase font-bold opacity-40">Excel / Web</div>
+                                                            <div className="text-lg font-black">{d.exQty} / {d.dbQty}</div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+
+                                        <div className="mt-8 flex gap-4">
+                                            <button 
+                                                onClick={commitUpload}
+                                                disabled={uploading}
+                                                className="flex-1 bg-navy text-white font-black py-4 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest disabled:opacity-50"
+                                            >
+                                                {uploading ? 'PROCESANDO...' : 'CONFIRMAR Y CARGAR PEDIDO'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {['personal', 'tienda'].map(tipo => (
+                                            <div
+                                                key={tipo}
+                                                onDragOver={(e) => onDragOver(e, tipo)}
+                                                onDragLeave={() => onDragLeave(tipo)}
+                                                onDrop={(e) => onDrop(e, tipo)}
+                                                className={`glass p-8 rounded-2xl border-2 border-dashed transition-all group relative overflow-hidden ${isDragging[tipo] ? 'border-accent bg-accent/5 scale-[1.02]' : 'border-border hover:border-accent'
+                                                    }`}
+                                            >
+                                                {uploading && <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10"><div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin"></div></div>}
+
+                                                <div className="relative z-0">
+                                                    <div className="text-3xl mb-4 group-hover:scale-110 transition-transform">
+                                                        {tipo === 'personal' ? '👤' : '🏪'}
+                                                    </div>
+                                                    <h3 className="text-xl font-bold mb-1 uppercase tracking-tight">
+                                                        PEDIDO {tipo === 'personal' ? 'MI PEDIDO' : 'DE TIENDA'}
+                                                    </h3>
+                                                    <p className="text-xs font-mono text-muted mb-6">
+                                                        {tipo === 'personal' ? 'Tus unidades para clientes.' : 'Unidades para stock de tienda Física.'}
+                                                    </p>
+
+                                                    <label className="flex items-center justify-center gap-3 w-full bg-surface border border-border group-hover:border-accent group-hover:text-accent font-bold py-3 rounded cursor-pointer transition-all">
+                                                        <Upload size={18} />
+                                                        SUBIR O ARRASTRAR EXCEL
+                                                        <input
+                                                            type="file"
+                                                            className="hidden"
+                                                            accept=".xlsx,.xls"
+                                                            onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0], tipo)}
+                                                        />
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
 
                                 <div className="glass p-6 rounded-2xl text-center">
                                     <h3 className="text-xs font-mono text-muted uppercase tracking-widest mb-2 italic">Instrucciones de carga</h3>

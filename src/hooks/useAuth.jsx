@@ -9,11 +9,22 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Fallback de seguridad: Si pasan 5 segundos y Supabase no responde, quitamos el loading.
+        const timeoutId = setTimeout(() => {
+            if (loading) {
+                console.warn("Tiempo de espera de Supabase agotado. Forzando salida de pantalla de carga.");
+                setLoading(false);
+            }
+        }, 5000);
+
         // Get initial session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setUser(session?.user ?? null);
             if (session?.user) fetchProfile(session.user.id);
             else setLoading(false);
+        }).catch(err => {
+            console.error("Error crítico de Supabase al arrancar:", err);
+            setLoading(false);
         });
 
         // Listen for auth changes
@@ -26,7 +37,10 @@ export const AuthProvider = ({ children }) => {
             }
         });
 
-        return () => subscription.unsubscribe();
+        return () => {
+            subscription.unsubscribe();
+            clearTimeout(timeoutId);
+        };
     }, []);
 
     const fetchProfile = async (id) => {
