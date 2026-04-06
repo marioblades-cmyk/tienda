@@ -12,6 +12,7 @@ export default function ClientOrdersView() {
     // Datos BD
     const [clientes, setClientes] = useState([]);
     const [items, setItems] = useState([]);
+    const [otherSellersItems, setOtherSellersItems] = useState([]);
     const [pagos, setPagos] = useState([]);
     const [semanas, setSemanas] = useState([]);
 
@@ -63,6 +64,8 @@ export default function ClientOrdersView() {
     const [payMonto, setPayMonto] = useState('');
     const [pagoConcepto, setPagoConcepto] = useState('');
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
+    const [batchDiscount, setBatchDiscount] = useState('');
+    const [batchAbono, setBatchAbono] = useState('');
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -82,6 +85,8 @@ export default function ClientOrdersView() {
             setShowSuggestions(false);
             setStockAnalysis(null);
             setSelectedStockSource('');
+            setBatchDiscount('');
+            setBatchAbono('');
         }
     }, [showAddModal]);
 
@@ -158,19 +163,35 @@ export default function ClientOrdersView() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [clientesRes, itemsRes, pagosRes, semanasRes] = await Promise.all([
+            // Define base queries
+            let itemsQuery = supabase.from('cliente_items').select('*, clientes(*)');
+            let pagosQuery = supabase.from('cliente_pagos').select('*');
+            let othersQuery = null;
+
+            // Apply seller isolation
+            if (!isAdmin && user?.id) {
+                itemsQuery = itemsQuery.eq('vendedor_id', user.id);
+                pagosQuery = pagosQuery.eq('vendedor_id', user.id);
+                // Detection query (only basics needed for coordination)
+                othersQuery = supabase.from('cliente_items')
+                    .select('id, cliente_id, vendedor_id, titulo, precio_venta, monto_pagado, estado, semana_id')
+                    .neq('vendedor_id', user.id)
+                    .neq('estado', 'ENTREGADO');
+            }
+
+            const [clientesRes, semanasRes, itemsRes, pagosRes, othersRes] = await Promise.all([
                 supabase.from('clientes').select('*').order('created_at', { ascending: false }),
-                supabase.from('cliente_items').select('*, clientes(*)').order('created_at', { ascending: false }),
-                supabase.from('cliente_pagos').select('*'),
-                supabase.from('semanas').select('*').order('created_at', { ascending: false })
+                supabase.from('semanas').select('*').order('created_at', { ascending: false }),
+                itemsQuery.order('created_at', { ascending: false }),
+                pagosQuery.order('created_at', { ascending: false }),
+                othersQuery ? othersQuery : Promise.resolve({ data: [] })
             ]);
 
             if (clientesRes.error) throw clientesRes.error;
-            if (itemsRes.error) throw itemsRes.error;
-            if (pagosRes.error) throw pagosRes.error;
 
             setClientes(clientesRes.data || []);
             setItems(itemsRes.data || []);
+            setOtherSellersItems(othersRes.data || []);
             setPagos(pagosRes.data || []);
             setSemanas(semanasRes.data || []);
         } catch (error) {
@@ -290,13 +311,13 @@ export default function ClientOrdersView() {
             const d = week.fecha_estimada_llegada ? new Date(week.fecha_estimada_llegada) : new Date(new Date(week.created_at).getTime() + (22*24*60*60*1000));
             dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
         } else if (it.estado === 'PEDIDO (Siguiente)') {
-            // Calcular fecha para el próximo pedido (Sábado más cercano + 22 días)
+            // Unificado: 22 días después del PRÓXIMO SÁBADO de Hoy
             const now = new Date();
-            const nextSat = new Date(now);
-            nextSat.setDate(now.getDate() + (6 - now.getDay() + 7) % 7);
-            const arrival = new Date(nextSat);
-            arrival.setDate(nextSat.getDate() + 22);
-            dateStr = arrival.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
+            const day = now.getDay();
+            const diff = (6 - day + 7) % 7 || 7;
+            const nextSat = new Date(now.getTime() + (diff * 24 * 60 * 60 * 1000));
+            const arrival = new Date(nextSat.getTime() + (22 * 24 * 60 * 60 * 1000));
+            dateStr = arrival.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
         }
 
         return (
@@ -341,15 +362,16 @@ export default function ClientOrdersView() {
     };
 
     const selectSuggestion = async (item) => {
-        const price = item.precio_venta_bs || item.precio_tapa || '';
+        const price = item.precio_venta_bs || item.precio_tapa || 0;
+        const formattedPrice = price ? Number(price).toFixed(2) : '';
         setAddForm({ 
             ...addForm, 
             titulo: item.titulo, 
             catalog_id: item.id,
             product_id: item.product_id,
-            precio_venta: price,
-            descuento: 0,
-            precio_final: price,
+            precio_venta: formattedPrice,
+            descuento: "0.0",
+            precio_final: formattedPrice,
             monto_pagado: ''
         });
         setShowSuggestions(false);
@@ -460,25 +482,26 @@ export default function ClientOrdersView() {
                 const toAdd = bulkResults.filter(p => bulkSelected.has(p.id));
                 if (toAdd.length === 0) return alert("No hay ítems seleccionados");
 
-                const newCartItems = [];
-                for (let p of toAdd) {
-                    const stock = await analyzeStockForItem(p.titulo);
-                    const price = p.precio_venta_bs || p.precio_tapa || 0;
-                    newCartItems.push({
-                        titulo: p.titulo,
-                        catalog_id: p.id,
-                        product_id: p.product_id,
-                        precio_original: price,
+                const newItems = [];
+                for (const it of Array.from(bulkSelected).map(id => bulkResults.find(r => r.id === id))) {
+                    if (!it) continue;
+                    
+                    // Obtener análisis individual para cada ítem del lote
+                    const analysis = await analyzeStockForItem(it.titulo);
+                    
+                    newItems.push({
+                        titulo: it.titulo,
+                        catalog_id: it.id,
+                        product_id: it.product_id || it.id,
+                        precio_original: Number(it.precio_venta_bs || it.precio_tapa || 0),
                         descuento: 0,
-                        precio_venta: price,
+                        precio_venta: Number(it.precio_venta_bs || it.precio_tapa || 0),
                         monto_pagado: 0,
-                        nota: 'Pedido por lote',
-                        source: stock.defaultSource,
-                        stockOptions: stock
+                        source: analysis.defaultSource,
+                        stockOptions: analysis
                     });
                 }
-
-                setCart([...cart, ...newCartItems]);
+                setCart([...cart, ...newItems]);
                 setBulkSelected(new Set());
                 setBulkSearch('');
                 setBulkRange('');
@@ -490,6 +513,53 @@ export default function ClientOrdersView() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const applyBatchDiscount = () => {
+        const pct = Number(batchDiscount);
+        if (isNaN(pct) || pct < 0) return;
+        setCart(cart.map(item => {
+            const base = Number(item.precio_original) || Number(item.precio_venta) || 0;
+            const final = base - (base * (pct / 100));
+            return { 
+                ...item, 
+                precio_venta: final.toFixed(2), 
+                descuento: pct.toFixed(1) 
+            };
+        }));
+        setBatchDiscount('');
+    };
+
+    const applyBatchAbono = () => {
+        const amt = Number(batchAbono);
+        if (isNaN(amt) || amt < 0) return;
+        setCart(cart.map(item => ({ 
+            ...item, 
+            monto_pagado: amt.toFixed(2) 
+        })));
+        setBatchAbono('');
+    };
+
+    const updateCartItem = (index, field, value) => {
+        const next = [...cart];
+        const item = { ...next[index], [field]: value };
+        
+        // Recalculación recíproca
+        if (field === 'precio_original' || field === 'descuento') {
+            const base = Number(item.precio_original) || 0;
+            const pct = Number(item.descuento) || 0;
+            item.precio_venta = (base - (base * (pct / 100))).toFixed(2);
+        } else if (field === 'precio_venta' || field === 'precio_final') {
+            const final = Number(value) || 0;
+            const base = Number(item.precio_original) || 0;
+            if (base > 0) {
+                item.descuento = ((1 - (final / base)) * 100).toFixed(1);
+            }
+            item.precio_venta = final;
+        }
+        
+        next[index] = item;
+        setCart(next);
     };
 
     const removeFromCart = (index) => {
@@ -714,34 +784,34 @@ export default function ClientOrdersView() {
 
     const groupedData = useMemo(() => {
         const groups = {};
-        // 1. Identify all clients who have ACTIVE orders (any seller)
-        clientes.forEach(c => {
-            const clientItems = items.filter(i => i.cliente_id === c.id);
-            const myItems = clientItems.filter(i => i.vendedor_id === user?.id);
-            const otherItems = clientItems.filter(i => i.vendedor_id !== user?.id && i.estado !== 'ENTREGADO');
+        
+        // 1. Determine which clients should be visible
+        const visibleClients = clientes.filter(c => {
+            if (isAdmin) return true;
+            
+            const hasMyItems = items.some(i => i.cliente_id === c.id);
+            const matchesSearch = search && (c.nombre.toLowerCase().includes(search.toLowerCase()) || c.celular.includes(search));
+            
+            return hasMyItems || matchesSearch;
+        });
 
-            // If I am not admin, I only "see" customers in my list if I have items with them,
-            // OR if I am looking at all and want to know about shipping.
-            if (!isAdmin && myItems.length === 0 && otherItems.length === 0) return;
+        visibleClients.forEach(c => {
+            const myItems = items.filter(i => i.cliente_id === c.id);
+            const others = otherSellersItems.filter(i => i.cliente_id === c.id);
+            
+            // If I am not admin and I have no items of my own AND I'm not searching for them, skip
+            if (!isAdmin && myItems.length === 0 && !search) return;
 
             groups[c.id] = { 
                 client: c, 
-                items: isAdmin ? clientItems : myItems, // Ver solo mis items o todos si soy admin
-                others: isAdmin ? [] : otherItems, // Guardar otros para alerta de envio
-                pagos: pagos.filter(p => p.cliente_id === c.id && (isAdmin || p.vendedor_id === user?.id))
-                             .reduce((s,p) => s + Number(p.monto), 0)
+                items: myItems,
+                others: others, // For coordinated shipping alert
+                pagos: pagos.filter(p => p.cliente_id === c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
         
-        // Remove empty groups if filtering
-        Object.keys(groups).forEach(k => {
-            if(groups[k].items.length === 0 && groups[k].others.length === 0 && (filterEstado !== 'todos' || search)) {
-                delete groups[k];
-            }
-        });
-        
         return Object.values(groups);
-    }, [clientes, items, pagos, filterEstado, search, isAdmin, user]);
+    }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user]);
 
     const sendWhatsApp = (client, type) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
@@ -897,8 +967,8 @@ export default function ClientOrdersView() {
                     {groupedData.length === 0 && <div className="text-center py-10 text-muted">No se encontraron clientes o pedidos.</div>}
                     {groupedData.map(group => {
                         const isExp = expandedCliente.has(group.client.id);
-                        const cVentas = group.items.reduce((s,i)=>s+Number(i.precio_venta), 0);
-                        const cPagItems = group.items.reduce((s,i)=>s+Number(i.monto_pagado), 0);
+                        const cVentas = group.items.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
+                        const cPagItems = group.items.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
                         const cDeuda = Math.max(0, cVentas - (cPagItems + group.pagos));
 
                         return (
@@ -932,25 +1002,27 @@ export default function ClientOrdersView() {
                                             <div className="font-mono text-sm font-bold text-error">BS {formatS(cDeuda)}</div>
                                         </div>
 
-                                        <div className="flex items-center gap-2" onClick={e=>e.stopPropagation()}>
-                                            <button onClick={()=>setShowPayModal(group.client.id)} className="bg-success text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-success/80 shadow-md">
-                                                Abonar
-                                            </button>
-                                            
-                                            <div className="relative">
-                                                <button onClick={()=>setShowWhatsAppMenu(showWhatsAppMenu===group.client.id ? null : group.client.id)} className="bg-[#25D366] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:brightness-110 shadow-md">
-                                                    <MessageCircle size={14} /> WhatsApp
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2" onClick={e=>e.stopPropagation()}>
+                                                <button onClick={()=>setShowPayModal(group.client.id)} className="bg-success text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-success/80 shadow-md">
+                                                    Abonar
                                                 </button>
-                                                {showWhatsAppMenu === group.client.id && (
-                                                    <div className="absolute top-full right-0 mt-2 w-48 bg-surface border border-border rounded-lg shadow-xl py-1 z-50">
-                                                        <button onClick={()=>sendWhatsApp(group.client, 'entrega')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📦 Aviso de Entrega</button>
-                                                        <button onClick={()=>sendWhatsApp(group.client, 'pago')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">💳 Confirmar Pago</button>
-                                                        <button onClick={()=>sendWhatsApp(group.client, 'estado')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📑 Estado General</button>
-                                                    </div>
-                                                )}
+                                                
+                                                <div className="relative">
+                                                    <button onClick={()=>setShowWhatsAppMenu(showWhatsAppMenu===group.client.id ? null : group.client.id)} className="bg-[#25D366] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:brightness-110 shadow-md">
+                                                        <MessageCircle size={14} /> WhatsApp
+                                                    </button>
+                                                    {showWhatsAppMenu === group.client.id && (
+                                                        <div className="absolute top-full right-0 mt-2 w-48 bg-surface border border-border rounded-lg shadow-xl py-1 z-50">
+                                                            <button onClick={()=>sendWhatsApp(group.client, 'entrega')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📦 Aviso de Entrega</button>
+                                                            <button onClick={()=>sendWhatsApp(group.client, 'pago')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">💳 Confirmar Pago</button>
+                                                            <button onClick={()=>sendWhatsApp(group.client, 'estado')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📑 Estado General</button>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
 
-                                            {isExp ? <ChevronUp size={20} className="text-muted ml-2" /> : <ChevronDown size={20} className="text-muted ml-2" />}
+                                            {isExp ? <ChevronUp size={20} className="text-muted ml-2 transition-transform" /> : <ChevronDown size={20} className="text-muted ml-2 transition-transform" />}
                                         </div>
                                     </div>
                                 </div>
@@ -1276,8 +1348,8 @@ export default function ClientOrdersView() {
 
             {/* ADD MODAL */}
             {showAddModal && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-hidden">
-                    <div className="bg-surface w-full max-w-7xl rounded-2xl border border-border flex flex-col min-h-[85vh] max-h-[95vh] shadow-2xl animate-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-hidden text-[#222]">
+                    <div className="bg-surface w-full max-w-[1700px] rounded-2xl border border-border flex flex-col min-h-[85vh] max-h-[95vh] shadow-2xl animate-in zoom-in-95 duration-200">
                         <div className="p-5 border-b border-border flex justify-between items-center bg-background rounded-t-2xl shrink-0">
                             <h2 className="text-lg font-bold font-display text-text flex items-center gap-2">
                                 <Plus className="text-primary"/> Nueva Venta / Pedido
@@ -1288,522 +1360,427 @@ export default function ClientOrdersView() {
                             </div>
                         </div>
                         
-                        <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-8 custom-scrollbar pb-64">
-                            {/* Cliente Bloque */}
-                            <div className="bg-background/40 border border-border p-5 rounded-2xl flex flex-col gap-4 shadow-inner">
-                                <h3 className="text-[10px] font-black uppercase text-muted tracking-[0.2em] flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-primary" /> Datos del Cliente
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                                    <div className="md:col-span-1">
-                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-primary tracking-widest">Celular *</label>
-                                        <input 
-                                            type="text" 
-                                            value={addForm.celular} 
-                                            onChange={e=>{
-                                                const val = e.target.value;
-                                                const cli = clientes.find(c=>c.celular===val);
-                                                if(cli) setAddForm({...addForm, celular:val, nombre:cli.nombre, ci:cli.ci||'', ciudad:cli.ciudad||'', sucursal:cli.sucursal||'', direccion:cli.direccion||'', notas_cliente:cli.notas||''});
-                                                else setAddForm({...addForm, celular:val});
-                                            }} 
-                                            className="w-full bg-surface border-2 border-border/40 px-4 py-3 rounded-2xl text-sm font-bold text-text outline-none focus:border-primary focus:bg-surface transition-all placeholder:opacity-30"
-                                            placeholder="73481501"
-                                        />
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">Nombre</label>
-                                        <input 
-                                            type="text" 
-                                            value={addForm.nombre} 
-                                            onChange={e=>setAddForm({...addForm, nombre:e.target.value.toUpperCase()})} 
-                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
-                                            placeholder="Opcional"
-                                        />
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">CI / NIT</label>
-                                        <input 
-                                            type="text" 
-                                            value={addForm.ci} 
-                                            onChange={e=>setAddForm({...addForm, ci:e.target.value})} 
-                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
-                                            placeholder="Opcional"
-                                        />
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">Ciudad</label>
-                                        <input 
-                                            type="text" 
-                                            value={addForm.ciudad} 
-                                            onChange={e=>setAddForm({...addForm, ciudad:e.target.value.toUpperCase()})} 
-                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
-                                            placeholder="Opcional"
-                                        />
-                                    </div>
-                                    <div className="md:col-span-1">
-                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">Sucursal</label>
-                                        <input 
-                                            type="text" 
-                                            value={addForm.sucursal} 
-                                            onChange={e=>setAddForm({...addForm, sucursal:e.target.value.toUpperCase()})} 
-                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
-                                            placeholder="Opcional"
-                                        />
-                                    </div>
+                        <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-6 custom-scrollbar pb-64">
+                            {/* DATOS CLIENTE (GRID RESPONSIVO) */}
+                            <div className="p-4 bg-background/40 border border-border/60 rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end shadow-inner mb-6">
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Celular</label>
+                                    <input type="text" value={addForm.celular} onChange={e=>{
+                                        const val = e.target.value;
+                                        const cli = clientes.find(c=>c.celular===val);
+                                        if(cli) setAddForm({...addForm, celular:val, nombre:cli.nombre, ci:cli.ci||'', ciudad:cli.ciudad||'', sucursal:cli.sucursal||'', direccion:cli.direccion||'', notas_cliente:cli.notas||''});
+                                        else setAddForm({...addForm, celular:val});
+                                    }} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="6XXXXXXX..."/>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Nombre Completo</label>
+                                    <input type="text" value={addForm.nombre} onChange={e=>setAddForm({...addForm, nombre:e.target.value.toUpperCase()})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Opcional..."/>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Carnet (CI)</label>
+                                    <input type="text" value={addForm.ci} onChange={e=>setAddForm({...addForm, ci:e.target.value})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Opcional..."/>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Ciudad</label>
+                                    <input type="text" value={addForm.ciudad} onChange={e=>setAddForm({...addForm, ciudad:e.target.value.toUpperCase()})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Eje: Tarija..."/>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Sucursal/Dirección</label>
+                                    <input type="text" value={addForm.sucursal} onChange={e=>setAddForm({...addForm, sucursal:e.target.value.toUpperCase()})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Opcional..."/>
                                 </div>
                             </div>
 
-                            {/* Buscador de Productos */}
-                            <div className="bg-background/40 border border-border p-5 rounded-2xl flex flex-col gap-4 shadow-inner relative">
-                                <div className="flex justify-between items-center">
-                                    <h3 className="text-[10px] font-black uppercase text-muted tracking-[0.2em] flex items-center gap-2">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-secondary" /> Selección de Productos
-                                    </h3>
-                                    <div className="flex bg-surface rounded-xl p-1 border border-border shadow-sm">
-                                        <button onClick={()=>setAddForm({...addForm, mode:'individual'})} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-tighter rounded-lg transition-all ${addForm.mode==='individual'?'bg-primary text-background shadow-md':'text-muted hover:text-text'}`}>
-                                            <Search size={14} className="inline mr-1.5" /> Individual
-                                        </button>
-                                        <button onClick={()=>setAddForm({...addForm, mode:'coleccion'})} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-tighter rounded-lg transition-all ${addForm.mode==='coleccion'?'bg-primary text-background shadow-md':'text-muted hover:text-text'}`}>
-                                            <Layers size={14} className="inline mr-1.5" /> Por Lote (Colección)
-                                        </button>
+                            <div className="flex flex-col lg:flex-row gap-6 items-start">
+                                {/* SECCIÓN IZQUIERDA: SELECCIÓN DE PRODUCTOS */}
+                                <div className="w-full lg:w-[400px] shrink-0 bg-surface border border-border/40 p-5 rounded-2xl shadow-xl flex flex-col gap-5">
+                                    <div className="flex items-center justify-between border-b border-border/10 pb-4">
+                                        <div className="flex items-center gap-2 text-[10px] font-black uppercase text-primary tracking-widest">
+                                            <div className="w-2 h-2 rounded-full bg-primary animate-pulse"/> Selección
+                                        </div>
+                                        <div className="flex bg-background p-1 rounded-xl border border-border">
+                                            <button onClick={()=>setAddForm({...addForm, mode:'individual'})} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${addForm.mode==='individual'?'bg-surface text-primary shadow-md':'text-muted-2'}`}>Individual</button>
+                                            <button onClick={()=>setAddForm({...addForm, mode:'bulk'})} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${addForm.mode!=='individual'?'bg-surface text-secondary shadow-md':'text-muted-2'}`}>Lote</button>
+                                        </div>
                                     </div>
-                                </div>
 
-                                {addForm.mode === 'individual' ? (
-                                    <div className="flex flex-col xl:flex-row gap-4 items-end">
-                                        <div className="flex-[4] min-w-[400px] relative w-full">
-                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-primary tracking-widest">Buscar en Catálogo</label>
-                                            <div className="relative">
-                                                <input type="text" value={addForm.titulo} onChange={e=>handleSearchCatalog(e.target.value)} className="w-full bg-surface border-2 border-primary/30 px-4 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary shadow-sm transition-all font-bold" placeholder="Escribe el título para buscar..."/>
-                                                {showSuggestions && catalogSuggestions.length > 0 && (
-                                                    <div className="absolute top-full left-0 w-[550px] mt-2 bg-surface border border-border rounded-2xl shadow-2xl z-[100] max-h-60 overflow-y-auto p-1.5 border-t-4 border-t-primary animate-in fade-in slide-in-from-top-2">
-                                                        {catalogSuggestions.map((sg, i) => (
-                                                            <div key={i} onClick={()=>selectSuggestion(sg)} className="p-2 border-b border-border/20 last:border-0 hover:bg-primary/5 rounded-xl cursor-pointer transition-colors">
-                                                                <div className="font-bold text-text text-[11px] leading-tight">{sg.titulo}</div>
-                                                                <div className="text-[9px] text-muted flex items-center justify-between mt-0.5">
-                                                                    <span>{sg.editorial} | Tapa: BS {sg.precio_tapa}</span>
-                                                                    <span className="font-mono text-success font-black">STOCK: {sg.stock_fisico || 0}</span>
+                                    {addForm.mode === 'individual' ? (
+                                        <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-left-2 duration-300">
+                                            <div>
+                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-[0.2em] pl-1">Buscar Manga / Cómic</label>
+                                                <div className="relative group">
+                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted group-focus-within:text-primary transition-colors" size={16}/>
+                                                    <input 
+                                                        type="text" 
+                                                        value={addForm.titulo} 
+                                                        onChange={e=>handleSearchCatalog(e.target.value)}
+                                                        className="w-full bg-background border-2 border-border/50 pl-10 pr-4 py-3 rounded-xl text-sm font-bold text-text outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all shadow-sm"
+                                                        placeholder="Eje: Berserk 01..."
+                                                    />
+                                                    {showSuggestions && catalogSuggestions.length > 0 && (
+                                                        <div className="absolute top-full left-0 w-full mt-2 bg-surface border border-border rounded-xl shadow-2xl z-[200] max-h-48 overflow-y-auto p-1 animate-in slide-in-from-top-2">
+                                                            {catalogSuggestions.map(item => (
+                                                                <div key={item.id} onClick={()=>selectSuggestion(item)} className="p-2.5 rounded-lg hover:bg-primary/5 cursor-pointer border border-transparent hover:border-primary/20 transition-all flex justify-between items-center group">
+                                                                    <div className="flex flex-col">
+                                                                        <span className="text-[11px] font-bold text-text/80 group-hover:text-primary leading-tight">{item.titulo}</span>
+                                                                        <span className="text-[9px] text-muted-2 uppercase">{item.editorial}</span>
+                                                                    </div>
+                                                                    <span className="text-[9px] font-black text-muted opacity-60">BS {item.precio_venta_bs || item.precio_tapa}</span>
                                                                 </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="block text-[10px] font-black uppercase text-center text-muted">Precio</label>
+                                                    <input type="number" step="0.01" value={addForm.precio_venta} onChange={e=>{
+                                                        const base = e.target.value;
+                                                        const pct = Number(addForm.descuento)||0;
+                                                        const final = Number(base) - (Number(base) * (pct/100));
+                                                        setAddForm({...addForm, precio_venta: base, precio_final: final.toFixed(2)});
+                                                    }} className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary font-mono text-center shadow-inner"/>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-[10px] font-black uppercase text-center text-error/80">Desc. %</label>
+                                                    <input type="number" step="0.1" value={addForm.descuento} onChange={e=>{
+                                                        const pct = e.target.value;
+                                                        const base = Number(addForm.precio_venta)||0;
+                                                        const final = base - (base * (Number(pct)||0) / 100);
+                                                        setAddForm({...addForm, descuento: pct, precio_final: final.toFixed(2)});
+                                                    }} className="w-full bg-background border border-border px-4 py-2.5 rounded-xl text-xs text-error font-bold outline-none focus:border-error font-mono text-center shadow-inner" placeholder="%"/>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-[10px] font-black uppercase text-center text-primary">Final BS</label>
+                                                    <input type="number" step="0.01" value={addForm.precio_final} onChange={e=>{
+                                                        const final = e.target.value;
+                                                        const base = Number(addForm.precio_venta)||0;
+                                                        const pct = base > 0 ? ((1 - Number(final) / base) * 100).toFixed(1) : "0.0";
+                                                        setAddForm({...addForm, precio_final: final, descuento: pct});
+                                                    }} className="w-full bg-primary/5 border border-primary/20 px-3 py-2.5 rounded-xl text-xs text-primary font-black outline-none focus:border-primary font-mono text-center shadow-inner"/>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-[10px] font-black uppercase text-center text-success">Abono BS</label>
+                                                    <input type="number" step="0.01" value={addForm.monto_pagado} onChange={e=>setAddForm({...addForm, monto_pagado:e.target.value})} className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs text-success font-black outline-none focus:border-success font-mono text-center shadow-inner" placeholder="0.00"/>
+                                                </div>
+                                            </div>
+
+                                            <div className="relative">
+                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 text-center tracking-widest">Asignar de:</label>
+                                                <div 
+                                                    onClick={() => setDropdownOpen(!dropdownOpen)}
+                                                    className={`w-full bg-background border-2 px-3 py-3 rounded-xl text-[10px] font-black uppercase cursor-pointer flex items-center justify-between transition-all select-none hover:shadow-md ${
+                                                        selectedStockSource === 'fisico' ? 'border-success text-success bg-success/5' : 
+                                                        selectedStockSource.includes('flotante_conf') ? 'border-primary text-primary bg-primary/5' : 
+                                                        selectedStockSource.includes('flotante_noc') ? 'border-orange-400 text-orange-400 bg-orange-400/5' : 
+                                                        selectedStockSource === 'pedido_PENDIENTE' ? 'border-purple-500 text-purple-500' :
+                                                        'border-border text-muted'
+                                                    }`}
+                                                >
+                                                    <div className="truncate flex items-center gap-2">
+                                                        {(() => {
+                                                            if (selectedStockSource === 'fisico') return "✨ STOCK FÍSICO";
+                                                            if (selectedStockSource === 'pedido_PENDIENTE') return "🚀 PRÓXIMO PEDIDO";
+                                                            if (selectedStockSource.includes('flotante')) {
+                                                                const id = selectedStockSource.split('_').pop();
+                                                                const fl = stockAnalysis?.flotantes.find(x => x.id == id);
+                                                                return fl ? `${fl.isConfirmed?'✅':'⏳'} ${fl.nombre}` : "---";
+                                                            }
+                                                            if (selectedStockSource.includes('pedido_')) {
+                                                                const id = selectedStockSource.split('_').pop();
+                                                                const s = semanas.find(x => x.id == id);
+                                                                return s ? `📂 P/ ${s.nombre}` : "---";
+                                                            }
+                                                            return "SELECCIONE ORIGEN";
+                                                        })()}
+                                                    </div>
+                                                    <ChevronDown size={14} className={`transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+                                                </div>
+
+                                                {dropdownOpen && (
+                                                    <div className="absolute bottom-full mb-2 left-0 w-full bg-surface border border-border rounded-xl shadow-2xl z-[200] overflow-hidden animate-in zoom-in-95 duration-200">
+                                                        <div className="max-h-[200px] overflow-y-auto p-1.5 flex flex-col gap-1.5">
+                                                            {stockAnalysis?.fisico > 0 && (
+                                                                <div onClick={() => { setSelectedStockSource('fisico'); setDropdownOpen(false); }} className="p-2.5 rounded-lg hover:bg-success/10 border border-transparent hover:border-success/30 cursor-pointer transition-all flex justify-between items-center">
+                                                                    <span className="text-success font-black text-[9px]">✨ STOCK FÍSICO</span>
+                                                                    <span className="bg-success text-background px-2 py-0.5 rounded-full text-[8px] font-bold">{stockAnalysis.fisico} U.</span>
+                                                                </div>
+                                                            )}
+                                                            {stockAnalysis?.flotantes.map(flot => (
+                                                                <div key={flot.id} onClick={() => { setSelectedStockSource(flot.isConfirmed ? `flotante_conf_${flot.id}` : `flotante_noc_${flot.id}`); setDropdownOpen(false); }} className={`p-2.5 rounded-lg cursor-pointer transition-all border border-transparent ${flot.isConfirmed? 'hover:bg-primary/10 hover:border-primary/20 bg-primary/5':'hover:bg-orange-400/10 hover:border-orange-400/20 bg-orange-400/5'}`}>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <span className={`font-black text-[9px] ${flot.isConfirmed ? 'text-primary' : 'text-orange-400'}`}>
+                                                                            {flot.isConfirmed ? '✅' : '⏳'} {flot.nombre}
+                                                                        </span>
+                                                                        <span className="text-[8px] opacity-60 font-mono italic">{flot.qty} U.</span>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                            {semanas.filter(s => s.abierta).map(s => (
+                                                                <div key={s.id} onClick={() => { setSelectedStockSource(`pedido_${s.id}`); setDropdownOpen(false); }} className="p-2.5 rounded-lg hover:bg-muted/30 cursor-pointer text-[9px] font-bold text-muted">
+                                                                    📂 Encargar para {s.nombre}
+                                                                </div>
+                                                            ))}
+                                                            <div onClick={() => { setSelectedStockSource('pedido_PENDIENTE'); setDropdownOpen(false); }} className="p-3 rounded-xl bg-purple-500/5 hover:bg-purple-500/10 border border-dashed border-purple-500/20 cursor-pointer text-center">
+                                                                <span className="text-purple-500 font-black text-[9px]">🚀 PRÓXIMO PEDIDO (Automático)</span>
                                                             </div>
-                                                        ))}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
-                                        </div>
-                                        <div className="w-24">
-                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest text-center">Precio</label>
-                                            <input type="number" value={addForm.precio_venta} onChange={e=>{
-                                                const base = e.target.value;
-                                                const pct = Number(addForm.descuento)||0;
-                                                const final = Number(base) - (Number(base) * pct / 100);
-                                                setAddForm({...addForm, precio_venta: base, precio_final: final.toFixed(0)});
-                                            }} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary font-mono text-center"/>
-                                        </div>
-                                        <div className="w-20">
-                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-error/80 tracking-widest text-center">Desc. %</label>
-                                            <input type="number" value={addForm.descuento} onChange={e=>{
-                                                const pct = e.target.value;
-                                                const base = Number(addForm.precio_venta)||0;
-                                                const final = base - (base * (Number(pct)||0) / 100);
-                                                setAddForm({...addForm, descuento: pct, precio_final: final.toFixed(0)});
-                                            }} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-xs text-error font-bold outline-none focus:border-error font-mono text-center" placeholder="%"/>
-                                        </div>
-                                        <div className="w-24">
-                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-primary/80 tracking-widest text-center">Final</label>
-                                            <input 
-                                                type="number" 
-                                                value={addForm.precio_final} 
-                                                onChange={e=>{
-                                                    const final = e.target.value;
-                                                    const base = Number(addForm.precio_venta)||0;
-                                                    const pct = base > 0 ? ((1 - Number(final) / base) * 100).toFixed(1) : 0;
-                                                    setAddForm({
-                                                        ...addForm, 
-                                                        precio_final: final, 
-                                                        descuento: pct
-                                                    });
-                                                }}
-                                                className="w-full bg-primary/5 border border-primary/20 px-3 py-2.5 rounded-xl text-xs text-primary font-black outline-none focus:border-primary font-mono text-center"
-                                            />
-                                        </div>
-                                        <div className="w-24">
-                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-success/80 tracking-widest text-center">Pago Inicial</label>
-                                            <input type="number" value={addForm.monto_pagado} onChange={e=>setAddForm({...addForm, monto_pagado:e.target.value})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-xs text-success font-black outline-none focus:border-success font-mono text-center" placeholder="BS"/>
-                                        </div>
 
-                                        <div className="w-72 relative">
-                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 text-center tracking-[0.2em]">Asignar De:</label>
-                                            <div 
-                                                onClick={() => setDropdownOpen(!dropdownOpen)}
-                                                className={`w-full bg-surface border-2 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase cursor-pointer flex items-center justify-between transition-all select-none hover:shadow-md ${
-                                                    selectedStockSource === 'fisico' ? 'border-success text-success bg-success/5 shadow-sm' : 
-                                                    selectedStockSource.includes('flotante_conf') ? 'border-primary text-primary bg-primary/5 shadow-sm' : 
-                                                    selectedStockSource.includes('flotante_noc') ? 'border-orange-400 text-orange-400 bg-orange-400/5' : 
-                                                    selectedStockSource === 'pedido_PENDIENTE' ? 'border-purple-500 text-purple-500 animate-pulse' :
-                                                    'border-border text-muted hover:border-primary/40'
-                                                }`}
-                                            >
-                                                <div className="truncate flex items-center gap-2">
-                                                    {(() => {
-                                                        if (selectedStockSource === 'fisico') return "✨ STOCK FÍSICO";
-                                                        if (selectedStockSource === 'pedido_PENDIENTE') return "🚀 PRÓXIMO PEDIDO (Por Asignar)";
-                                                        if (selectedStockSource.includes('flotante')) {
-                                                            const id = selectedStockSource.split('_').pop();
-                                                            const fl = stockAnalysis?.flotantes.find(x => x.id == id);
-                                                            return fl ? `${fl.isConfirmed?'✅':'⏳'} ${fl.nombre}` : "---";
-                                                        }
-                                                        if (selectedStockSource.includes('pedido_')) {
-                                                            const id = selectedStockSource.split('_').pop();
-                                                            const s = semanas.find(x => x.id == id);
-                                                            return s ? `📂 P/ ${s.nombre}` : "---";
-                                                        }
-                                                        return "SELECCIONE ORIGEN";
-                                                    })()}
-                                                </div>
-                                                <ChevronDown size={14} className={`transition-transform duration-300 ${dropdownOpen ? 'rotate-180' : ''}`} />
+                                            <button onClick={()=>{
+                                                if(!selectedStockSource) return alert("Selecciona origen de stock");
+                                                addToCart();
+                                                setDropdownOpen(false);
+                                            }} disabled={!addForm.titulo || loading} className="w-full py-4 bg-primary text-background font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-primary/20 disabled:opacity-50">
+                                                Añadir al Pedido
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-left-2 duration-300">
+                                            <div className="space-y-1.5">
+                                                <label className="block text-[10px] font-black uppercase text-muted/80 pl-1">Colección</label>
+                                                <input type="text" value={bulkSearch} onChange={e=>setBulkSearch(e.target.value)} onBlur={()=>searchBulkCatalog(bulkSearch)} className="w-full bg-background border border-border px-3 py-3 rounded-xl text-sm font-bold text-text outline-none focus:border-secondary shadow-sm" placeholder="Ej: Dragon Ball Deluxe..."/>
                                             </div>
-
-                                            {dropdownOpen && (
-                                                <div className="absolute bottom-full mb-2 left-0 w-full bg-surface border border-border rounded-2xl shadow-2xl z-[150] overflow-hidden animate-in slide-in-from-bottom-2 duration-200">
-                                                    <div className="max-h-[300px] overflow-y-auto p-1.5 custom-scrollbar flex flex-col gap-1">
-                                                        {/* STOCK FISICO */}
-                                                        {stockAnalysis?.fisico > 0 && (
-                                                            <div onClick={() => { setSelectedStockSource('fisico'); setDropdownOpen(false); }} className="p-2.5 rounded-xl hover:bg-success/10 border-2 border-transparent hover:border-success/30 cursor-pointer transition-all flex justify-between items-center bg-background/40">
-                                                                <span className="text-success font-black text-[10px]">✨ STOCK FÍSICO</span>
-                                                                <span className="bg-success text-background px-2 py-0.5 rounded-full text-[9px]">{stockAnalysis.fisico} U.</span>
-                                                            </div>
-                                                        )}
-
-                                                        {/* STOCK FLOTANTE */}
-                                                        {stockAnalysis?.flotantes.map(flot => {
-                                                            const isConfirmed = flot.isConfirmed;
-                                                            return (
-                                                                <div key={flot.id} onClick={() => { setSelectedStockSource(isConfirmed ? `flotante_conf_${flot.id}` : `flotante_noc_${flot.id}`); setDropdownOpen(false); }} className={`p-2.5 rounded-xl cursor-pointer transition-all border-2 border-transparent ${isConfirmed ? 'bg-primary/5 hover:bg-primary/10 hover:border-primary/30' : 'bg-orange-400/5 hover:bg-orange-400/10 hover:border-orange-400/30'}`}>
-                                                                    <div className="flex justify-between items-center">
-                                                                        <span className={`font-black text-[10px] ${isConfirmed ? 'text-primary' : 'text-orange-400'}`}>
-                                                                            {isConfirmed ? '✅ CONFIRMADO' : '⏳ POR CONFIRMAR'}
-                                                                        </span>
-                                                                        {flot.fechaArribo && (
-                                                                            <span className="text-[9px] font-mono opacity-60">LLEGA: {new Date(flot.fechaArribo).toLocaleDateString()}</span>
-                                                                        )}
-                                                                    </div>
-                                                                    <div className="text-[9px] font-bold mt-1 uppercase text-text truncate">{flot.nombre} - {flot.qty} U.</div>
-                                                                </div>
-                                                            );
-                                                        })}
-
-                                                        {/* ENCUESTAR EN SEMANAS ABIERTAS */}
-                                                        {semanas.filter(s => {
-                                                            // LOGICA DEL SABADO 12:00
-                                                            const dateMatch = s.nombre.match(/(\d+)-(\d+)$/);
-                                                            if (!dateMatch) return s.abierta;
-                                                            const [_, d, m] = dateMatch;
-                                                            const weekDate = new Date(new Date().getFullYear(), parseInt(m)-1, parseInt(d));
-                                                            // Saturday is day 6. Calculate distance to next Saturday.
-                                                            const diff = (6 - weekDate.getDay() + 7) % 7;
-                                                            const deadline = new Date(weekDate);
-                                                            deadline.setDate(weekDate.getDate() + (diff === 0 ? 0 : diff));
-                                                            deadline.setHours(12, 0, 0);
-                                                            
-                                                            return s.abierta && new Date() < deadline;
-                                                        }).slice(0,4).map(s => (
-                                                            <div key={s.id} onClick={() => { setSelectedStockSource(`pedido_${s.id}`); setDropdownOpen(false); }} className="p-2.5 rounded-xl bg-background/60 hover:bg-muted/30 border border-border/50 cursor-pointer transition-all flex justify-between items-center group">
-                                                                <span className="text-[10px] font-bold text-muted group-hover:text-text truncate pr-2">📂 {s.nombre}</span>
-                                                                <ArrowRight size={10} className="text-muted opacity-0 group-hover:opacity-100 transition-all"/>
-                                                            </div>
-                                                        ))}
-
-                                                        {/* PROXIMO PEDIDO (PENDIENTE) */}
-                                                        {(() => {
-                                                            const today = new Date();
-                                                            const nextSat = new Date();
-                                                            nextSat.setDate(today.getDate() + (6 - today.getDay() + 7) % 7);
-                                                            const arrival = new Date(nextSat);
-                                                            arrival.setDate(nextSat.getDate() + 22);
-                                                            const dateStr = arrival.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
-
-                                                            return (
-                                                                <div onClick={() => { setSelectedStockSource('pedido_PENDIENTE'); setDropdownOpen(false); }} className="mt-1 p-3 rounded-xl bg-purple-500/10 border-2 border-dashed border-purple-500/30 hover:bg-purple-500/20 hover:border-purple-500/60 cursor-pointer transition-all flex flex-col gap-1 items-center justify-center text-center group">
-                                                                    <span className="text-purple-500 font-black text-[11px] flex items-center gap-2 group-hover:scale-110 transition-transform">🚀 PRÓXIMO PEDIDO</span>
-                                                                    <span className="text-[9px] text-purple-400/80 font-bold uppercase italic">Arribo aprox: {dateStr}</span>
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            <div className="absolute top-[102%] left-0 w-full text-center">
-                                                <p className="text-[8px] font-black text-muted-2 uppercase tracking-tighter opacity-70 leading-none">
-                                                    * Corte de pedido: Sábados 12:00 PM. Pasada esta hora, se asigna a "Próximo Pedido" automáticamente.
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <button onClick={()=>{
-                                            if(!selectedStockSource) return alert("Selecciona origen de stock");
-                                            addToCart();
-                                            setDropdownOpen(false);
-                                        }} disabled={!addForm.titulo || loading} className="h-[42px] px-6 bg-primary text-background font-black text-xs uppercase tracking-widest rounded-xl hover:scale-105 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 shrink-0">
-                                            Añadir
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col gap-4">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80">Nombre de Colección (ej: Kingdom Hearts)</label>
-                                                <input type="text" value={bulkSearch} onChange={e=>setBulkSearch(e.target.value)} onBlur={()=>searchBulkCatalog(bulkSearch)} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Buscar título base..."/>
-                                            </div>
-                                            <div>
-                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80">Rango de Tomos (ej: 1-5, 8, 10-12)</label>
+                                            <div className="space-y-1.5">
+                                                <label className="block text-[10px] font-black uppercase text-muted/80 pl-1">Rango de Tomos</label>
                                                 <div className="flex gap-2">
-                                                    <input type="text" value={bulkRange} onChange={e=>setBulkRange(e.target.value)} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm font-mono" placeholder="Definir rango..."/>
-                                                    <button onClick={applyBulkRange} className="px-4 bg-muted hover:bg-muted/80 text-text font-black text-[10px] rounded-xl transition-all uppercase">Filtrar</button>
+                                                    <input type="text" value={bulkRange} onChange={e=>setBulkRange(e.target.value)} className="w-full bg-background border border-border px-3 py-3 rounded-xl text-sm font-mono font-bold" placeholder="Ej: 1-5, 8..."/>
+                                                    <button onClick={applyBulkRange} className="px-4 bg-muted text-[10px] font-black uppercase rounded-xl border border-border hover:bg-muted/80 transition-colors">OK</button>
                                                 </div>
                                             </div>
-                                        </div>
-                                        
-                                        {bulkResults.length > 0 && (
-                                            <div className="bg-surface border border-border rounded-xl p-3 max-h-48 overflow-y-auto">
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                            {bulkResults.length > 0 && (
+                                                <div className="bg-background border border-border rounded-xl p-2 max-h-40 overflow-y-auto flex flex-col gap-1 shadow-inner">
                                                     {bulkResults.map(p => (
-                                                        <label key={p.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${bulkSelected.has(p.id) ? 'bg-primary/10 border-primary shadow-sm' : 'border-border/50 hover:bg-muted/30'}`}>
-                                                            <input type="checkbox" checked={bulkSelected.has(p.id)} onChange={()=>toggleBulkItem(p.id)} className="w-4 h-4 accent-primary" />
-                                                            <span className="text-[11px] font-bold truncate flex-1">{p.titulo}</span>
-                                                            <span className="text-[9px] text-muted font-mono shrink-0">BS {p.precio_venta_bs || p.precio_tapa}</span>
+                                                        <label key={p.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${bulkSelected.has(p.id) ? 'bg-secondary/10 border-secondary shadow-sm':'border-transparent hover:bg-muted/20'}`}>
+                                                            <input type="checkbox" checked={bulkSelected.has(p.id)} onChange={()=>toggleBulkItem(p.id)} className="w-4 h-4 accent-secondary" />
+                                                            <span className="text-[10px] font-black text-text truncate uppercase flex-1">{p.titulo}</span>
                                                         </label>
                                                     ))}
                                                 </div>
+                                            )}
+                                            <button onClick={addToCart} disabled={bulkSelected.size === 0 || loading} className="w-full py-4 bg-secondary text-background font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] transition-all">
+                                                Añadir Lote ({bulkSelected.size})
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* SECCIÓN DERECHA: CARRITO Y RESUMEN */}
+                                <div className="flex-1 min-w-0 bg-surface border border-border/40 p-5 rounded-2xl shadow-xl flex flex-col gap-5 min-h-[400px]">
+                                    <div className="flex items-center justify-between border-b border-border/10 pb-4">
+                                        <h3 className="text-[10px] font-black uppercase text-secondary tracking-widest flex items-center gap-2">
+                                            <ShoppingBag size={14}/> Detalle del Pedido
+                                        </h3>
+                                        {cart.length > 0 && (
+                                            <div className="flex gap-2">
+                                                <button onClick={()=>setCart([])} className="p-1.5 text-muted hover:text-error transition-colors"><Trash2 size={16}/></button>
                                             </div>
                                         )}
-
-                                        <div className="flex justify-between items-center mt-2 border-t border-border pt-4">
-                                            <span className="text-[10px] font-black text-muted uppercase tracking-widest">{bulkSelected.size} Ítems seleccionados para añadir</span>
-                                            <button onClick={addToCart} disabled={bulkSelected.size === 0 || loading} className="bg-secondary text-background font-black text-xs uppercase tracking-widest px-8 py-3 rounded-xl hover:scale-105 transition-all shadow-lg shadow-secondary/20">
-                                                        Añadir Lote seleccionado a la tabla
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* TABLA DE ITEMS (CARRO) */}
-                            {cart.length > 0 && (
-                                <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-4 duration-300">
-                                    <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-primary/10 border border-primary/20 p-4 rounded-2xl shadow-sm">
-                                        <h3 className="text-[10px] font-black uppercase text-primary tracking-[0.2em] flex items-center gap-2">
-                                            <ShoppingBag size={14} className="text-primary"/> Detalle del Pedido Actual
-                                        </h3>
-                                        
-                                        <div className="flex flex-wrap items-center gap-3">
-                                            <div className="flex items-center gap-2 bg-background/60 border border-border px-3 py-1.5 rounded-xl shadow-inner group focus-within:border-primary transition-all">
-                                                <span className="text-[9px] font-black text-muted uppercase">Global Desc. %</span>
-                                                <input 
-                                                    type="number" 
-                                                    placeholder="0"
-                                                    className="w-12 bg-transparent text-xs font-bold text-error outline-none text-center"
-                                                    onKeyDown={(e) => {
-                                                        if(e.key === 'Enter') {
-                                                            const pct = Number(e.target.value);
-                                                            const next = cart.map(it => {
-                                                                const base = Number(it.precio_original)||0;
-                                                                const val = base * (pct/100);
-                                                                return {...it, descuento: pct, precio_venta: (base - val).toFixed(0)};
-                                                            });
-                                                            setCart(next);
-                                                        }
-                                                    }}
-                                                />
-                                            </div>
-
-                                            <div className="flex items-center gap-2 bg-background/60 border border-border px-3 py-1.5 rounded-xl shadow-inner group focus-within:border-success transition-all">
-                                                <span className="text-[9px] font-black text-muted uppercase">Global Inicial BS</span>
-                                                <input 
-                                                    type="number" 
-                                                    placeholder="0"
-                                                    className="w-14 bg-transparent text-xs font-bold text-success outline-none text-center"
-                                                    onKeyDown={(e) => {
-                                                        if(e.key === 'Enter') {
-                                                            const amt = Number(e.target.value);
-                                                            const next = cart.map(it => ({...it, monto_pagado: amt}));
-                                                            setCart(next);
-                                                        }
-                                                    }}
-                                                />
-                                            </div>
-
-                                            <div className="flex items-center gap-2 bg-background/60 border border-border px-3 py-1.5 rounded-xl shadow-inner group focus-within:border-secondary transition-all">
-                                                <span className="text-[9px] font-black text-muted uppercase tracking-tighter">Asignar Fuente Global</span>
-                                                <select 
-                                                    className="bg-transparent text-[9px] font-black uppercase outline-none cursor-pointer text-text"
-                                                    onChange={(e) => {
-                                                        const src = e.target.value;
-                                                        if(!src) return;
-                                                        const next = cart.map(it => ({...it, source: src}));
-                                                        setCart(next);
-                                                    }}
-                                                >
-                                                    <option value="">-- Elige --</option>
-                                                    <option value="pedido_PENDIENTE">🚀 Próximo Pedido</option>
-                                                    <option value="fisico">✨ Stock Físico</option>
-                                                    {semanas.filter(s => s.abierta).slice(0,3).map(s => (
-                                                        <option key={s.id} value={`pedido_${s.id}`}>📂 {s.nombre}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-
-                                            <button onClick={()=>setCart([])} className="p-2 text-muted-2 hover:text-error transition-colors hover:bg-error/5 rounded-lg" title="Limpiar todo el carrito">
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </div>
                                     </div>
 
-                                    <div className="border border-border rounded-2xl overflow-hidden shadow-xl bg-surface/50 backdrop-blur-md">
-                                        <table className="w-full text-sm">
-                                            <thead>
-                                                <tr className="bg-background/80 text-[10px] font-black uppercase text-muted tracking-widest border-b border-border">
-                                                    <th className="p-4 text-left">Título / Ítem</th>
-                                                    <th className="p-4 text-center w-28">Precio Original</th>
-                                                    <th className="p-4 text-center w-24">Desc. %</th>
-                                                    <th className="p-4 text-center w-28 text-primary">Precio Final</th>
-                                                    <th className="p-4 text-center w-28 text-success">Pago Inicial</th>
-                                                    <th className="p-3 text-center w-[350px]">Asignación de Stock</th>
-                                                    <th className="p-4 w-12 text-right"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-border/30">
-                                                {cart.map((c, i) => {
-                                                    const finalPrice = Math.max(0, Number(c.precio_original) - (Number(c.descuento)||0));
-                                                    
-                                                    // Calculo de fecha para Proximo Pedido (Siguiente Sabado + 22 dias)
-                                                    const todayDt = new Date();
-                                                    const nextSatDt = new Date();
-                                                    nextSatDt.setDate(todayDt.getDate() + (6 - todayDt.getDay() + 7) % 7);
-                                                    const arrivalDt = new Date(nextSatDt);
-                                                    arrivalDt.setDate(nextSatDt.getDate() + 22);
-                                                    const dateStr = arrivalDt.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+                                    {cart.length > 0 ? (
+                                        <div className="flex flex-col gap-5 flex-1">
+                                            {/* ACCIONES RÁPIDAS */}
+                                            <div className="bg-background/50 border border-border/40 p-3 rounded-xl flex flex-wrap items-center gap-4 shadow-inner">
+                                                <div className="text-[9px] font-black uppercase text-muted tracking-widest border-r border-border/40 pr-4 mr-2">Acciones Rápidas</div>
+                                                
+                                                <div className="flex items-center gap-2">
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-error opacity-50">%</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={batchDiscount} 
+                                                            onChange={e => setBatchDiscount(e.target.value)}
+                                                            className="w-20 bg-surface border border-error/20 pl-6 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-error outline-none focus:border-error"
+                                                            placeholder="0.0"
+                                                        />
+                                                    </div>
+                                                    <button 
+                                                        onClick={applyBatchDiscount}
+                                                        className="bg-error/10 hover:bg-error text-error hover:text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all border border-error/20"
+                                                    >
+                                                        Desc. Todos
+                                                    </button>
+                                                </div>
 
-                                                    return (
-                                                        <tr key={i} className="hover:bg-primary/5 transition-colors group">
-                                                            <td className="p-4">
-                                                                <div className="font-bold text-text leading-tight" title={c.titulo}>{c.titulo}</div>
-                                                                <div className="text-[9px] text-muted uppercase font-mono mt-0.5">{c.product_id || 'ID Desconocido'}</div>
-                                                            </td>
-                                                            <td className="p-4">
-                                                                <div className="flex items-center justify-center gap-1 border border-border rounded bg-surface px-2 py-1">
-                                                                    <span className="text-[10px] text-muted font-bold">BS</span>
-                                                                    <input type="number" value={c.precio_original} onChange={(e)=>{
-                                                                        const base = Number(e.target.value);
-                                                                        const pct = Number(c.descuento)||0;
-                                                                        const final = base - (base * pct / 100);
-                                                                        const next = [...cart];
-                                                                        next[i] = {...c, precio_original: base, precio_venta: final.toFixed(0)};
-                                                                        setCart(next);
-                                                                    }} className="w-full bg-transparent text-center font-mono font-bold outline-none"/>
-                                                                </div>
-                                                            </td>
-                                                            <td className="p-4 text-center">
-                                                                <div className="flex items-center justify-center gap-1 border border-border rounded bg-surface px-2 py-1">
-                                                                    <span className="text-[10px] text-error font-bold">%</span>
-                                                                    <input type="number" value={c.descuento} onChange={(e)=>{
-                                                                        const pct = e.target.value;
-                                                                        const base = Number(c.precio_original)||0;
-                                                                        const final = base - (base * (Number(pct)||0) / 100);
-                                                                        const next = [...cart];
-                                                                        next[i] = {...c, descuento: pct, precio_venta: final.toFixed(0)};
-                                                                        setCart(next);
-                                                                    }} className="w-full bg-transparent text-center font-mono font-bold text-error outline-none"/>
-                                                                </div>
-                                                            </td>
-                                                            <td className="p-4 text-center">
-                                                                <div className="flex items-center justify-center gap-1 border-2 border-primary/30 rounded-lg bg-primary/5 px-2 py-1">
-                                                                    <span className="text-[10px] text-primary font-bold">BS</span>
-                                                                    <input type="number" value={c.precio_venta} onChange={(e)=>{
-                                                                        const final = e.target.value;
-                                                                        const base = Number(c.precio_original)||0;
-                                                                        const pct = base > 0 ? ((1 - Number(final) / base) * 100).toFixed(1) : 0;
-                                                                        const next = [...cart];
-                                                                        next[i] = {...c, precio_venta: final, descuento: pct};
-                                                                        setCart(next);
-                                                                    }} className="w-full bg-transparent text-center font-mono font-black text-primary outline-none"/>
-                                                                </div>
-                                                            </td>
-                                                            <td className="p-4 text-center">
-                                                                <div className="flex items-center justify-center gap-1 border border-success/30 rounded bg-success/5 px-2 py-1">
-                                                                    <span className="text-[10px] text-success">BS</span>
-                                                                    <input type="number" value={c.monto_pagado} onChange={(e)=>{
-                                                                        const v = Number(e.target.value);
-                                                                        const next = [...cart];
-                                                                        next[i] = {...c, monto_pagado: v};
-                                                                        setCart(next);
-                                                                    }} className="w-full bg-transparent text-center font-mono font-bold text-success outline-none"/>
-                                                                </div>
-                                                            </td>
-                                                            <td className="p-4 text-center">
-                                                                <select 
-                                                                    value={c.source} 
-                                                                    onChange={(e) => {
-                                                                        const next = [...cart];
-                                                                        next[i] = {...c, source: e.target.value};
-                                                                        setCart(next);
-                                                                    }}
-                                                                    className={`w-full bg-surface border-2 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase outline-none focus:border-primary shadow-sm transition-all ${
-                                                                        c.source === 'fisico' ? 'border-success text-success bg-success/5' : 
-                                                                        c.source === 'pedido_PENDIENTE' ? 'border-purple-500 text-purple-500 bg-purple-500/5' :
-                                                                        c.source.includes('flotante_conf') ? 'border-primary text-primary bg-primary/5' :
-                                                                        c.source.includes('flotante_noc') ? 'border-orange-400 text-orange-400 bg-orange-400/5' :
-                                                                        'border-muted text-muted bg-muted/10'
-                                                                    }`}
-                                                                >
-                                                                    <option value="pedido_PENDIENTE">🚀 PRÓXIMO PEDIDO (Arribo: {dateStr})</option>
-                                                                    {c.stockOptions.fisico > 0 && <option value="fisico">✨ Stock Físico ({c.stockOptions.fisico} u.)</option>}
-                                                                    {c.stockOptions.flotantes.map(flot => (
-                                                                        <option key={flot.id} value={flot.isConfirmed ? `flotante_conf_${flot.id}` : `flotante_noc_${flot.id}`}>
-                                                                            {flot.isConfirmed ? '🌍' : '⏳'} {flot.nombre} ({flot.qty} u.)
-                                                                        </option>
-                                                                    ))}
-                                                                    {semanas.filter(s => {
-                                                                            if (!s.abierta) return false;
-                                                                            const dateMatch = s.nombre.match(/(\d+)-(\d+)$/);
-                                                                            if (!dateMatch) return true;
-                                                                            const [_, d, m] = dateMatch;
-                                                                            const weekDate = new Date(new Date().getFullYear(), parseInt(m)-1, parseInt(d));
-                                                                            const diff = (6 - weekDate.getDay() + 7) % 7;
-                                                                            const deadline = new Date(weekDate);
-                                                                            deadline.setDate(weekDate.getDate() + (diff === 0 ? 0 : diff));
-                                                                            deadline.setHours(12, 0, 0);
-                                                                            return new Date() < deadline;
-                                                                        }).slice(0, 4).map(s => <option key={s.id} value={`pedido_${s.id}`}>Encargar p/ {s.nombre}</option>)}
-                                                                </select>
-                                                            </td>
-                                                            <td className="p-4 text-right">
-                                                                <button onClick={()=>removeFromCart(i)} className="text-muted/40 hover:text-error transition-colors p-1.5 hover:bg-error/10 rounded-lg">
-                                                                    <Trash2 size={16}/>
-                                                                </button>
-                                                            </td>
+                                                <div className="flex items-center gap-2 ml-auto">
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-success opacity-50">BS</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={batchAbono} 
+                                                            onChange={e => setBatchAbono(e.target.value)}
+                                                            className="w-20 bg-surface border border-success/20 pl-8 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-success outline-none focus:border-success"
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                    <button 
+                                                        onClick={applyBatchAbono}
+                                                        className="bg-success/10 hover:bg-success text-success hover:text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all border border-success/20"
+                                                    >
+                                                        Abono Todos
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="overflow-x-auto border border-border/30 rounded-xl bg-background/20 shadow-inner">
+                                                <table className="w-full text-[11px] text-left">
+                                                    <thead className="bg-background/80 text-[8px] font-black uppercase text-muted tracking-widest border-b border-border sticky top-0 z-10">
+                                                        <tr>
+                                                            <th className="px-3 py-3">Título / Ítem</th>
+                                                            <th className="px-3 py-3 text-center w-24">Precio</th>
+                                                            <th className="px-3 py-3 text-center w-20">Desc%</th>
+                                                            <th className="px-3 py-3 text-center w-24">Final BS</th>
+                                                            <th className="px-3 py-3 text-center w-24">Abono</th>
+                                                            <th className="px-3 py-3 text-center w-64">Asignación</th>
+                                                            <th className="px-3 py-3 text-center w-36">Llegada Aproximada</th>
+                                                            <th className="px-3 py-3 w-10"></th>
                                                         </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                        <div className="bg-background/80 p-5 px-8 flex justify-between items-center border-t border-border">
-                                            <div className="flex gap-8 text-[11px] font-black uppercase tracking-widest text-muted">
-                                                <div>Items: <span className="text-text">{cart.length}</span></div>
-                                                <div>Subtotal: <span className="text-text">BS {formatS(cart.reduce((s,i)=>s+Number(i.precio_original), 0))}</span></div>
-                                                <div>Descuentos: <span className="text-error">BS {formatS(cart.reduce((s,i)=>s+Number(i.descuento), 0))}</span></div>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-border/20">
+                                                        {cart.map((c, i) => (
+                                                            <tr key={i} className="hover:bg-primary/5 transition-colors border-b border-border/5">
+                                                                <td className="px-3 py-2.5 font-bold text-text truncate max-w-[280px]" title={c.titulo}>{c.titulo}</td>
+                                                                
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <input type="number" step="0.01" value={c.precio_original} onChange={(e)=>updateCartItem(i, 'precio_original', e.target.value)}
+                                                                        className="w-20 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono text-muted outline-none focus:border-primary shadow-sm"/>
+                                                                </td>
+
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <input type="number" step="0.1" value={c.descuento} onChange={(e)=>updateCartItem(i, 'descuento', e.target.value)}
+                                                                        className="w-16 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono text-error outline-none focus:border-error shadow-sm font-bold"/>
+                                                                </td>
+
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <input type="number" step="0.01" value={c.precio_venta} onChange={(e)=>updateCartItem(i, 'precio_venta', e.target.value)}
+                                                                        className="w-20 bg-primary/5 border border-primary/20 rounded px-2 py-1.5 text-center font-mono font-black text-primary outline-none focus:border-primary shadow-sm"/>
+                                                                </td>
+
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <input type="number" step="0.01" value={c.monto_pagado} onChange={(e)=>{
+                                                                        const next = [...cart];
+                                                                        next[i] = {...c, monto_pagado: e.target.value};
+                                                                        setCart(next);
+                                                                    }} className="w-20 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono font-bold text-success outline-none focus:border-success shadow-sm"/>
+                                                                </td>
+
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <select 
+                                                                        value={c.source || 'pedido_PENDIENTE'} 
+                                                                        onChange={(e)=>{
+                                                                            const next = [...cart];
+                                                                            const source = e.target.value;
+                                                                            let semana_id = null;
+                                                                            if (source.startsWith('pedido_')) {
+                                                                                const sId = source.split('_')[1];
+                                                                                if (sId !== 'PENDIENTE') semana_id = sId;
+                                                                            } else if (source.startsWith('flotante_')) {
+                                                                                semana_id = source.split('_').pop();
+                                                                            }
+                                                                            next[i] = {...c, source, semana_id};
+                                                                            setCart(next);
+                                                                        }}
+                                                                        className="w-full text-[9px] font-black uppercase bg-surface border-2 border-border/40 rounded px-2 py-2 outline-none text-muted-2 cursor-pointer hover:border-primary transition-all shadow-sm"
+                                                                    >
+                                                                        {/* 1. STOCK FÍSICO SI EXISTE */}
+                                                                        {c.stockOptions?.fisico > 0 && (
+                                                                            <optgroup label="✨ STOCK EN TIENDA" className="text-success font-black uppercase">
+                                                                                <option value="fisico">✨ STOCK FÍSICO ({c.stockOptions.fisico})</option>
+                                                                            </optgroup>
+                                                                        )}
+
+                                                                        {/* 2. SEMANAS FLOTANTES (CONFIRMADAS O POR LLEGAR) */}
+                                                                        {c.stockOptions?.flotantes && c.stockOptions.flotantes.length > 0 && (
+                                                                            <optgroup label="🛳️ PRODUCTOS EN CAMINO" className="text-primary font-black uppercase">
+                                                                                {c.stockOptions.flotantes.map(fl => (
+                                                                                    <option key={fl.id} value={fl.isConfirmed ? `flotante_conf_${fl.id}` : `flotante_noc_${fl.id}`}>
+                                                                                        {fl.isConfirmed ? '✅' : '⏳'} {fl.nombre} ({fl.qty} U.)
+                                                                                    </option>
+                                                                                ))}
+                                                                            </optgroup>
+                                                                        )}
+                                                                        
+                                                                        {/* 3. SEMANAS ABIERTAS PARA PEDIDOS */}
+                                                                        <optgroup label="🚀 LANZAMIENTOS (W)" className="text-muted font-black uppercase">
+                                                                            {semanas.filter(s => s.abierta).map(s => (
+                                                                                <option key={s.id} value={`pedido_${s.id}`}>🚀 P/ {s.nombre}</option>
+                                                                            ))}
+                                                                            <option value="pedido_PENDIENTE">📂 PRÓXIMO PEDIDO (SIN FECHA)</option>
+                                                                        </optgroup>
+                                                                    </select>
+                                                                </td>
+
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <div className={`text-[9px] font-black uppercase px-2 py-1.5 rounded-lg border ${
+                                                                        c.source === 'fisico' ? 'bg-success/5 border-success/20 text-success' :
+                                                                        'bg-muted/5 border-border/30 text-muted-2'
+                                                                    }`}>
+                                                                        {(() => {
+                                                                            if (c.source === 'fisico') return "✨ INMEDIATA";
+                                                                            
+                                                                            let date = null;
+                                                                            const now = new Date();
+                                                                            
+                                                                            if (c.source === 'pedido_PENDIENTE') {
+                                                                                // Unificado: 22 días después del PRÓXIMO SÁBADO de Hoy
+                                                                                const day = now.getDay();
+                                                                                const diff = (6 - day + 7) % 7 || 7;
+                                                                                const nextSat = new Date(now.getTime() + (diff * 24 * 60 * 60 * 1000));
+                                                                                date = new Date(nextSat.getTime() + (22 * 24 * 60 * 60 * 1000));
+                                                                            } else if (c.source.startsWith('flotante_')) {
+                                                                                const id = c.source.split('_').pop();
+                                                                                const fl = c.stockOptions?.flotantes?.find(f => f.id == id);
+                                                                                if (fl) date = fl.fechaArribo;
+                                                                            } else if (c.source.startsWith('pedido_')) {
+                                                                                const id = c.source.split('_')[1];
+                                                                                const s = semanas.find(x => x.id == id);
+                                                                                if (s) {
+                                                                                    date = s.fecha_estimada_llegada ? new Date(s.fecha_estimada_llegada) : new Date(new Date(s.created_at).getTime() + (22 * 24 * 60 * 60 * 1000));
+                                                                                }
+                                                                            }
+                                                                            
+                                                                            if (!date) return "---";
+                                                                            return new Date(date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
+                                                                        })()}
+                                                                    </div>
+                                                                </td>
+
+                                                                <td className="px-3 py-2.5 text-right">
+                                                                    <button onClick={()=>removeFromCart(i)} className="p-2 text-muted/40 hover:text-error hover:bg-error/5 rounded-lg transition-all"><X size={16}/></button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
                                             </div>
-                                            <div className="flex items-center gap-4">
-                                                <span className="text-[10px] font-black uppercase text-muted tracking-[0.2em]">Total Pedido</span>
-                                                <span className="text-2xl font-mono font-black text-primary">BS {formatS(cart.reduce((s,i)=>s+Number(i.precio_venta), 0))}</span>
+                                            
+                                            <div className="mt-auto bg-background/40 p-5 rounded-2xl border border-border flex justify-between items-center shadow-lg">
+                                                <div className="flex flex-col">
+                                                    <span className="text-[10px] font-black uppercase text-muted tracking-widest pb-1">Unidades: {cart.length}</span>
+                                                    <span className="text-[10px] font-black uppercase text-success tracking-widest">Abono: BS {formatS(cart.reduce((s,i)=>s+Number(i.monto_pagado), 0))}</span>
+                                                </div>
+                                                <div className="flex flex-col items-end">
+                                                    <span className="text-[10px] font-black uppercase text-primary tracking-[0.2em] pb-1">Total Pedido</span>
+                                                    <span className="text-2xl font-mono font-black text-primary decoration-primary decoration-double underline underline-offset-4">BS {formatS(cart.reduce((s,i)=>s+Number(i.precio_venta), 0))}</span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
+                                    ) : (
+                                        <div className="flex-1 flex flex-col items-center justify-center text-center opacity-20 py-20">
+                                            <ShoppingBag size={64} />
+                                            <div className="mt-2 text-xs font-black uppercase tracking-widest">Vacío</div>
+                                        </div>
+                                    )}
                                 </div>
-                            )}
+                            </div>
                         </div>
 
                         <div className="p-6 border-t border-border flex justify-end gap-4 bg-background rounded-b-2xl shrink-0">
-                            <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="px-6 py-2.5 text-[11px] font-black uppercase tracking-widest text-muted hover:text-text transition-colors">Cancelar</button>
+                            <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="px-6 py-2.5 text-[11px] font-black uppercase tracking-widest text-muted hover:text-text">Cancelar</button>
                             <button 
                                 onClick={handleSaveOrder} 
                                 disabled={cart.length === 0 || loading}

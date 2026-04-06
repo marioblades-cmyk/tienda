@@ -381,20 +381,20 @@ export default function ConfirmationInfoView() {
                                                     </div>
                                                 </div>
 
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full text-sm border-collapse">
+                                                <div className="overflow-x-auto -mx-6 px-6 pb-4">
+                                                    <table className="w-full text-[11px] md:text-sm border-separate border-spacing-0">
                                                         <thead>
                                                             <tr className="text-[10px] font-bold text-secondary uppercase tracking-widest border-b border-border/20">
-                                                                <th className="px-4 py-3 text-left">Título</th>
-                                                                <th className="px-4 py-3 text-center">Pedido</th>
-                                                                <th className="px-4 py-3 text-center">Confirmado</th>
-                                                                <th className="px-4 py-3 text-center">Reparto</th>
-                                                                <th className="px-4 py-3 text-center">Recibido</th>
-                                                                <th className="px-4 py-3 text-center">Diferencia</th>
+                                                                <th className="sticky left-0 z-10 bg-secondary/5 px-4 py-3 text-left min-w-[180px] md:min-w-[320px] backdrop-blur-sm shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Título</th>
+                                                                <th className="px-2 md:px-4 py-3 text-center">Pedido</th>
+                                                                <th className="px-2 md:px-4 py-3 text-center">Confirmado</th>
+                                                                <th className="px-2 md:px-4 py-3 text-center">Reparto</th>
+                                                                <th className="px-2 md:px-4 py-3 text-center">Recibido</th>
+                                                                <th className="px-2 md:px-4 py-3 text-center">Diferencia</th>
                                                                 <th className="px-4 py-3 text-right">Estado</th>
                                                             </tr>
                                                         </thead>
-                                                        <tbody>
+                                                        <tbody className="divide-y divide-border/10">
                                                             {week.titleDetails
                                                                 .filter(t => {
                                                                     if (detailFilter === 'cuts') return t.isCut || t.isMissing;
@@ -406,26 +406,28 @@ export default function ConfirmationInfoView() {
                                                                     const isTitleExp = expandedTitle?.weekId === week.id && expandedTitle?.title === (t.titulo || '').toLowerCase().trim();
                                                                     const titleOrders = clientItems.filter(ci => ci.semana_id === week.id && (ci.titulo || '').toLowerCase().trim() === (t.titulo || '').toLowerCase().trim());
                                                                     const allocatedCount = titleOrders.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA').length;
-
+                                                                    
                                                                     return (
                                                                         <React.Fragment key={titleKey}>
-                                                                            <tr className={`border-b border-border/10 hover:bg-white/40 transition-colors ${isTitleExp ? 'bg-secondary/5' : ''}`}>
-                                                                                <td className="px-4 py-3">
-                                                                                    <div className="flex items-center gap-2">
+                                                                            <tr className={`hover:bg-white/40 transition-colors ${isTitleExp ? 'bg-secondary/5' : ''}`}>
+                                                                                <td className="sticky left-0 z-20 bg-white px-4 py-3 min-w-[180px] md:min-w-[320px] shadow-[4px_0_10px_-4px_rgba(0,0,0,0.1)]">
+                                                                                    <div className="flex items-start gap-2 py-0.5">
                                                                                         <button 
                                                                                             onClick={() => setExpandedTitle(isTitleExp ? null : { weekId: week.id, title: (t.titulo || '').toLowerCase().trim() })}
-                                                                                            className="p-1 hover:bg-secondary/10 rounded transition-colors text-secondary"
+                                                                                            className="mt-0.5 p-1 hover:bg-secondary/10 rounded transition-colors text-secondary shrink-0"
                                                                                         >
                                                                                             {isTitleExp ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                                                                         </button>
-                                                                                        <span className="font-bold text-navy truncate max-w-[250px]" title={t.titulo}>{t.titulo}</span>
+                                                                                        <span className="font-bold text-navy leading-tight whitespace-normal break-words" title={t.titulo}>
+                                                                                            {t.titulo}
+                                                                                        </span>
                                                                                     </div>
                                                                                 </td>
-                                                                                <td className="px-4 py-3 text-center font-mono font-bold text-muted-2">{t.pedido || 0}</td>
-                                                                                <td className="px-4 py-3 text-center font-black text-navy">{t.confirmado || 0}</td>
-                                                                                <td className="px-4 py-3 text-center">
+                                                                                <td className="px-2 md:px-4 py-3 text-center font-mono font-bold text-muted-2">{t.pedido || 0}</td>
+                                                                                <td className="px-2 md:px-4 py-3 text-center font-black text-navy">{t.confirmado || 0}</td>
+                                                                                <td className="px-2 md:px-4 py-3 text-center">
                                                                                     <div className="flex flex-col items-center gap-1">
-                                                                                        <div className={`text-[10px] font-black px-2 py-0.5 rounded-full ${t.allocated >= t.confirmado && t.confirmado > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                                                        <div className={`text-[9px] md:text-[10px] font-black px-2 py-0.5 rounded-full ${t.allocated >= t.confirmado && t.confirmado > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
                                                                                             {t.allocated} / {t.confirmado}
                                                                                         </div>
                                                                                         {t.needsAllocation && (
@@ -435,25 +437,25 @@ export default function ConfirmationInfoView() {
                                                                                         )}
                                                                                     </div>
                                                                                 </td>
-                                                                                <td className={`px-4 py-3 text-center font-black ${t.received > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
+                                                                                <td className={`px-2 md:px-4 py-3 text-center font-black ${t.received > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
                                                                                     {t.received || 0}
                                                                                 </td>
-                                                                                <td className={`px-4 py-3 text-center font-bold ${t.pedido > t.confirmado ? 'text-red-500' : (t.confirmado > t.pedido ? 'text-green-600' : 'text-muted-2')}`}>
+                                                                                <td className={`px-2 md:px-4 py-3 text-center font-bold ${t.pedido > t.confirmado ? 'text-red-500' : (t.confirmado > t.pedido ? 'text-green-600' : 'text-muted-2')}`}>
                                                                                     {t.pedido > t.confirmado ? `-${t.pedido - t.confirmado}` : (t.confirmado > t.pedido ? `+${t.confirmado - t.pedido}` : '-')}
                                                                                 </td>
                                                                                 <td className="px-4 py-3 text-right">
                                                                                     {t.received >= t.confirmado && t.confirmado > 0 ? (
-                                                                                        <span className="bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-[0_0_8px_rgba(16,185,129,0.4)] whitespace-nowrap">LLEGÓ COMPLETO</span>
+                                                                                        <span className="bg-emerald-600 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-[0_0_8px_rgba(16,185,129,0.4)] whitespace-nowrap">LLEGÓ COMPLETO</span>
                                                                                     ) : t.isMissing ? (
-                                                                                        <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm animate-pulse whitespace-nowrap">RECORTADO TOTAL</span>
+                                                                                        <span className="bg-red-500 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-sm animate-pulse whitespace-nowrap">RECORTADO TOTAL</span>
                                                                                     ) : t.isCut ? (
-                                                                                        <span className="bg-orange-500 text-white text-[9px] font-black px-2 py-0.5 rounded whitespace-nowrap">RECORTADO</span>
+                                                                                        <span className="bg-orange-500 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded whitespace-nowrap">RECORTADO</span>
                                                                                     ) : t.isExtra ? (
-                                                                                        <span className="bg-green-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-[0_0_8px_rgba(22,163,74,0.4)] whitespace-nowrap">EXTRA</span>
+                                                                                        <span className="bg-green-600 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-[0_0_8px_rgba(22,163,74,0.4)] whitespace-nowrap">EXTRA</span>
                                                                                     ) : t.received > 0 ? (
-                                                                                        <span className="bg-blue-500 text-white text-[9px] font-black px-2 py-0.5 rounded whitespace-nowrap">ARRIBANDO ({t.received})</span>
+                                                                                        <span className="bg-blue-500 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded whitespace-nowrap">ARRIBANDO ({t.received})</span>
                                                                                     ) : (
-                                                                                        <span className="bg-blue-600/10 text-blue-600 text-[9px] font-black px-2 py-0.5 rounded">EN CAMINO</span>
+                                                                                        <span className="bg-blue-600/10 text-blue-600 text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded">EN CAMINO</span>
                                                                                     )}
                                                                                 </td>
                                                                             </tr>
