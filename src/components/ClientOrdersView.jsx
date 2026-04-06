@@ -688,41 +688,60 @@ export default function ClientOrdersView() {
                 const matchTitulo = it.titulo?.toLowerCase().includes(s);
                 if (!matchCliente && !matchTitulo) return false;
             }
+
+            // SEGURIDAD: Solo mis items si no soy admin
+            if (!isAdmin && it.vendedor_id !== user?.id) return false;
+
             return true;
         });
-    }, [items, filterEstado, filterSemana, search]);
+    }, [items, filterEstado, filterSemana, search, isAdmin, user]);
 
-    const totalPedidos = items.filter(i => i.estado !== 'ENTREGADO').length;
-    const ventasTotales = items.reduce((acc, i) => acc + (Number(i.precio_venta)||0), 0);
-    const pagadoItems = items.reduce((acc, i) => acc + (Number(i.monto_pagado)||0), 0);
-    const pagadoGral = pagos.reduce((acc, p) => acc + (Number(p.monto)||0), 0);
+    const totalPedidos = items.filter(i => {
+        if (!isAdmin && i.vendedor_id !== user?.id) return false;
+        return i.estado !== 'ENTREGADO';
+    }).length;
+
+    const ventasTotales = items.filter(i => isAdmin || i.vendedor_id === user?.id)
+        .reduce((acc, i) => acc + (Number(i.precio_venta)||0), 0);
+    const pagadoItems = items.filter(i => isAdmin || i.vendedor_id === user?.id)
+        .reduce((acc, i) => acc + (Number(i.monto_pagado)||0), 0);
+    const pagadoGral = pagos.filter(p => isAdmin || p.vendedor_id === user?.id)
+        .reduce((acc, p) => acc + (Number(p.monto)||0), 0);
     const totalCobrado = pagadoItems + pagadoGral;
     const saldoPendiente = ventasTotales - totalCobrado;
 
     const [editingState, setEditingState] = useState(null);
 
-    // Grouping by client
     const groupedData = useMemo(() => {
         const groups = {};
+        // 1. Identify all clients who have ACTIVE orders (any seller)
         clientes.forEach(c => {
-            groups[c.id] = { client: c, items: [], pagos: 0 };
-        });
-        displayItems.forEach(it => {
-            if(groups[it.cliente_id]) groups[it.cliente_id].items.push(it);
-        });
-        pagos.forEach(p => {
-            if(groups[p.cliente_id]) groups[p.cliente_id].pagos += Number(p.monto);
+            const clientItems = items.filter(i => i.cliente_id === c.id);
+            const myItems = clientItems.filter(i => i.vendedor_id === user?.id);
+            const otherItems = clientItems.filter(i => i.vendedor_id !== user?.id && i.estado !== 'ENTREGADO');
+
+            // If I am not admin, I only "see" customers in my list if I have items with them,
+            // OR if I am looking at all and want to know about shipping.
+            if (!isAdmin && myItems.length === 0 && otherItems.length === 0) return;
+
+            groups[c.id] = { 
+                client: c, 
+                items: isAdmin ? clientItems : myItems, // Ver solo mis items o todos si soy admin
+                others: isAdmin ? [] : otherItems, // Guardar otros para alerta de envio
+                pagos: pagos.filter(p => p.cliente_id === c.id && (isAdmin || p.vendedor_id === user?.id))
+                             .reduce((s,p) => s + Number(p.monto), 0)
+            };
         });
         
         // Remove empty groups if filtering
         Object.keys(groups).forEach(k => {
-            if(groups[k].items.length === 0 && (filterEstado !== 'todos' || search)) {
+            if(groups[k].items.length === 0 && groups[k].others.length === 0 && (filterEstado !== 'todos' || search)) {
                 delete groups[k];
             }
         });
         
         return Object.values(groups);
-    }, [clientes, displayItems, pagos, filterEstado, search]);
+    }, [clientes, items, pagos, filterEstado, search, isAdmin, user]);
 
     const sendWhatsApp = (client, type) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
@@ -938,7 +957,7 @@ export default function ClientOrdersView() {
 
                                 {/* Expanded Table */}
                                 {isExp && (
-                                    <div className="border-t border-border bg-background p-4">
+                                    <div className="border-t border-border bg-background p-4 animate-in slide-in-from-top-2">
                                         <div className="overflow-x-auto">
                                             <table className="w-full text-sm">
                                                 <thead>
@@ -953,6 +972,7 @@ export default function ClientOrdersView() {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
+                                                    {/* PROPIOS ITEMS */}
                                                     {group.items.map(it => {
                                                         const iDeuda = Math.max(0, it.precio_venta - it.monto_pagado);
                                                         const isEd = editingState === it.id;
@@ -989,39 +1009,65 @@ export default function ClientOrdersView() {
                                                                 <td className="py-2 text-[11px] text-muted max-w-[150px] truncate" title={it.nota}>{it.nota || '-'}</td>
                                                                 <td className="py-2 text-right">
                                                                     <button onClick={async()=>{
-                                                                        if(confirm('¿Eliminar este ítem del pedido?')) {
-                                                                            // Restore stock if it was physically in store
-                                                // Restore stock if it was physically in store or already ordered to provider
-                                                let shouldRestore = false;
-                                                if ((it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (it.catalog_id || it.product_id)) {
-                                                    shouldRestore = true;
-                                                } else if (it.estado === 'RESERVA' && it.semana_id) {
-                                                    // If reservation, check if week is already "Ordered" or "Received"
-                                                    const { data: sem } = await supabase.from('semanas').select('estado').eq('id', it.semana_id).maybeSingle();
-                                                    if (sem && (sem.estado === 'PEDIDA' || sem.estado === 'RECIBIDA')) {
-                                                        shouldRestore = true;
-                                                        console.log(`📦 Semana ${sem.estado}: devolviendo unidad a stock físico (era preventa consolidada).`);
-                                                    }
-                                                }
-
-                                                if (shouldRestore && (it.catalog_id || it.product_id)) {
-                                                    const lookupCol = it.catalog_id ? 'id' : 'product_id';
-                                                    const lookupVal = it.catalog_id || it.product_id;
-                                                    const { data: prod } = await supabase.from('catalogo_productos').select('id, stock_fisico').eq(lookupCol, lookupVal).maybeSingle();
-                                                    if (prod) {
-                                                        await supabase.from('catalogo_productos').update({ stock_fisico: (prod.stock_fisico || 0) + 1 }).eq('id', prod.id);
-                                                        if (typeof catalogService !== 'undefined') catalogService.clearCache();
-                                                    }
-                                                }
+                                                                        if(!confirm('¿Eliminar este ítem del pedido?')) return;
+                                                                        setLoading(true);
+                                                                        try {
+                                                                            let shouldRestore = false;
+                                                                            if ((it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (it.catalog_id || it.product_id)) {
+                                                                                shouldRestore = true;
+                                                                            } else if (it.estado === 'RESERVA' && it.semana_id) {
+                                                                                const { data: sem } = await supabase.from('semanas').select('estado').eq('id', it.semana_id).maybeSingle();
+                                                                                if (sem && (sem.estado === 'PEDIDA' || sem.estado === 'RECIBIDA')) {
+                                                                                    shouldRestore = true;
+                                                                                }
+                                                                            }
+                                                                            if (shouldRestore && (it.catalog_id || it.product_id)) {
+                                                                                const lookupCol = it.catalog_id ? 'id' : 'product_id';
+                                                                                const lookupVal = it.catalog_id || it.product_id;
+                                                                                const { data: prod } = await supabase.from('catalogo_productos').select('id, stock_fisico').eq(lookupCol, lookupVal).maybeSingle();
+                                                                                if (prod) {
+                                                                                    await supabase.from('catalogo_productos').update({ stock_fisico: (prod.stock_fisico || 0) + 1 }).eq('id', prod.id);
+                                                                                    if (typeof catalogService !== 'undefined') catalogService.clearCache();
+                                                                                }
+                                                                            }
                                                                             await supabase.from('cliente_items').delete().eq('id', it.id);
-                                                                            await fetchData();
-                                                                            await fetchCatalog();
-                                                                        }
-                                                                    }} className="text-muted hover:text-error p-1"><Trash2 size={14}/></button>
+                                                                            await fetchData(); await fetchCatalog();
+                                                                        } catch(e){ console.error(e); }
+                                                                        finally { setLoading(false); }
+                                                                    }} className="text-muted hover:text-error p-1 transition-colors">
+                                                                        <Trash2 size={14}/>
+                                                                    </button>
                                                                 </td>
                                                             </tr>
                                                         );
                                                     })}
+
+                                                    {/* ITEMS DE OTROS SOCIOS (Coordina envío) */}
+                                                    {group.others?.length > 0 && (
+                                                        <>
+                                                            <tr className="bg-muted/5 border-t-2 border-primary/10">
+                                                                <td colSpan={7} className="p-3">
+                                                                    <div className="flex items-center gap-2 text-[10px] font-black text-primary uppercase tracking-widest">
+                                                                        <RefreshCw size={12} className="animate-spin-slow" /> Pedidos de otros socios (Para envío conjunto)
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                            {group.others.map(oit => (
+                                                                <tr key={oit.id} className="bg-muted/5 border-b border-border/20 opacity-70">
+                                                                    <td className="py-2 pl-2 text-xs font-medium italic">{oit.titulo}</td>
+                                                                    <td className="py-2 text-xs font-mono">BS {formatS(oit.precio_venta)}</td>
+                                                                    <td className="py-2 text-xs font-mono">BS {formatS(oit.monto_pagado)}</td>
+                                                                    <td className="py-2 text-xs font-mono">BS {formatS(oit.precio_venta - oit.monto_pagado)}</td>
+                                                                    <td className="py-2">
+                                                                        {renderStatus(oit)}
+                                                                    </td>
+                                                                    <td colSpan={2} className="py-2 text-[10px] text-muted italic">
+                                                                        Vendido por otro socio
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </>
+                                                    )}
                                                 </tbody>
                                             </table>
                                         </div>
@@ -1072,7 +1118,6 @@ export default function ClientOrdersView() {
                                             if (i.estado !== 'PEDIDO (Siguiente)') return false;
                                         } else {
                                             if (selectedSemanaHoja && i.semana_id !== selectedSemanaHoja) return false;
-                                            // Si no hay semana seleccionada, por defecto no mostramos los "Siguiente" para no ensuciar las semanas reales
                                             if (!selectedSemanaHoja && i.estado === 'PEDIDO (Siguiente)') return false;
                                         }
 
@@ -1082,7 +1127,6 @@ export default function ClientOrdersView() {
                                         return i.titulo.toLowerCase().includes(term);
                                     });
 
-                                    // Agrupar con seguridad nula
                                     const grouped = {};
                                     filtered.forEach(i => {
                                         const title = i.titulo || 'Sin Título';
