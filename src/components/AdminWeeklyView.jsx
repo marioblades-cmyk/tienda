@@ -13,6 +13,8 @@ export default function AdminWeeklyView() {
     const [draggingId, setDraggingId] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [pendingOrders, setPendingOrders] = useState(0);
+    const [editingDateId, setEditingDateId] = useState(null);
+    const [tempDate, setTempDate] = useState('');
 
     useEffect(() => {
         fetchSemanas();
