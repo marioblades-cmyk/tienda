@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info } from 'lucide-react';
+import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 export default function ClientOrdersView() {
@@ -19,8 +19,10 @@ export default function ClientOrdersView() {
     const [view, setView] = useState('clientes'); // 'clientes' | 'items' | 'hoja'
     const [search, setSearch] = useState('');
     const [filterEstado, setFilterEstado] = useState('todos'); // 'todos' | 'PEDIDO' | 'CONFIRMADO' | 'EN TIENDA' | 'ENTREGADO'
+    const [filterSemana, setFilterSemana] = useState('todos'); // 'todos' | semana_id
     const [expandedCliente, setExpandedCliente] = useState(new Set());
     const [selectedSemanaHoja, setSelectedSemanaHoja] = useState('');
+    const [selectedItems, setSelectedItems] = useState(new Set()); // IDs de ítems seleccionados para acciones masivas
 
     // Modales
     const [showAddModal, setShowAddModal] = useState(false);
@@ -29,13 +31,20 @@ export default function ClientOrdersView() {
 
     // Formulario Nuevo Pedido
     const [addForm, setAddForm] = useState({
-        celular: '', nombre: '', direccion: '', notas_cliente: '',
+        celular: '', nombre: '', ci: '', ciudad: '', sucursal: '', direccion: '', notas_cliente: '',
         semana_id: '', mode: 'individual',
         // individual
-        titulo: '', product_id: '', precio_venta: '', monto_pagado: '', nota_item: '',
+        titulo: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '',
         // coleccion
         coleccion_nombre: '', tomos: '', precio_tomo: '', pago_inicial_total: ''
     });
+
+    // Bulk add modal state (integrated in AddModal)
+    const [bulkSearch, setBulkSearch] = useState('');
+    const [bulkRange, setBulkRange] = useState('');
+    const [bulkResults, setBulkResults] = useState([]);
+    const [bulkSelected, setBulkSelected] = useState(new Set());
+    const [bulkLoading, setBulkLoading] = useState(false);
 
     const [catalogSuggestions, setCatalogSuggestions] = useState([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -46,6 +55,7 @@ export default function ClientOrdersView() {
     
     // Carrito de la venta actual
     const [cart, setCart] = useState([]);
+    const [dropdownOpen, setDropdownOpen] = useState(false);
 
     // Formulario Pagos
     const [payMode, setPayMode] = useState('items'); // 'items' | 'general'
@@ -53,6 +63,83 @@ export default function ClientOrdersView() {
     const [payMonto, setPayMonto] = useState('');
     const [pagoConcepto, setPagoConcepto] = useState('');
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
+    
+    // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
+    useEffect(() => {
+        if (!showAddModal) {
+            setAddForm({
+                celular: '', nombre: '', ci: '', ciudad: '', sucursal: '', direccion: '', notas_cliente: '',
+                semana_id: '', mode: 'individual',
+                titulo: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '',
+                coleccion_nombre: '', tomos: '', precio_tomo: '', pago_inicial_total: ''
+            });
+            setCart([]);
+            setBulkSearch('');
+            setBulkRange('');
+            setBulkResults([]);
+            setBulkSelected(new Set());
+            setCatalogSuggestions([]);
+            setShowSuggestions(false);
+            setStockAnalysis(null);
+            setSelectedStockSource('');
+        }
+    }, [showAddModal]);
+
+    const handleBulkDelete = async () => {
+        if (!selectedItems.size) return;
+        if (!confirm(`¿Estás seguro de eliminar ${selectedItems.size} pedidos seleccionados? Esta acción no se puede deshacer.`)) return;
+
+        setLoading(true);
+        try {
+            const list = Array.from(selectedItems);
+            const itemsToDelete = items.filter(i => selectedItems.has(i.id));
+
+            for (const it of itemsToDelete) {
+                // Restore stock if it was physically in store
+                let shouldRestore = false;
+                if ((it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (it.catalog_id || it.product_id)) {
+                    shouldRestore = true;
+                } else if (it.estado === 'RESERVA' && it.semana_id) {
+                    const { data: sem } = await supabase.from('semanas')
+                        .select('estado')
+                        .eq('id', it.semana_id)
+                        .maybeSingle();
+                    if (sem && (sem.estado === 'PEDIDA' || sem.estado === 'RECIBIDA')) {
+                        shouldRestore = true;
+                    }
+                }
+
+                if (shouldRestore && (it.catalog_id || it.product_id)) {
+                    const lookupCol = it.catalog_id ? 'id' : 'product_id';
+                    const lookupVal = it.catalog_id || it.product_id;
+                    const { data: prod } = await supabase.from('catalogo_productos')
+                        .select('id, stock_fisico')
+                        .eq(lookupCol, lookupVal)
+                        .maybeSingle();
+                    if (prod) {
+                        await supabase.from('catalogo_productos')
+                            .update({ stock_fisico: (prod.stock_fisico || 0) + 1 })
+                            .eq('id', prod.id);
+                    }
+                }
+            }
+
+            // Perform bulk delete
+            const { error } = await supabase.from('cliente_items').delete().in('id', list);
+            if (error) throw error;
+
+            setSelectedItems(new Set());
+            if (typeof catalogService !== 'undefined') catalogService.clearCache();
+            await fetchData();
+            await fetchCatalog();
+            alert(`${list.length} pedidos eliminados correctamente.`);
+        } catch (err) {
+            console.error(err);
+            alert("Error al realizar borrado masivo: " + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
         fetchData();
@@ -95,6 +182,86 @@ export default function ClientOrdersView() {
     };
 
     // Helper: Parsear Tomos "1-5,7" -> [1,2,3,4,5,7]
+    const parseRange = (rangeStr) => {
+        if (!rangeStr || !rangeStr.trim()) return null;
+        const nums = new Set();
+        for (const part of rangeStr.split(',')) {
+            const trimmed = part.trim();
+            if (trimmed.includes('-')) {
+                const [a, b] = trimmed.split('-').map(n => parseInt(n.trim()));
+                if (!isNaN(a) && !isNaN(b)) {
+                    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) nums.add(i);
+                }
+            } else {
+                const n = parseInt(trimmed);
+                if (!isNaN(n)) nums.add(n);
+            }
+        }
+        return nums.size > 0 ? nums : null;
+    };
+
+    const extractVolNum = (title) => {
+        const matches = (title || "").match(/\d+/g);
+        return matches ? parseInt(matches[matches.length - 1]) : null;
+    };
+
+    const searchBulkCatalog = async (term) => {
+        if (!term || term.trim().length < 2) { setBulkResults([]); return; }
+        setBulkLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('catalogo_productos')
+                .select('*')
+                .ilike('titulo', `%${term.trim()}%`)
+                .order('titulo', { ascending: true })
+                .limit(100);
+            if (error) throw error;
+            const results = data || [];
+            setBulkResults(results);
+            
+            // Auto-select based on range
+            const rangeSet = parseRange(bulkRange);
+            if (rangeSet) {
+                setBulkSelected(new Set(
+                    results.filter(p => {
+                        const v = extractVolNum(p.titulo);
+                        return p.titulo.toLowerCase().startsWith(term.trim().toLowerCase()) && v !== null && rangeSet.has(v);
+                    }).map(p => p.id)
+                ));
+            } else {
+                setBulkSelected(new Set());
+            }
+        } catch (err) {
+            console.error('Error buscando catálogo:', err);
+        } finally {
+            setBulkLoading(false);
+        }
+    };
+
+    const applyBulkRange = () => {
+        const rangeSet = parseRange(bulkRange);
+        if (!rangeSet) {
+            setBulkSelected(new Set(
+                bulkResults.filter(p => p.titulo.toLowerCase().startsWith(bulkSearch.trim().toLowerCase())).map(p => p.id)
+            ));
+            return;
+        }
+        setBulkSelected(new Set(
+            bulkResults.filter(p => {
+                const v = extractVolNum(p.titulo);
+                return p.titulo.toLowerCase().startsWith(bulkSearch.trim().toLowerCase()) && v !== null && rangeSet.has(v);
+            }).map(p => p.id)
+        ));
+    };
+
+    const toggleBulkItem = (pid) => {
+        setBulkSelected(prev => {
+            const next = new Set(prev);
+            next.has(pid) ? next.delete(pid) : next.add(pid);
+            return next;
+        });
+    };
+
     const parseTomos = (str) => {
         if (!str) return [];
         const result = new Set();
@@ -113,103 +280,7 @@ export default function ClientOrdersView() {
         return Array.from(result).sort((a,b)=>a-b);
     };
 
-    const handleSearchCatalog = (val) => {
-        setAddForm({ ...addForm, titulo: val });
-        if (val.length > 2) {
-            const lower = val.toLowerCase();
-            const matches = catalog.filter(c => c.titulo.toLowerCase().includes(lower)).slice(0, 8);
-            setCatalogSuggestions(matches);
-            setShowSuggestions(true);
-        } else {
-            setCatalogSuggestions([]);
-            setShowSuggestions(false);
-        }
-    };
-
-    const selectSuggestion = async (item) => {
-        setAddForm({ 
-            ...addForm, 
-            titulo: item.titulo, 
-            catalog_id: item.id,
-            product_id: item.product_id,
-            precio_venta: item.precio_venta_bs || item.precio_tapa || '' 
-        });
-        setShowSuggestions(false);
-        setStockAnalysis(null);
-        setSelectedStockSource('');
-        
-        // Analyze Stock dynamically
-        try {
-            const { data: masters } = await supabase.from('master_confirmaciones').select('semana_id, datos_json');
-            const { data: recs } = await supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').eq('titulo', item.titulo);
-            // Fetch unconfirmed store requests to calculate unconfirmed floating stock
-            const { data: allOrders } = await supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)').eq('titulo', item.titulo);
-            
-            const flotantes = [];
-            const pTitle = item.titulo.toLowerCase().trim();
-            
-            semanas.forEach(w => {
-                const master = masters?.find(m => m.semana_id === w.id);
-                const isConfirmed = !!master;
-                let qtyFlot = 0;
-
-                if (isConfirmed) {
-                    const totalConf = (master.datos_json || [])
-                        .filter(i => (i.titulo||'').toLowerCase().trim() === pTitle)
-                        .reduce((s,i) => s + (i.cantidad||0), 0);
-                        
-                    const sellerRequested = (allOrders || [])
-                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id)
-                        .reduce((s,p) => s + (p.cantidad||0), 0);
-
-                    const totalRec = (recs || [])
-                        .filter(r => r.semana_id === w.id)
-                        .reduce((s,r) => s + (r.cantidad_recibida||0), 0);
-                    
-                    const clientReserved = items.filter(it => 
-                        (it.titulo || '').toLowerCase().trim() === pTitle && 
-                        it.semana_id === w.id && 
-                        it.estado === `CONFIRMADO ${w.nombre}`
-                    ).length;
-                        
-                    qtyFlot = Math.max(0, (totalConf - sellerRequested) - totalRec - clientReserved);
-                } else {
-                    // Not confirmed yet: show the full "Tienda" request for this item
-                    const storeTotal = (allOrders || [])
-                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id)
-                        .reduce((s,p) => s + (p.cantidad||0), 0);
-                    
-                    const clientWaitlist = items.filter(it => 
-                        (it.titulo || '').toLowerCase().trim() === pTitle && 
-                        it.semana_id === w.id && 
-                        it.estado === `PEDIDO ${w.nombre}`
-                    ).length;
-
-                    qtyFlot = Math.max(0, storeTotal - clientWaitlist);
-                }
-                
-                if (qtyFlot > 0) {
-                    const d = w.fecha_estimada_llegada ? new Date(w.fecha_estimada_llegada) : new Date(new Date(w.created_at).getTime() + (22*24*60*60*1000));
-                    flotantes.push({ semana_id: w.id, nombre: w.nombre, qty: qtyFlot, fechaArribo: d, isConfirmed });
-                }
-            });
-            
-            setStockAnalysis({ fisico: item.stock_fisico || 0, flotantes });
-            
-            // Auto-select logical default
-            if (item.stock_fisico > 0) {
-                setSelectedStockSource('fisico');
-            } else if (flotantes.length > 0) {
-                const first = flotantes[0];
-                const sourceId = first.isConfirmed ? `flotante_conf_${first.semana_id}` : `flotante_noc_${first.semana_id}`;
-                setSelectedStockSource(sourceId);
-            }
-        } catch (e) {
-            console.error("Error analyzing stock:", e);
-        }
-    };
-
-    const formatS = (num) => Number(num).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formatS = (num) => Number(num || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     const renderStatus = (it) => {
         const week = semanas.find(s => s.id === it.semana_id);
@@ -218,6 +289,14 @@ export default function ClientOrdersView() {
         if (isFloating && week) {
             const d = week.fecha_estimada_llegada ? new Date(week.fecha_estimada_llegada) : new Date(new Date(week.created_at).getTime() + (22*24*60*60*1000));
             dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
+        } else if (it.estado === 'PEDIDO (Siguiente)') {
+            // Calcular fecha para el próximo pedido (Sábado más cercano + 22 días)
+            const now = new Date();
+            const nextSat = new Date(now);
+            nextSat.setDate(now.getDate() + (6 - now.getDay() + 7) % 7);
+            const arrival = new Date(nextSat);
+            arrival.setDate(nextSat.getDate() + 22);
+            dateStr = arrival.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
         }
 
         return (
@@ -248,77 +327,168 @@ export default function ClientOrdersView() {
         );
     };
 
-    const addToCart = () => {
-        if (addForm.mode === 'individual') {
-            if (!addForm.titulo) return alert("Título obligatorio");
-            if (!selectedStockSource) return alert("Selecciona origen de stock");
-            
-            let targetSemanaId = null;
-            let estadoTarget = 'PEDIDO';
-            
-            if (selectedStockSource === 'fisico') {
-                estadoTarget = 'EN TIENDA';
-            } else if (selectedStockSource.startsWith('flotante_conf_')) {
-                targetSemanaId = selectedStockSource.replace('flotante_conf_', '');
-                const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
-                estadoTarget = `CONFIRMADO ${wName}`;
-            } else if (selectedStockSource.startsWith('flotante_noc_')) {
-                targetSemanaId = selectedStockSource.replace('flotante_noc_', '');
-                const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
-                estadoTarget = `PEDIDO ${wName}`;
-            } else if (selectedStockSource.startsWith('pedido_')) {
-                targetSemanaId = selectedStockSource.replace('pedido_', '');
-                const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
-                estadoTarget = `PEDIDO ${wName}`;
-            }
-
-            setCart([...cart, {
-                titulo: addForm.titulo,
-                catalog_id: addForm.catalog_id,
-                product_id: addForm.product_id,
-                semana_id: targetSemanaId,
-                precio_venta: Number(addForm.precio_venta) || 0,
-                monto_pagado: Number(addForm.monto_pagado) || 0,
-                estado: estadoTarget,
-                nota: addForm.nota_item,
-                source: selectedStockSource
-            }]);
-
-            // Reset only item fields
-            setAddForm({ ...addForm, titulo: '', catalog_id: '', product_id: '', precio_venta: '', monto_pagado: '', nota_item: '' });
-            setStockAnalysis(null);
-            setSelectedStockSource('');
+    const handleSearchCatalog = (val) => {
+        setAddForm({ ...addForm, titulo: val });
+        if (val.length > 2) {
+            const lower = val.toLowerCase();
+            const matches = catalog.filter(c => c.titulo.toLowerCase().includes(lower)).slice(0, 8);
+            setCatalogSuggestions(matches);
+            setShowSuggestions(true);
         } else {
-            const tomosArr = parseTomos(addForm.tomos);
-            if (tomosArr.length === 0) return alert("No se pudo parsear tomos");
-            
-            const activeSemana = addForm.semana_id || null;
-            const estadoBase = activeSemana ? `PEDIDO ${semanas.find(s=>s.id===activeSemana)?.nombre || ''}` : 'PEDIDO'; 
-            
-            let abonoIndividual = 0;
-            let abonoTotal = Number(addForm.pago_inicial_total) || 0;
-            if (abonoTotal > 0) abonoIndividual = abonoTotal / tomosArr.length;
+            setCatalogSuggestions([]);
+            setShowSuggestions(false);
+        }
+    };
 
-            const newItems = tomosArr.map(t => {
-                const padTomo = t.toString().padStart(2, '0');
-                const tituloGenerado = `${addForm.coleccion_nombre} ${padTomo}`.trim().toUpperCase();
-                const catMatch = catalog.find(c => c.titulo.toUpperCase().trim() === tituloGenerado);
+    const selectSuggestion = async (item) => {
+        const price = item.precio_venta_bs || item.precio_tapa || '';
+        setAddForm({ 
+            ...addForm, 
+            titulo: item.titulo, 
+            catalog_id: item.id,
+            product_id: item.product_id,
+            precio_venta: price,
+            descuento: 0,
+            precio_final: price,
+            monto_pagado: ''
+        });
+        setShowSuggestions(false);
+        
+        // Analyze Stock inline to populate the row selector immediately
+        const stock = await analyzeStockForItem(item.titulo);
+        setStockAnalysis(stock);
+        setSelectedStockSource(stock.defaultSource);
+    };
+
+    const analyzeStockForItem = async (title) => {
+        try {
+            const { data: masters } = await supabase.from('master_confirmaciones').select('semana_id, datos_json');
+            const { data: recs } = await supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').eq('titulo', title);
+            const { data: allOrders } = await supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)').eq('titulo', title);
+            const { data: catProd } = await supabase.from('catalogo_productos').select('stock_fisico').eq('titulo', title).maybeSingle();
+
+            const flotantes = [];
+            const pTitle = title.toLowerCase().trim();
+            
+            semanas.forEach(w => {
+                const master = masters?.find(m => m.semana_id === w.id);
+                const isConfirmed = !!master;
+                let qtyFlot = 0;
+
+                if (isConfirmed) {
+                    const totalConf = (master.datos_json || [])
+                        .filter(i => (i.titulo||'').toLowerCase().trim() === pTitle)
+                        .reduce((s,i) => s + (i.cantidad||0), 0);
+                    const sellerRequested = (allOrders || [])
+                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id)
+                        .reduce((s,p) => s + (p.cantidad||0), 0);
+                    const totalRec = (recs || [])
+                        .filter(r => r.semana_id === w.id)
+                        .reduce((s,r) => s + (r.cantidad_recibida||0), 0);
+                    const clientReserved = items.filter(it => 
+                        (it.titulo || '').toLowerCase().trim() === pTitle && 
+                        it.semana_id === w.id && 
+                        it.estado.includes('CONFIRMADO')
+                    ).length;
+                        
+                    qtyFlot = Math.max(0, (totalConf - sellerRequested) - totalRec - clientReserved);
+                } else {
+                    const storeTotal = (allOrders || [])
+                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id)
+                        .reduce((s,p) => s + (p.cantidad||0), 0);
+                    const clientWaitlist = items.filter(it => 
+                        (it.titulo || '').toLowerCase().trim() === pTitle && 
+                        it.semana_id === w.id && 
+                        it.estado.includes('PEDIDO')
+                    ).length;
+                    qtyFlot = Math.max(0, storeTotal - clientWaitlist);
+                }
                 
-                return {
-                    titulo: tituloGenerado,
-                    catalog_id: catMatch ? catMatch.id : null,
-                    product_id: catMatch ? catMatch.product_id : null,
-                    semana_id: activeSemana,
-                    precio_venta: Number(addForm.precio_tomo) || 0,
-                    monto_pagado: abonoIndividual,
-                    estado: estadoBase,
-                    nota: `Colección autogenerada`,
-                    source: 'pedido_' + activeSemana
-                };
+                if (qtyFlot > 0) {
+                    const d = w.fecha_estimada_llegada ? new Date(w.fecha_estimada_llegada) : new Date(new Date(w.created_at).getTime() + (22*24*60*60*1000));
+                    flotantes.push({ id: w.id, nombre: w.nombre, qty: qtyFlot, fechaArribo: d, isConfirmed });
+                }
             });
 
-            setCart([...cart, ...newItems]);
-            setAddForm({ ...addForm, coleccion_nombre: '', tomos: '', precio_tomo: '', pago_inicial_total: '' });
+            const fisico = catProd?.stock_fisico || 0;
+            
+            // Determinar fuente por defecto
+            let defaultSource = 'pedido_PENDIENTE';
+            if (fisico > 0) defaultSource = 'fisico';
+            else if (flotantes.length > 0) {
+                const bestFlot = flotantes.find(f => f.isConfirmed);
+                if (bestFlot) defaultSource = bestFlot.isConfirmed ? `flotante_conf_${bestFlot.id}` : `flotante_noc_${bestFlot.id}`;
+                else defaultSource = `flotante_noc_${flotantes[0].id}`;
+            } else {
+                const openWeek = semanas.find(s => s.abierta);
+                if (openWeek) defaultSource = `pedido_${openWeek.id}`;
+            }
+
+            return { fisico, flotantes, defaultSource };
+        } catch (e) {
+            console.error("Error analyzing stock for item:", e);
+            return { fisico: 0, flotantes: [], defaultSource: '' };
+        }
+    };
+
+    const addToCart = async () => {
+        setLoading(true);
+        try {
+            if (addForm.mode === 'individual') {
+                if (!addForm.titulo) return alert("Título obligatorio");
+                
+                setCart([...cart, {
+                    titulo: addForm.titulo,
+                    catalog_id: addForm.catalog_id,
+                    product_id: addForm.product_id,
+                    precio_original: Number(addForm.precio_venta) || 0,
+                    descuento: Number(addForm.descuento) || 0,
+                    precio_venta: Number(addForm.precio_final) || Number(addForm.precio_venta) || 0,
+                    monto_pagado: Number(addForm.monto_pagado) || 0,
+                    nota: addForm.nota_item,
+                    source: selectedStockSource,
+                    stockOptions: stockAnalysis
+                }]);
+
+                // Reset item fields
+                setAddForm({ ...addForm, titulo: '', catalog_id: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '' });
+                setStockAnalysis(null);
+                setSelectedStockSource('');
+                setCatalogSuggestions([]);
+            } else {
+                // Batch addition
+                const toAdd = bulkResults.filter(p => bulkSelected.has(p.id));
+                if (toAdd.length === 0) return alert("No hay ítems seleccionados");
+
+                const newCartItems = [];
+                for (let p of toAdd) {
+                    const stock = await analyzeStockForItem(p.titulo);
+                    const price = p.precio_venta_bs || p.precio_tapa || 0;
+                    newCartItems.push({
+                        titulo: p.titulo,
+                        catalog_id: p.id,
+                        product_id: p.product_id,
+                        precio_original: price,
+                        descuento: 0,
+                        precio_venta: price,
+                        monto_pagado: 0,
+                        nota: 'Pedido por lote',
+                        source: stock.defaultSource,
+                        stockOptions: stock
+                    });
+                }
+
+                setCart([...cart, ...newCartItems]);
+                setBulkSelected(new Set());
+                setBulkSearch('');
+                setBulkRange('');
+                setBulkResults([]);
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error al añadir al carrito");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -337,11 +507,24 @@ export default function ClientOrdersView() {
             let cliMatch = clientes.find(c => c.celular === addForm.celular);
             if (cliMatch) {
                 clienteId = cliMatch.id;
+                // Update client data if something new was provided (optional but good)
+                await supabase.from('clientes').update({
+                    nombre: addForm.nombre || cliMatch.nombre,
+                    ci: addForm.ci || cliMatch.ci,
+                    ciudad: addForm.ciudad || cliMatch.ciudad,
+                    sucursal: addForm.sucursal || cliMatch.sucursal,
+                    direccion: addForm.direccion || cliMatch.direccion,
+                    notas: addForm.notas_cliente || cliMatch.notas
+                }).eq('id', clienteId);
             } else {
-                if (!addForm.nombre) return alert("Para nuevo celular, ingrese un nombre");
+                // If no name provided, use "Cliente [Celular]"
+                const finalNombre = addForm.nombre || `Cliente ${addForm.celular}`;
                 const { data: newCli, error: cliErr } = await supabase.from('clientes').insert([{
-                    nombre: addForm.nombre,
+                    nombre: finalNombre,
                     celular: addForm.celular,
+                    ci: addForm.ci,
+                    ciudad: addForm.ciudad,
+                    sucursal: addForm.sucursal,
                     direccion: addForm.direccion,
                     notas: addForm.notas_cliente
                 }]).select().single();
@@ -349,29 +532,53 @@ export default function ClientOrdersView() {
                 clienteId = newCli.id;
             }
 
-            // 2. Process Cart and Prepare Insert Items (Don't subtract stock yet!)
+            // 2. Process Cart and Prepare Insert Items
             const itemsToInsert = [];
             
             for (let cItem of cart) {
+                let targetSemanaId = null;
+                let estadoTarget = 'PEDIDO';
+                
+                if (cItem.source === 'fisico') {
+                    estadoTarget = 'EN TIENDA';
+                } else if (cItem.source.startsWith('flotante_conf_')) {
+                    targetSemanaId = cItem.source.replace('flotante_conf_', '');
+                    const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
+                    estadoTarget = `CONFIRMADO ${wName}`;
+                } else if (cItem.source.startsWith('flotante_noc_')) {
+                    targetSemanaId = cItem.source.replace('flotante_noc_', '');
+                    const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
+                    estadoTarget = `PEDIDO ${wName}`;
+                } else if (cItem.source === 'pedido_PENDIENTE') {
+                    targetSemanaId = null;
+                    estadoTarget = 'PEDIDO (Siguiente)';
+                } else if (cItem.source.startsWith('pedido_')) {
+                    targetSemanaId = cItem.source.replace('pedido_', '');
+                    const sFound = semanas.find(s=>s.id === targetSemanaId);
+                    const wName = sFound?.nombre || '';
+                    estadoTarget = `PEDIDO ${wName}`;
+                }
+
                 itemsToInsert.push({
                     cliente_id: clienteId,
                     titulo: cItem.titulo,
                     product_id: cItem.product_id || null, 
                     catalog_id: cItem.catalog_id || null,
-                    semana_id: cItem.semana_id,
+                    semana_id: targetSemanaId,
                     precio_venta: cItem.precio_venta,
+                    descuento: cItem.descuento || 0,
                     monto_pagado: cItem.monto_pagado,
-                    estado: cItem.estado,
+                    estado: estadoTarget,
                     nota: cItem.nota,
                     vendedor_id: user?.id
                 });
             }
 
-            // 3. Insert Items FIRST
+            // 3. Insert Items
             const { error: insErr } = await supabase.from('cliente_items').insert(itemsToInsert);
             if (insErr) throw insErr;
 
-            // 4. ONLY IF SUCCESSFUL, subtract physical stock
+            // 4. Subtract stock
             for (let cItem of cart) {
                 if (cItem.source === 'fisico') {
                     const lookupCol = cItem.catalog_id ? 'id' : (cItem.product_id ? 'product_id' : null);
@@ -392,22 +599,18 @@ export default function ClientOrdersView() {
                 }
             }
             
-            // Invalidar memoria caché del catálogo para que los cambios se vean de inmediato
             if (typeof catalogService !== 'undefined') catalogService.clearCache();
             
             setShowAddModal(false);
             setCart([]);
             setAddForm({
-                celular: '', nombre: '', direccion: '', notas_cliente: '',
+                celular: '', nombre: '', ci: '', ciudad: '', sucursal: '', direccion: '', notas_cliente: '',
                 semana_id: '', mode: 'individual',
-                titulo: '', product_id: '', precio_venta: '', monto_pagado: '', nota_item: '',
+                titulo: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '',
                 coleccion_nombre: '', tomos: '', precio_tomo: '', pago_inicial_total: ''
             });
             await fetchData();
             await fetchCatalog();
-            
-            // Invalidar memoria caché del catálogo para que los cambios se vean de inmediato
-            if (typeof catalogService !== 'undefined') catalogService.clearCache();
 
         } catch (e) {
             console.error(e);
@@ -463,14 +666,31 @@ export default function ClientOrdersView() {
     };
 
     // Filtros y KPIs
-    const displayItems = items.filter(it => {
-        if (filterEstado !== 'todos' && !it.estado.startsWith(filterEstado)) return false;
-        if (search) {
-            const s = search.toLowerCase();
-            return (it.titulo?.toLowerCase().includes(s) || it.clientes?.nombre?.toLowerCase().includes(s) || it.clientes?.celular?.includes(s));
-        }
-        return true;
-    });
+    const displayItems = useMemo(() => {
+        return items.filter(it => {
+            // Filtro por Estado
+            if (filterEstado !== 'todos') {
+                if (filterEstado === 'PEDIDO') {
+                    if (!it.estado.startsWith('PEDIDO') && !it.estado.startsWith('CONFIRMADO')) return false;
+                    if (it.estado === 'EN TIENDA' || it.estado === 'ENTREGADO') return false;
+                } else {
+                    if (!it.estado.startsWith(filterEstado)) return false;
+                }
+            }
+
+            // Filtro por Semana
+            if (filterSemana !== 'todos' && it.semana_id !== filterSemana) return false;
+
+            // Filtro por Busqueda (Nombre, Celular, Titulo)
+            if (search) {
+                const s = search.toLowerCase();
+                const matchCliente = it.clientes?.nombre?.toLowerCase().includes(s) || it.clientes?.celular?.includes(s);
+                const matchTitulo = it.titulo?.toLowerCase().includes(s);
+                if (!matchCliente && !matchTitulo) return false;
+            }
+            return true;
+        });
+    }, [items, filterEstado, filterSemana, search]);
 
     const totalPedidos = items.filter(i => i.estado !== 'ENTREGADO').length;
     const ventasTotales = items.reduce((acc, i) => acc + (Number(i.precio_venta)||0), 0);
@@ -561,38 +781,92 @@ export default function ClientOrdersView() {
                 </div>
             </div>
 
-            {/* Toolbox */}
+            {/* Toolbox: Tabs */}
             <div className="flex flex-col md:flex-row justify-between items-center bg-surface p-4 rounded-xl border border-border gap-4">
                 <div className="flex bg-background rounded-lg p-1 border border-border">
                     <button onClick={()=>setView('clientes')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='clientes'?'bg-surface text-primary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Por Cliente</button>
                     <button onClick={()=>setView('items')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='items'?'bg-surface text-primary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Resumen Ítems</button>
                     <button onClick={()=>setView('hoja')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='hoja'?'bg-surface text-secondary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>📋 Hoja de Pedido</button>
                 </div>
+                <div className="text-[10px] font-black text-muted uppercase tracking-widest hidden md:block">Gestión de Cartera de Clientes</div>
+            </div>
                 
-                <div className="flex-1 max-w-md w-full flex items-center bg-background border border-border rounded-lg px-3 py-2">
-                    <Search size={18} className="text-muted mr-2" />
+            {/* BARRA DE FILTROS MAESTROS */}
+            <div className="bg-surface border border-primary/20 p-4 rounded-2xl shadow-sm flex flex-col xl:flex-row gap-4 items-center">
+                <div className="relative flex-1 w-full xl:max-w-md group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted group-focus-within:text-primary transition-colors" size={18} />
                     <input 
                         type="text" 
                         placeholder="Buscar cliente, celular o título..." 
-                        className="bg-transparent border-none outline-none text-sm w-full text-text placeholder-muted"
+                        className="w-full bg-background border border-border/40 pl-12 pr-4 py-3 rounded-xl text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all shadow-inner"
                         value={search} onChange={e=>setSearch(e.target.value)}
                     />
                 </div>
 
-                <div className="flex items-center gap-3">
-                    <select value={filterEstado} onChange={e=>setFilterEstado(e.target.value)} className="bg-background border border-border text-text text-sm rounded-lg px-3 py-2 outline-none">
-                        <option value="todos">Todos los Estados</option>
-                        <option value="PEDIDO">Pedidos (En Tránsito)</option>
-                        <option value="CONFIRMADO">Confirmados</option>
-                        <option value="ADJUDICADO">Adjudicados (Planificados)</option>
-                        <option value="RECORTADO">Recortados (Sin Stock)</option>
-                        <option value="EN TIENDA">En Tienda (Listos)</option>
-                        <option value="ENTREGADO">Entregados</option>
-                    </select>
+                <div className="flex flex-wrap items-center gap-2 justify-center">
+                    {[
+                        { id: 'todos', label: 'TODOS', icon: Layers, color: 'text-text bg-muted/10 border-muted/20' },
+                        { id: 'PEDIDO', label: 'PENDIENTES', icon: Calendar, color: 'text-primary bg-primary/10 border-primary/20' },
+                        { id: 'EN TIENDA', label: 'EN TIENDA', icon: Box, color: 'text-success bg-success/10 border-success/20' },
+                        { id: 'ENTREGADO', label: 'ENTREGADOS', icon: CheckSquare, color: 'text-muted bg-muted/5 border-border' },
+                    ].map(btn => {
+                        const count = btn.id === 'todos' ? items.length : items.filter(i => {
+                            if (btn.id === 'PEDIDO') return i.estado.includes('PEDIDO') || i.estado.includes('CONFIRMADO');
+                            return i.estado.startsWith(btn.id);
+                        }).length;
 
-                    <button onClick={() => setShowAddModal(true)} className="bg-primary text-primary-text font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20">
-                        <Plus size={18} /> Nuevo Pedido
-                    </button>
+                        return (
+                            <button 
+                                key={btn.id}
+                                onClick={() => setFilterEstado(btn.id)}
+                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider ${
+                                    filterEstado === btn.id ? btn.color + ' ring-4 ring-offset-2 ring-primary/10' : 'bg-transparent border-transparent text-muted hover:bg-muted/10'
+                                }`}
+                            >
+                                <btn.icon size={14} />
+                                {btn.label}
+                                <span className="ml-2 bg-black/10 px-2 py-0.5 rounded-full text-[9px] opacity-70">{count}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className="flex items-center gap-3 w-full xl:w-auto">
+                    {selectedItems.size > 0 ? (
+                        <div className="flex items-center gap-3 bg-error/10 border border-error/20 px-4 py-2 rounded-xl animate-in zoom-in-95">
+                            <span className="text-[10px] font-black text-error uppercase whitespace-nowrap">{selectedItems.size} SELECCIONADOS</span>
+                            <button 
+                                onClick={handleBulkDelete}
+                                className="bg-error text-white px-4 py-2 rounded-lg text-xs font-black uppercase hover:bg-error/80 transition-all flex items-center gap-2"
+                            >
+                                <Trash2 size={14} /> Eliminar Lote
+                            </button>
+                            <button 
+                                onClick={() => setSelectedItems(new Set())}
+                                className="text-muted hover:text-text p-2"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="relative group flex-1 xl:w-48">
+                                <select 
+                                    value={filterSemana} 
+                                    onChange={e=>setFilterSemana(e.target.value)} 
+                                    className="w-full bg-background border border-border/40 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer"
+                                >
+                                    <option value="todos">📦 TODAS LAS SEMANAS</option>
+                                    {semanas.map(s => <option key={s.id} value={s.id}>Semana: {s.nombre}</option>)}
+                                </select>
+                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
+                            </div>
+
+                            <button onClick={() => setShowAddModal(true)} className="bg-primary text-background font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 hover:scale-105 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
+                                <Plus size={18} /> Nuevo Pedido
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -775,6 +1049,7 @@ export default function ClientOrdersView() {
                                 className="bg-transparent text-sm font-bold outline-none pr-4"
                             >
                                 <option value="">-- Seleccionar Semana --</option>
+                                <option value="SIGUIENTE">⭐️ PRÓXIMO PEDIDO (Siguiente)</option>
                                 {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                             </select>
                         </div>
@@ -793,7 +1068,14 @@ export default function ClientOrdersView() {
                             <tbody className="divide-y divide-border/10">
                                 {(() => {
                                     const filtered = items.filter(i => {
-                                        if (selectedSemanaHoja && i.semana_id !== selectedSemanaHoja) return false;
+                                        if (selectedSemanaHoja === 'SIGUIENTE') {
+                                            if (i.estado !== 'PEDIDO (Siguiente)') return false;
+                                        } else {
+                                            if (selectedSemanaHoja && i.semana_id !== selectedSemanaHoja) return false;
+                                            // Si no hay semana seleccionada, por defecto no mostramos los "Siguiente" para no ensuciar las semanas reales
+                                            if (!selectedSemanaHoja && i.estado === 'PEDIDO (Siguiente)') return false;
+                                        }
+
                                         if (!isAdmin && i.vendedor_id !== user?.id) return false;
                                         if (!i.titulo) return false;
                                         const term = search.toLowerCase();
@@ -862,18 +1144,45 @@ export default function ClientOrdersView() {
                     <table className="w-full text-sm">
                         <thead>
                             <tr className="text-left text-muted text-xs uppercase border-b border-border bg-background">
+                                <th className="p-4 w-10 text-center">
+                                    <input 
+                                        type="checkbox" 
+                                        className="w-4 h-4 accent-primary cursor-pointer"
+                                        checked={displayItems.length > 0 && selectedItems.size === displayItems.length}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setSelectedItems(new Set(displayItems.map(i => i.id)));
+                                            } else {
+                                                setSelectedItems(new Set());
+                                            }
+                                        }}
+                                    />
+                                </th>
                                 <th className="p-4">Cliente</th>
                                 <th className="p-4">Título</th>
                                 <th className="p-4">P. Venta</th>
                                 <th className="p-4">Cobrado</th>
-                                <th className="p-4">Estado</th>
+                                <th className="p-4 text-center">Estado</th>
                                 <th className="p-4 text-right">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {displayItems.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-muted">No hay ítems</td></tr>}
+                            {displayItems.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-muted">No hay ítems</td></tr>}
                             {displayItems.map(it => (
-                                <tr key={it.id} className="border-b border-border/50 hover:bg-white/5">
+                                <tr key={it.id} className={`border-b border-border/50 hover:bg-white/5 transition-colors ${selectedItems.has(it.id) ? 'bg-primary/5' : ''}`}>
+                                    <td className="p-4 text-center">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 accent-primary cursor-pointer"
+                                            checked={selectedItems.has(it.id)}
+                                            onChange={() => {
+                                                const next = new Set(selectedItems);
+                                                if (next.has(it.id)) next.delete(it.id);
+                                                else next.add(it.id);
+                                                setSelectedItems(next);
+                                            }}
+                                        />
+                                    </td>
                                     <td className="p-4">
                                         <div className="font-bold text-text">{it.clientes?.nombre}</div>
                                         <div className="text-xs text-muted">{it.clientes?.celular}</div>
@@ -923,202 +1232,541 @@ export default function ClientOrdersView() {
 
             {/* ADD MODAL */}
             {showAddModal && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                    <div className="bg-surface w-full max-w-2xl rounded-2xl border border-border flex flex-col max-h-[90vh]">
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-hidden">
+                    <div className="bg-surface w-full max-w-7xl rounded-2xl border border-border flex flex-col min-h-[85vh] max-h-[95vh] shadow-2xl animate-in zoom-in-95 duration-200">
                         <div className="p-5 border-b border-border flex justify-between items-center bg-background rounded-t-2xl shrink-0">
                             <h2 className="text-lg font-bold font-display text-text flex items-center gap-2">
                                 <Plus className="text-primary"/> Nueva Venta / Pedido
                             </h2>
                             <div className="flex items-center gap-4">
-                                {cart.length > 0 && <span className="bg-primary text-background px-2 py-0.5 rounded text-[10px] font-bold animate-pulse">{cart.length} ITEMS EN CESTA</span>}
-                                <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="text-muted hover:text-text"><X size={20}/></button>
+                                {cart.length > 0 && <span className="bg-primary/20 text-primary border border-primary/30 px-3 py-1 rounded-full text-[10px] font-black animate-pulse uppercase tracking-widest">{cart.length} ITEMS EN CESTA</span>}
+                                <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="text-muted hover:text-text transition-colors p-2 hover:bg-muted/20 rounded-full"><X size={20}/></button>
                             </div>
                         </div>
                         
-                        <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-5">
+                        <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-8 custom-scrollbar pb-64">
                             {/* Cliente Bloque */}
-                            <div className="bg-background border border-border p-4 rounded-xl flex flex-col gap-3">
-                                <h3 className="text-xs font-bold uppercase text-muted tracking-wider">Datos del Cliente</h3>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-[11px] mb-1 text-muted">Celular *</label>
-                                        <input type="text" value={addForm.celular} onChange={e=>{
-                                            const val = e.target.value;
-                                            const cli = clientes.find(c=>c.celular===val);
-                                            if(cli) setAddForm({...addForm, celular:val, nombre:cli.nombre, direccion:cli.direccion||'', notas_cliente:cli.notas||''});
-                                            else setAddForm({...addForm, celular:val});
-                                        }} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none focus:border-primary" placeholder="Ej: 71234567"/>
+                            <div className="bg-background/40 border border-border p-5 rounded-2xl flex flex-col gap-4 shadow-inner">
+                                <h3 className="text-[10px] font-black uppercase text-muted tracking-[0.2em] flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-primary" /> Datos del Cliente
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                    <div className="md:col-span-1">
+                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-primary tracking-widest">Celular *</label>
+                                        <input 
+                                            type="text" 
+                                            value={addForm.celular} 
+                                            onChange={e=>{
+                                                const val = e.target.value;
+                                                const cli = clientes.find(c=>c.celular===val);
+                                                if(cli) setAddForm({...addForm, celular:val, nombre:cli.nombre, ci:cli.ci||'', ciudad:cli.ciudad||'', sucursal:cli.sucursal||'', direccion:cli.direccion||'', notas_cliente:cli.notas||''});
+                                                else setAddForm({...addForm, celular:val});
+                                            }} 
+                                            className="w-full bg-surface border-2 border-border/40 px-4 py-3 rounded-2xl text-sm font-bold text-text outline-none focus:border-primary focus:bg-surface transition-all placeholder:opacity-30"
+                                            placeholder="73481501"
+                                        />
                                     </div>
-                                    <div>
-                                        <label className="block text-[11px] mb-1 text-muted">Nombre *</label>
-                                        <input type="text" value={addForm.nombre} onChange={e=>setAddForm({...addForm, nombre:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none focus:border-primary"/>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">Nombre</label>
+                                        <input 
+                                            type="text" 
+                                            value={addForm.nombre} 
+                                            onChange={e=>setAddForm({...addForm, nombre:e.target.value.toUpperCase()})} 
+                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
+                                            placeholder="Opcional"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">CI / NIT</label>
+                                        <input 
+                                            type="text" 
+                                            value={addForm.ci} 
+                                            onChange={e=>setAddForm({...addForm, ci:e.target.value})} 
+                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
+                                            placeholder="Opcional"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">Ciudad</label>
+                                        <input 
+                                            type="text" 
+                                            value={addForm.ciudad} 
+                                            onChange={e=>setAddForm({...addForm, ciudad:e.target.value.toUpperCase()})} 
+                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
+                                            placeholder="Opcional"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-1">
+                                        <label className="block text-[10px] font-black uppercase mb-1.5 text-muted tracking-widest">Sucursal</label>
+                                        <input 
+                                            type="text" 
+                                            value={addForm.sucursal} 
+                                            onChange={e=>setAddForm({...addForm, sucursal:e.target.value.toUpperCase()})} 
+                                            className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm transition-all" 
+                                            placeholder="Opcional"
+                                        />
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Detalle Producto */}
-                            <div className="bg-background border border-border p-4 rounded-xl flex flex-col gap-3">
+                            {/* Buscador de Productos */}
+                            <div className="bg-background/40 border border-border p-5 rounded-2xl flex flex-col gap-4 shadow-inner relative">
                                 <div className="flex justify-between items-center">
-                                    <h3 className="text-xs font-bold uppercase text-muted tracking-wider">Detalles del Pedido</h3>
-                                    <div className="flex bg-surface rounded p-0.5 border border-border">
-                                        <button onClick={()=>setAddForm({...addForm, mode:'individual'})} className={`px-3 py-1 text-[11px] font-bold rounded-sm ${addForm.mode==='individual'?'bg-primary text-background':'text-muted'}`}>INDIVIDUAL</button>
-                                        <button onClick={()=>setAddForm({...addForm, mode:'coleccion'})} className={`px-3 py-1 text-[11px] font-bold rounded-sm ${addForm.mode==='coleccion'?'bg-primary text-background':'text-muted'}`}>COLECCIÓN</button>
+                                    <h3 className="text-[10px] font-black uppercase text-muted tracking-[0.2em] flex items-center gap-2">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-secondary" /> Selección de Productos
+                                    </h3>
+                                    <div className="flex bg-surface rounded-xl p-1 border border-border shadow-sm">
+                                        <button onClick={()=>setAddForm({...addForm, mode:'individual'})} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-tighter rounded-lg transition-all ${addForm.mode==='individual'?'bg-primary text-background shadow-md':'text-muted hover:text-text'}`}>
+                                            <Search size={14} className="inline mr-1.5" /> Individual
+                                        </button>
+                                        <button onClick={()=>setAddForm({...addForm, mode:'coleccion'})} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-tighter rounded-lg transition-all ${addForm.mode==='coleccion'?'bg-primary text-background shadow-md':'text-muted hover:text-text'}`}>
+                                            <Layers size={14} className="inline mr-1.5" /> Por Lote (Colección)
+                                        </button>
                                     </div>
                                 </div>
 
-                                {addForm.mode === 'coleccion' && (
-                                    <div className="mb-2">
-                                        <label className="block text-[11px] mb-1 text-muted">Semana de Importación</label>
-                                        <select value={addForm.semana_id} onChange={e=>setAddForm({...addForm, semana_id:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none focus:border-primary">
-                                            <option value="">No asignar / Stock Local</option>
-                                            {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre} - {s.estado}</option>)}
-                                        </select>
-                                    </div>
-                                )}
-
                                 {addForm.mode === 'individual' ? (
-                                    <div className="grid border-t border-border/50 pt-3 grid-cols-2 gap-3 relative">
-                                        <div className="col-span-2 relative">
-                                            <label className="block text-[11px] mb-1 text-primary font-bold">Título del Catálogo *</label>
-                                            <input type="text" value={addForm.titulo} onChange={e=>handleSearchCatalog(e.target.value)} className="w-full bg-surface border border-primary px-3 py-2 rounded-lg text-sm text-text outline-none focus:ring-1 focus:ring-primary shadow-inner" placeholder="Escribe para buscar..."/>
-                                            
-                                            {showSuggestions && catalogSuggestions.length > 0 && (
-                                                <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-xl z-10 max-h-48 overflow-y-auto">
-                                                    {catalogSuggestions.map((sg, i) => (
-                                                        <div key={i} onClick={()=>selectSuggestion(sg)} className="p-2 border-b border-border/50 hover:bg-background cursor-pointer text-sm">
-                                                            <div className="font-bold text-text">{sg.titulo}</div>
-                                                            <div className="text-[10px] text-muted">{sg.editorial} | BS {sg.precio_venta_bs || sg.precio_tapa}</div>
-                                                        </div>
-                                                    ))}
+                                    <div className="flex flex-col xl:flex-row gap-4 items-end">
+                                        <div className="flex-[4] min-w-[400px] relative w-full">
+                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-primary tracking-widest">Buscar en Catálogo</label>
+                                            <div className="relative">
+                                                <input type="text" value={addForm.titulo} onChange={e=>handleSearchCatalog(e.target.value)} className="w-full bg-surface border-2 border-primary/30 px-4 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary shadow-sm transition-all font-bold" placeholder="Escribe el título para buscar..."/>
+                                                {showSuggestions && catalogSuggestions.length > 0 && (
+                                                    <div className="absolute top-full left-0 w-[550px] mt-2 bg-surface border border-border rounded-2xl shadow-2xl z-[100] max-h-60 overflow-y-auto p-1.5 border-t-4 border-t-primary animate-in fade-in slide-in-from-top-2">
+                                                        {catalogSuggestions.map((sg, i) => (
+                                                            <div key={i} onClick={()=>selectSuggestion(sg)} className="p-2 border-b border-border/20 last:border-0 hover:bg-primary/5 rounded-xl cursor-pointer transition-colors">
+                                                                <div className="font-bold text-text text-[11px] leading-tight">{sg.titulo}</div>
+                                                                <div className="text-[9px] text-muted flex items-center justify-between mt-0.5">
+                                                                    <span>{sg.editorial} | Tapa: BS {sg.precio_tapa}</span>
+                                                                    <span className="font-mono text-success font-black">STOCK: {sg.stock_fisico || 0}</span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="w-24">
+                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest text-center">Precio</label>
+                                            <input type="number" value={addForm.precio_venta} onChange={e=>{
+                                                const base = e.target.value;
+                                                const pct = Number(addForm.descuento)||0;
+                                                const final = Number(base) - (Number(base) * pct / 100);
+                                                setAddForm({...addForm, precio_venta: base, precio_final: final.toFixed(0)});
+                                            }} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary font-mono text-center"/>
+                                        </div>
+                                        <div className="w-20">
+                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-error/80 tracking-widest text-center">Desc. %</label>
+                                            <input type="number" value={addForm.descuento} onChange={e=>{
+                                                const pct = e.target.value;
+                                                const base = Number(addForm.precio_venta)||0;
+                                                const final = base - (base * (Number(pct)||0) / 100);
+                                                setAddForm({...addForm, descuento: pct, precio_final: final.toFixed(0)});
+                                            }} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-xs text-error font-bold outline-none focus:border-error font-mono text-center" placeholder="%"/>
+                                        </div>
+                                        <div className="w-24">
+                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-primary/80 tracking-widest text-center">Final</label>
+                                            <input 
+                                                type="number" 
+                                                value={addForm.precio_final} 
+                                                onChange={e=>{
+                                                    const final = e.target.value;
+                                                    const base = Number(addForm.precio_venta)||0;
+                                                    const pct = base > 0 ? ((1 - Number(final) / base) * 100).toFixed(1) : 0;
+                                                    setAddForm({
+                                                        ...addForm, 
+                                                        precio_final: final, 
+                                                        descuento: pct
+                                                    });
+                                                }}
+                                                className="w-full bg-primary/5 border border-primary/20 px-3 py-2.5 rounded-xl text-xs text-primary font-black outline-none focus:border-primary font-mono text-center"
+                                            />
+                                        </div>
+                                        <div className="w-24">
+                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-success/80 tracking-widest text-center">Pago Inicial</label>
+                                            <input type="number" value={addForm.monto_pagado} onChange={e=>setAddForm({...addForm, monto_pagado:e.target.value})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-xs text-success font-black outline-none focus:border-success font-mono text-center" placeholder="BS"/>
+                                        </div>
+
+                                        <div className="w-72 relative">
+                                            <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 text-center tracking-[0.2em]">Asignar De:</label>
+                                            <div 
+                                                onClick={() => setDropdownOpen(!dropdownOpen)}
+                                                className={`w-full bg-surface border-2 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase cursor-pointer flex items-center justify-between transition-all select-none hover:shadow-md ${
+                                                    selectedStockSource === 'fisico' ? 'border-success text-success bg-success/5 shadow-sm' : 
+                                                    selectedStockSource.includes('flotante_conf') ? 'border-primary text-primary bg-primary/5 shadow-sm' : 
+                                                    selectedStockSource.includes('flotante_noc') ? 'border-orange-400 text-orange-400 bg-orange-400/5' : 
+                                                    selectedStockSource === 'pedido_PENDIENTE' ? 'border-purple-500 text-purple-500 animate-pulse' :
+                                                    'border-border text-muted hover:border-primary/40'
+                                                }`}
+                                            >
+                                                <div className="truncate flex items-center gap-2">
+                                                    {(() => {
+                                                        if (selectedStockSource === 'fisico') return "✨ STOCK FÍSICO";
+                                                        if (selectedStockSource === 'pedido_PENDIENTE') return "🚀 PRÓXIMO PEDIDO (Por Asignar)";
+                                                        if (selectedStockSource.includes('flotante')) {
+                                                            const id = selectedStockSource.split('_').pop();
+                                                            const fl = stockAnalysis?.flotantes.find(x => x.id == id);
+                                                            return fl ? `${fl.isConfirmed?'✅':'⏳'} ${fl.nombre}` : "---";
+                                                        }
+                                                        if (selectedStockSource.includes('pedido_')) {
+                                                            const id = selectedStockSource.split('_').pop();
+                                                            const s = semanas.find(x => x.id == id);
+                                                            return s ? `📂 P/ ${s.nombre}` : "---";
+                                                        }
+                                                        return "SELECCIONE ORIGEN";
+                                                    })()}
+                                                </div>
+                                                <ChevronDown size={14} className={`transition-transform duration-300 ${dropdownOpen ? 'rotate-180' : ''}`} />
+                                            </div>
+
+                                            {dropdownOpen && (
+                                                <div className="absolute bottom-full mb-2 left-0 w-full bg-surface border border-border rounded-2xl shadow-2xl z-[150] overflow-hidden animate-in slide-in-from-bottom-2 duration-200">
+                                                    <div className="max-h-[300px] overflow-y-auto p-1.5 custom-scrollbar flex flex-col gap-1">
+                                                        {/* STOCK FISICO */}
+                                                        {stockAnalysis?.fisico > 0 && (
+                                                            <div onClick={() => { setSelectedStockSource('fisico'); setDropdownOpen(false); }} className="p-2.5 rounded-xl hover:bg-success/10 border-2 border-transparent hover:border-success/30 cursor-pointer transition-all flex justify-between items-center bg-background/40">
+                                                                <span className="text-success font-black text-[10px]">✨ STOCK FÍSICO</span>
+                                                                <span className="bg-success text-background px-2 py-0.5 rounded-full text-[9px]">{stockAnalysis.fisico} U.</span>
+                                                            </div>
+                                                        )}
+
+                                                        {/* STOCK FLOTANTE */}
+                                                        {stockAnalysis?.flotantes.map(flot => {
+                                                            const isConfirmed = flot.isConfirmed;
+                                                            return (
+                                                                <div key={flot.id} onClick={() => { setSelectedStockSource(isConfirmed ? `flotante_conf_${flot.id}` : `flotante_noc_${flot.id}`); setDropdownOpen(false); }} className={`p-2.5 rounded-xl cursor-pointer transition-all border-2 border-transparent ${isConfirmed ? 'bg-primary/5 hover:bg-primary/10 hover:border-primary/30' : 'bg-orange-400/5 hover:bg-orange-400/10 hover:border-orange-400/30'}`}>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <span className={`font-black text-[10px] ${isConfirmed ? 'text-primary' : 'text-orange-400'}`}>
+                                                                            {isConfirmed ? '✅ CONFIRMADO' : '⏳ POR CONFIRMAR'}
+                                                                        </span>
+                                                                        {flot.fechaArribo && (
+                                                                            <span className="text-[9px] font-mono opacity-60">LLEGA: {new Date(flot.fechaArribo).toLocaleDateString()}</span>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="text-[9px] font-bold mt-1 uppercase text-text truncate">{flot.nombre} - {flot.qty} U.</div>
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        {/* ENCUESTAR EN SEMANAS ABIERTAS */}
+                                                        {semanas.filter(s => {
+                                                            // LOGICA DEL SABADO 12:00
+                                                            const dateMatch = s.nombre.match(/(\d+)-(\d+)$/);
+                                                            if (!dateMatch) return s.abierta;
+                                                            const [_, d, m] = dateMatch;
+                                                            const weekDate = new Date(new Date().getFullYear(), parseInt(m)-1, parseInt(d));
+                                                            // Saturday is day 6. Calculate distance to next Saturday.
+                                                            const diff = (6 - weekDate.getDay() + 7) % 7;
+                                                            const deadline = new Date(weekDate);
+                                                            deadline.setDate(weekDate.getDate() + (diff === 0 ? 0 : diff));
+                                                            deadline.setHours(12, 0, 0);
+                                                            
+                                                            return s.abierta && new Date() < deadline;
+                                                        }).slice(0,4).map(s => (
+                                                            <div key={s.id} onClick={() => { setSelectedStockSource(`pedido_${s.id}`); setDropdownOpen(false); }} className="p-2.5 rounded-xl bg-background/60 hover:bg-muted/30 border border-border/50 cursor-pointer transition-all flex justify-between items-center group">
+                                                                <span className="text-[10px] font-bold text-muted group-hover:text-text truncate pr-2">📂 {s.nombre}</span>
+                                                                <ArrowRight size={10} className="text-muted opacity-0 group-hover:opacity-100 transition-all"/>
+                                                            </div>
+                                                        ))}
+
+                                                        {/* PROXIMO PEDIDO (PENDIENTE) */}
+                                                        {(() => {
+                                                            const today = new Date();
+                                                            const nextSat = new Date();
+                                                            nextSat.setDate(today.getDate() + (6 - today.getDay() + 7) % 7);
+                                                            const arrival = new Date(nextSat);
+                                                            arrival.setDate(nextSat.getDate() + 22);
+                                                            const dateStr = arrival.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+
+                                                            return (
+                                                                <div onClick={() => { setSelectedStockSource('pedido_PENDIENTE'); setDropdownOpen(false); }} className="mt-1 p-3 rounded-xl bg-purple-500/10 border-2 border-dashed border-purple-500/30 hover:bg-purple-500/20 hover:border-purple-500/60 cursor-pointer transition-all flex flex-col gap-1 items-center justify-center text-center group">
+                                                                    <span className="text-purple-500 font-black text-[11px] flex items-center gap-2 group-hover:scale-110 transition-transform">🚀 PRÓXIMO PEDIDO</span>
+                                                                    <span className="text-[9px] text-purple-400/80 font-bold uppercase italic">Arribo aprox: {dateStr}</span>
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
                                                 </div>
                                             )}
+                                            <div className="absolute top-[102%] left-0 w-full text-center">
+                                                <p className="text-[8px] font-black text-muted-2 uppercase tracking-tighter opacity-70 leading-none">
+                                                    * Corte de pedido: Sábados 12:00 PM. Pasada esta hora, se asigna a "Próximo Pedido" automáticamente.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <button onClick={()=>{
+                                            if(!selectedStockSource) return alert("Selecciona origen de stock");
+                                            addToCart();
+                                            setDropdownOpen(false);
+                                        }} disabled={!addForm.titulo || loading} className="h-[42px] px-6 bg-primary text-background font-black text-xs uppercase tracking-widest rounded-xl hover:scale-105 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 shrink-0">
+                                            Añadir
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80">Nombre de Colección (ej: Kingdom Hearts)</label>
+                                                <input type="text" value={bulkSearch} onChange={e=>setBulkSearch(e.target.value)} onBlur={()=>searchBulkCatalog(bulkSearch)} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Buscar título base..."/>
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80">Rango de Tomos (ej: 1-5, 8, 10-12)</label>
+                                                <div className="flex gap-2">
+                                                    <input type="text" value={bulkRange} onChange={e=>setBulkRange(e.target.value)} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm font-mono" placeholder="Definir rango..."/>
+                                                    <button onClick={applyBulkRange} className="px-4 bg-muted hover:bg-muted/80 text-text font-black text-[10px] rounded-xl transition-all uppercase">Filtrar</button>
+                                                </div>
+                                            </div>
                                         </div>
                                         
-                                        {stockAnalysis && (
-                                            <div className="col-span-2 bg-background border border-border rounded-xl p-3 flex flex-col gap-2">
-                                                <h4 className="text-[10px] font-bold uppercase text-muted tracking-wider">Asignación de Inventario</h4>
-                                                
-                                                {/* Card Fisico */}
-                                                <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedStockSource === 'fisico' ? 'bg-success/10 border-success' : 'border-border opacity-60 hover:opacity-100'}`}>
-                                                    <input type="radio" name="stock_source" checked={selectedStockSource==='fisico'} onChange={()=>setSelectedStockSource('fisico')} className="accent-success w-4 h-4" disabled={stockAnalysis.fisico <= 0} />
-                                                    <div className="flex-1">
-                                                        <div className="text-sm font-bold text-success">Tomar de Stock Físico (En Tienda)</div>
-                                                        <div className="text-xs text-muted">Disponible: {stockAnalysis.fisico} u. — Se marcará listo para entregar.</div>
-                                                    </div>
-                                                </label>
-
-                                                {/* Cards Flotantes */}
-                                                {stockAnalysis.flotantes.map((flot, idx) => {
-                                                    const sourceId = flot.isConfirmed ? `flotante_conf_${flot.semana_id}` : `flotante_noc_${flot.semana_id}`;
-                                                    return (
-                                                    <label key={idx} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedStockSource === sourceId ? (flot.isConfirmed ? 'bg-blue-500/10 border-blue-500' : 'bg-purple-500/10 border-purple-500') : 'border-border opacity-70 hover:opacity-100'}`}>
-                                                        <input type="radio" name="stock_source" checked={selectedStockSource===sourceId} onChange={()=>setSelectedStockSource(sourceId)} className={`w-4 h-4 ${flot.isConfirmed ? 'accent-blue-500' : 'accent-purple-500'}`} />
-                                                        <div className="flex-1">
-                                                            <div className={`text-sm font-bold ${flot.isConfirmed ? 'text-blue-400' : 'text-purple-400'}`}>Tomar de Stock Flotante ({flot.nombre})</div>
-                                                            <div className="text-xs text-muted">
-                                                                Reservado en tránsito ({flot.qty} u.) {flot.isConfirmed ? '✅ Confirmado' : '⏳ Aún NO Confirmado'} - Llegada: {flot.fechaArribo.toLocaleDateString('es-BO', {day:'numeric', month:'short'})}
-                                                            </div>
-                                                        </div>
-                                                    </label>
-                                                )})}
-
-                                                {/* Nuevo Pedido Base */}
-                                                <div className="mt-2 border-t border-border/50 pt-2">
-                                                    <label className="block text-[11px] mb-1 text-muted">Realizar Nueva Importación / Pedido futuro</label>
-                                                    <select value={selectedStockSource.startsWith('pedido_') ? selectedStockSource : ''} onChange={e=>setSelectedStockSource(e.target.value)} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none">
-                                                        <option value="" disabled>Seleccione semana objetivo...</option>
-                                                        {semanas.slice(0, 3).map(s => {
-                                                            const d = s.fecha_estimada_llegada ? new Date(s.fecha_estimada_llegada) : new Date(new Date(s.created_at).getTime() + (22*24*60*60*1000));
-                                                            return <option key={s.id} value={`pedido_${s.id}`}>Encargar en {s.nombre} (Llega ~{d.toLocaleDateString('es-BO', {day:'numeric', month:'short'})})</option>
-                                                        })}
-                                                    </select>
+                                        {bulkResults.length > 0 && (
+                                            <div className="bg-surface border border-border rounded-xl p-3 max-h-48 overflow-y-auto">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                    {bulkResults.map(p => (
+                                                        <label key={p.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${bulkSelected.has(p.id) ? 'bg-primary/10 border-primary shadow-sm' : 'border-border/50 hover:bg-muted/30'}`}>
+                                                            <input type="checkbox" checked={bulkSelected.has(p.id)} onChange={()=>toggleBulkItem(p.id)} className="w-4 h-4 accent-primary" />
+                                                            <span className="text-[11px] font-bold truncate flex-1">{p.titulo}</span>
+                                                            <span className="text-[9px] text-muted font-mono shrink-0">BS {p.precio_venta_bs || p.precio_tapa}</span>
+                                                        </label>
+                                                    ))}
                                                 </div>
                                             </div>
                                         )}
 
-                                        <div>
-                                            <label className="block text-[11px] mb-1 text-muted">Precio Venta (BS) *</label>
-                                            <input type="number" value={addForm.precio_venta} onChange={e=>setAddForm({...addForm, precio_venta:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none"/>
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] mb-1 text-muted">Abono Inicial (BS)</label>
-                                            <input type="number" value={addForm.monto_pagado} onChange={e=>setAddForm({...addForm, monto_pagado:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-success font-bold outline-none"/>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="grid border-t border-border/50 pt-3 grid-cols-2 gap-3">
-                                        <div className="col-span-2">
-                                            <label className="block text-[11px] mb-1 text-primary font-bold">Nombre Colección (Prefijo Catálogo) *</label>
-                                            <input type="text" value={addForm.coleccion_nombre} onChange={e=>setAddForm({...addForm, coleccion_nombre:e.target.value})} className="w-full bg-surface border border-primary px-3 py-2 rounded-lg text-sm text-text outline-none" placeholder="Ej: NARUTO IVREA"/>
-                                            <p className="text-[10px] text-muted mt-1">El sistema anexará automáticamente ' 01', ' 02' e intentará emparejar con el catálogo maestro.</p>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <label className="block text-[11px] mb-1 text-muted">Rango de Tomos *</label>
-                                            <input type="text" value={addForm.tomos} onChange={e=>setAddForm({...addForm, tomos:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none" placeholder="Ej: 1-5, 7, 9-12"/>
-                                            {addForm.tomos && (
-                                                <div className="text-[10px] text-primary mt-1 font-mono">
-                                                    Generará: {parseTomos(addForm.tomos).length} tomos ({parseTomos(addForm.tomos).join(', ')})
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] mb-1 text-muted">Precio x Tomo (BS) *</label>
-                                            <input type="number" value={addForm.precio_tomo} onChange={e=>setAddForm({...addForm, precio_tomo:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-text outline-none"/>
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] mb-1 text-muted">Abono Total (se divide)</label>
-                                            <input type="number" value={addForm.pago_inicial_total} onChange={e=>setAddForm({...addForm, pago_inicial_total:e.target.value})} className="w-full bg-surface border border-border px-3 py-2 rounded-lg text-sm text-success font-bold outline-none"/>
+                                        <div className="flex justify-between items-center mt-2 border-t border-border pt-4">
+                                            <span className="text-[10px] font-black text-muted uppercase tracking-widest">{bulkSelected.size} Ítems seleccionados para añadir</span>
+                                            <button onClick={addToCart} disabled={bulkSelected.size === 0 || loading} className="bg-secondary text-background font-black text-xs uppercase tracking-widest px-8 py-3 rounded-xl hover:scale-105 transition-all shadow-lg shadow-secondary/20">
+                                                        Añadir Lote seleccionado a la tabla
+                                            </button>
                                         </div>
                                     </div>
                                 )}
-                                
-                                <button 
-                                    onClick={addToCart}
-                                    className="w-full bg-background border-2 border-primary text-primary font-black py-3 rounded-xl hover:bg-primary hover:text-background transition-all flex items-center justify-center gap-2 mt-2 shadow-sm"
-                                >
-                                    <Plus size={18}/> AÑADIR A ESTA VENTA
-                                </button>
                             </div>
 
-                            {/* Carrito Temporal */}
+                            {/* TABLA DE ITEMS (CARRO) */}
                             {cart.length > 0 && (
-                                <div className="bg-background border border-border p-4 rounded-xl flex flex-col gap-3">
-                                    <h3 className="text-xs font-bold uppercase text-primary tracking-wider flex items-center gap-2">
-                                        <ShoppingBag size={14}/> Cesta de la Venta Actual
-                                    </h3>
-                                    <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-2">
-                                        {cart.map((c, i) => (
-                                            <div key={i} className="flex items-center justify-between bg-surface p-3 rounded-lg border border-border/50 group">
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-bold text-text truncate">{c.titulo}</div>
-                                                    <div className="text-[10px] text-muted flex items-center gap-2">
-                                                        <span className={`font-bold ${c.estado === 'EN TIENDA' ? 'text-success' : 'text-blue-400'}`}>[{c.estado}]</span>
-                                                        <span>• BS {formatS(c.precio_venta)}</span>
-                                                        {c.nota && <span>• {c.nota}</span>}
-                                                    </div>
-                                                </div>
-                                                <button onClick={()=>removeFromCart(i)} className="text-muted hover:text-error ml-3 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Trash2 size={16}/>
-                                                </button>
+                                <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-4 duration-300">
+                                    <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-primary/10 border border-primary/20 p-4 rounded-2xl shadow-sm">
+                                        <h3 className="text-[10px] font-black uppercase text-primary tracking-[0.2em] flex items-center gap-2">
+                                            <ShoppingBag size={14} className="text-primary"/> Detalle del Pedido Actual
+                                        </h3>
+                                        
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            <div className="flex items-center gap-2 bg-background/60 border border-border px-3 py-1.5 rounded-xl shadow-inner group focus-within:border-primary transition-all">
+                                                <span className="text-[9px] font-black text-muted uppercase">Global Desc. %</span>
+                                                <input 
+                                                    type="number" 
+                                                    placeholder="0"
+                                                    className="w-12 bg-transparent text-xs font-bold text-error outline-none text-center"
+                                                    onKeyDown={(e) => {
+                                                        if(e.key === 'Enter') {
+                                                            const pct = Number(e.target.value);
+                                                            const next = cart.map(it => {
+                                                                const base = Number(it.precio_original)||0;
+                                                                const val = base * (pct/100);
+                                                                return {...it, descuento: pct, precio_venta: (base - val).toFixed(0)};
+                                                            });
+                                                            setCart(next);
+                                                        }
+                                                    }}
+                                                />
                                             </div>
-                                        ))}
+
+                                            <div className="flex items-center gap-2 bg-background/60 border border-border px-3 py-1.5 rounded-xl shadow-inner group focus-within:border-success transition-all">
+                                                <span className="text-[9px] font-black text-muted uppercase">Global Inicial BS</span>
+                                                <input 
+                                                    type="number" 
+                                                    placeholder="0"
+                                                    className="w-14 bg-transparent text-xs font-bold text-success outline-none text-center"
+                                                    onKeyDown={(e) => {
+                                                        if(e.key === 'Enter') {
+                                                            const amt = Number(e.target.value);
+                                                            const next = cart.map(it => ({...it, monto_pagado: amt}));
+                                                            setCart(next);
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+
+                                            <div className="flex items-center gap-2 bg-background/60 border border-border px-3 py-1.5 rounded-xl shadow-inner group focus-within:border-secondary transition-all">
+                                                <span className="text-[9px] font-black text-muted uppercase tracking-tighter">Asignar Fuente Global</span>
+                                                <select 
+                                                    className="bg-transparent text-[9px] font-black uppercase outline-none cursor-pointer text-text"
+                                                    onChange={(e) => {
+                                                        const src = e.target.value;
+                                                        if(!src) return;
+                                                        const next = cart.map(it => ({...it, source: src}));
+                                                        setCart(next);
+                                                    }}
+                                                >
+                                                    <option value="">-- Elige --</option>
+                                                    <option value="pedido_PENDIENTE">🚀 Próximo Pedido</option>
+                                                    <option value="fisico">✨ Stock Físico</option>
+                                                    {semanas.filter(s => s.abierta).slice(0,3).map(s => (
+                                                        <option key={s.id} value={`pedido_${s.id}`}>📂 {s.nombre}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <button onClick={()=>setCart([])} className="p-2 text-muted-2 hover:text-error transition-colors hover:bg-error/5 rounded-lg" title="Limpiar todo el carrito">
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="border-t border-border pt-2 flex justify-between items-center font-bold">
-                                        <span className="text-xs text-muted">TOTAL VENTA:</span>
-                                        <span className="text-lg font-mono text-primary">BS {formatS(cart.reduce((s,i)=>s+i.precio_venta, 0))}</span>
+
+                                    <div className="border border-border rounded-2xl overflow-hidden shadow-xl bg-surface/50 backdrop-blur-md">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="bg-background/80 text-[10px] font-black uppercase text-muted tracking-widest border-b border-border">
+                                                    <th className="p-4 text-left">Título / Ítem</th>
+                                                    <th className="p-4 text-center w-28">Precio Original</th>
+                                                    <th className="p-4 text-center w-24">Desc. %</th>
+                                                    <th className="p-4 text-center w-28 text-primary">Precio Final</th>
+                                                    <th className="p-4 text-center w-28 text-success">Pago Inicial</th>
+                                                    <th className="p-3 text-center w-[350px]">Asignación de Stock</th>
+                                                    <th className="p-4 w-12 text-right"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border/30">
+                                                {cart.map((c, i) => {
+                                                    const finalPrice = Math.max(0, Number(c.precio_original) - (Number(c.descuento)||0));
+                                                    
+                                                    // Calculo de fecha para Proximo Pedido (Siguiente Sabado + 22 dias)
+                                                    const todayDt = new Date();
+                                                    const nextSatDt = new Date();
+                                                    nextSatDt.setDate(todayDt.getDate() + (6 - todayDt.getDay() + 7) % 7);
+                                                    const arrivalDt = new Date(nextSatDt);
+                                                    arrivalDt.setDate(nextSatDt.getDate() + 22);
+                                                    const dateStr = arrivalDt.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+
+                                                    return (
+                                                        <tr key={i} className="hover:bg-primary/5 transition-colors group">
+                                                            <td className="p-4">
+                                                                <div className="font-bold text-text leading-tight" title={c.titulo}>{c.titulo}</div>
+                                                                <div className="text-[9px] text-muted uppercase font-mono mt-0.5">{c.product_id || 'ID Desconocido'}</div>
+                                                            </td>
+                                                            <td className="p-4">
+                                                                <div className="flex items-center justify-center gap-1 border border-border rounded bg-surface px-2 py-1">
+                                                                    <span className="text-[10px] text-muted font-bold">BS</span>
+                                                                    <input type="number" value={c.precio_original} onChange={(e)=>{
+                                                                        const base = Number(e.target.value);
+                                                                        const pct = Number(c.descuento)||0;
+                                                                        const final = base - (base * pct / 100);
+                                                                        const next = [...cart];
+                                                                        next[i] = {...c, precio_original: base, precio_venta: final.toFixed(0)};
+                                                                        setCart(next);
+                                                                    }} className="w-full bg-transparent text-center font-mono font-bold outline-none"/>
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-4 text-center">
+                                                                <div className="flex items-center justify-center gap-1 border border-border rounded bg-surface px-2 py-1">
+                                                                    <span className="text-[10px] text-error font-bold">%</span>
+                                                                    <input type="number" value={c.descuento} onChange={(e)=>{
+                                                                        const pct = e.target.value;
+                                                                        const base = Number(c.precio_original)||0;
+                                                                        const final = base - (base * (Number(pct)||0) / 100);
+                                                                        const next = [...cart];
+                                                                        next[i] = {...c, descuento: pct, precio_venta: final.toFixed(0)};
+                                                                        setCart(next);
+                                                                    }} className="w-full bg-transparent text-center font-mono font-bold text-error outline-none"/>
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-4 text-center">
+                                                                <div className="flex items-center justify-center gap-1 border-2 border-primary/30 rounded-lg bg-primary/5 px-2 py-1">
+                                                                    <span className="text-[10px] text-primary font-bold">BS</span>
+                                                                    <input type="number" value={c.precio_venta} onChange={(e)=>{
+                                                                        const final = e.target.value;
+                                                                        const base = Number(c.precio_original)||0;
+                                                                        const pct = base > 0 ? ((1 - Number(final) / base) * 100).toFixed(1) : 0;
+                                                                        const next = [...cart];
+                                                                        next[i] = {...c, precio_venta: final, descuento: pct};
+                                                                        setCart(next);
+                                                                    }} className="w-full bg-transparent text-center font-mono font-black text-primary outline-none"/>
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-4 text-center">
+                                                                <div className="flex items-center justify-center gap-1 border border-success/30 rounded bg-success/5 px-2 py-1">
+                                                                    <span className="text-[10px] text-success">BS</span>
+                                                                    <input type="number" value={c.monto_pagado} onChange={(e)=>{
+                                                                        const v = Number(e.target.value);
+                                                                        const next = [...cart];
+                                                                        next[i] = {...c, monto_pagado: v};
+                                                                        setCart(next);
+                                                                    }} className="w-full bg-transparent text-center font-mono font-bold text-success outline-none"/>
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-4 text-center">
+                                                                <select 
+                                                                    value={c.source} 
+                                                                    onChange={(e) => {
+                                                                        const next = [...cart];
+                                                                        next[i] = {...c, source: e.target.value};
+                                                                        setCart(next);
+                                                                    }}
+                                                                    className={`w-full bg-surface border-2 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase outline-none focus:border-primary shadow-sm transition-all ${
+                                                                        c.source === 'fisico' ? 'border-success text-success bg-success/5' : 
+                                                                        c.source === 'pedido_PENDIENTE' ? 'border-purple-500 text-purple-500 bg-purple-500/5' :
+                                                                        c.source.includes('flotante_conf') ? 'border-primary text-primary bg-primary/5' :
+                                                                        c.source.includes('flotante_noc') ? 'border-orange-400 text-orange-400 bg-orange-400/5' :
+                                                                        'border-muted text-muted bg-muted/10'
+                                                                    }`}
+                                                                >
+                                                                    <option value="pedido_PENDIENTE">🚀 PRÓXIMO PEDIDO (Arribo: {dateStr})</option>
+                                                                    {c.stockOptions.fisico > 0 && <option value="fisico">✨ Stock Físico ({c.stockOptions.fisico} u.)</option>}
+                                                                    {c.stockOptions.flotantes.map(flot => (
+                                                                        <option key={flot.id} value={flot.isConfirmed ? `flotante_conf_${flot.id}` : `flotante_noc_${flot.id}`}>
+                                                                            {flot.isConfirmed ? '🌍' : '⏳'} {flot.nombre} ({flot.qty} u.)
+                                                                        </option>
+                                                                    ))}
+                                                                    {semanas.filter(s => {
+                                                                            if (!s.abierta) return false;
+                                                                            const dateMatch = s.nombre.match(/(\d+)-(\d+)$/);
+                                                                            if (!dateMatch) return true;
+                                                                            const [_, d, m] = dateMatch;
+                                                                            const weekDate = new Date(new Date().getFullYear(), parseInt(m)-1, parseInt(d));
+                                                                            const diff = (6 - weekDate.getDay() + 7) % 7;
+                                                                            const deadline = new Date(weekDate);
+                                                                            deadline.setDate(weekDate.getDate() + (diff === 0 ? 0 : diff));
+                                                                            deadline.setHours(12, 0, 0);
+                                                                            return new Date() < deadline;
+                                                                        }).slice(0, 4).map(s => <option key={s.id} value={`pedido_${s.id}`}>Encargar p/ {s.nombre}</option>)}
+                                                                </select>
+                                                            </td>
+                                                            <td className="p-4 text-right">
+                                                                <button onClick={()=>removeFromCart(i)} className="text-muted/40 hover:text-error transition-colors p-1.5 hover:bg-error/10 rounded-lg">
+                                                                    <Trash2 size={16}/>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                        <div className="bg-background/80 p-5 px-8 flex justify-between items-center border-t border-border">
+                                            <div className="flex gap-8 text-[11px] font-black uppercase tracking-widest text-muted">
+                                                <div>Items: <span className="text-text">{cart.length}</span></div>
+                                                <div>Subtotal: <span className="text-text">BS {formatS(cart.reduce((s,i)=>s+Number(i.precio_original), 0))}</span></div>
+                                                <div>Descuentos: <span className="text-error">BS {formatS(cart.reduce((s,i)=>s+Number(i.descuento), 0))}</span></div>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                <span className="text-[10px] font-black uppercase text-muted tracking-[0.2em]">Total Pedido</span>
+                                                <span className="text-2xl font-mono font-black text-primary">BS {formatS(cart.reduce((s,i)=>s+Number(i.precio_venta), 0))}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}
                         </div>
 
-                        <div className="p-5 border-t border-border flex justify-end gap-3 bg-background rounded-b-2xl shrink-0">
-                            <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
+                        <div className="p-6 border-t border-border flex justify-end gap-4 bg-background rounded-b-2xl shrink-0">
+                            <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="px-6 py-2.5 text-[11px] font-black uppercase tracking-widest text-muted hover:text-text transition-colors">Cancelar</button>
                             <button 
                                 onClick={handleSaveOrder} 
                                 disabled={cart.length === 0 || loading}
-                                className={`px-8 py-3 rounded-xl text-sm font-black flex items-center gap-2 shadow-lg transition-all ${cart.length > 0 && !loading ? 'bg-primary text-background hover:scale-105 hover:shadow-primary/30' : 'bg-muted text-surface cursor-not-allowed'}`}
+                                className={`px-12 py-3.5 rounded-2xl text-xs font-black uppercase tracking-[0.2em] flex items-center gap-3 shadow-2xl transition-all ${cart.length > 0 && !loading ? 'bg-primary text-background hover:scale-105 hover:shadow-primary/40 active:scale-95' : 'bg-muted text-surface cursor-not-allowed'}`}
                             >
-                                <Check size={18}/> PROCESAR VENTA COMPLETA ({cart.length})
+                                {loading ? <div className="animate-spin w-4 h-4 border-2 border-background border-t-transparent rounded-full" /> : <Check size={18}/>}
+                                Procesar Pedido Completo
                             </button>
                         </div>
                     </div>

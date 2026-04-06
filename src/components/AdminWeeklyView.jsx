@@ -11,13 +11,45 @@ export default function AdminWeeklyView() {
     const [isCreating, setIsCreating] = useState(false);
     const [newSemanaName, setNewSemanaName] = useState('');
     const [draggingId, setDraggingId] = useState(null);
-    const [editingDateId, setEditingDateId] = useState(null);
-    const [tempDate, setTempDate] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [pendingOrders, setPendingOrders] = useState(0);
 
     useEffect(() => {
         fetchSemanas();
+        fetchPending();
     }, []);
+
+    const fetchPending = async () => {
+        const { count, error } = await supabase
+            .from('cliente_items')
+            .select('*', { count: 'exact', head: true })
+            .is('semana_id', null)
+            .eq('estado', 'PEDIDO (Siguiente)');
+        if (!error) setPendingOrders(count || 0);
+    };
+
+    const assignPending = async (semanaId, semanaNombre) => {
+        if (!confirm(`¿Quieres asignar los ${pendingOrders} pedidos pendientes a la ${semanaNombre}?`)) return;
+        setLoading(true);
+        try {
+            const { error } = await supabase
+                .from('cliente_items')
+                .update({ 
+                    semana_id: semanaId, 
+                    estado: `PEDIDO ${semanaNombre}` 
+                })
+                .is('semana_id', null)
+                .eq('estado', 'PEDIDO (Siguiente)');
+            
+            if (error) throw error;
+            alert("¡Éxito! Pedidos asignados.");
+            await fetchPending();
+        } catch (err) {
+            alert("Error al asignar: " + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const fetchSemanas = async () => {
         setLoading(true);
@@ -233,6 +265,21 @@ export default function AdminWeeklyView() {
                 </button>
             </div>
 
+            {pendingOrders > 0 && (
+                <div className="bg-purple-500/10 border-2 border-purple-500/30 p-4 rounded-xl flex items-center justify-between animate-pulse">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-purple-500 text-white rounded-full flex items-center justify-center font-bold shadow-lg">
+                            {pendingOrders}
+                        </div>
+                        <div>
+                            <p className="text-sm font-black text-purple-500 uppercase tracking-widest">Pedidos en Espera</p>
+                            <p className="text-[10px] text-muted-2">Hay {pendingOrders} ítems guardados como "Próximo Pedido" que necesitan ser asignados a una semana concreta.</p>
+                        </div>
+                    </div>
+                    <span className="text-[10px] font-bold text-muted-2 italic">Asigna desde una semana abierta ↓</span>
+                </div>
+            )}
+
             {isCreating && (
                 <form onSubmit={createSemana} className="card p-6 flex gap-4 items-end animate-in fade-in slide-in-from-top-4 duration-300">
                     <div className="flex-1">
@@ -346,6 +393,16 @@ export default function AdminWeeklyView() {
                                     {s.abierta ? <Lock size={14} /> : <Unlock size={14} />}
                                     {s.abierta ? 'CERRAR' : 'ABRIR'}
                                 </button>
+
+                                {s.abierta && pendingOrders > 0 && (
+                                    <button
+                                        onClick={() => assignPending(s.id, s.nombre)}
+                                        className="flex items-center gap-2 px-3 py-2 bg-purple-500 text-white rounded text-xs font-black shadow-lg shadow-purple-500/20 hover:scale-105 transition-all"
+                                        title="Asignar pedidos pendientes de semana a esta carpeta"
+                                    >
+                                        <RefreshCw size={14} /> ASIGNAR {pendingOrders} PENDIENTES
+                                    </button>
+                                )}
 
                                 {s.archivo_url && (
                                     <button
