@@ -19,12 +19,13 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3, ShoppingBag
+    Truck, BarChart3, ShoppingBag, Wallet
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
 import CatalogUpdatedView from './components/CatalogUpdatedView';
 import ClientOrdersView from './components/ClientOrdersView';
+import FlujoCajaView from './components/FlujoCajaView';
 
 // --- Nav item ---
 function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
@@ -67,6 +68,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
+        { id: 'caja', icon: Wallet, label: 'Flujo de Caja' || 'POS System' },
     ];
 
     const sellerItems = [
@@ -77,6 +79,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
+        { id: 'caja', icon: Wallet, label: 'Flujo de Caja' || 'POS System' },
     ];
 
     const items = isAdmin ? adminItems : sellerItems;
@@ -157,6 +160,7 @@ const TAB_TITLES = {
     preventas: 'Generador de Preventas',
     cotizaciones: 'Generador de Cotizaciones',
     clientes: 'Pedidos de Clientes',
+    caja: 'Flujo de Caja',
     entelequia: 'Herramienta Editorial',
 };
 
@@ -262,6 +266,7 @@ function Main() {
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
         activeTab === 'clientes' ? <ClientOrdersView /> :
+        activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
         activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback
@@ -272,6 +277,7 @@ function Main() {
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
         activeTab === 'clientes' ? <ClientOrdersView /> :
+        activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
         <SellerDashboard isAdmin={isAdmin} />
     );
 
