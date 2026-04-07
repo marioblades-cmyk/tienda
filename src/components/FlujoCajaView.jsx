@@ -255,12 +255,12 @@ export default function FlujoCajaView({ user, profile }) {
                                 <span className="w-8 h-[1px] bg-primary/40 block" /> Gestión de Efectivo en Sucursal
                             </div>
                             <h2 className="text-5xl font-display uppercase tracking-tight leading-none text-white font-black">
-                                {turnoActivo ? `Caja: ${turnoActivo.responsable}` : 'Módulo Inactivo'}
+                                {turnoActivo ? `Caja: ${turnoActivo.responsable}` : 'Caja Cerrada'}
                             </h2>
                             <div className="flex items-center gap-6 mt-6">
                                 <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-full border border-white/10">
-                                    <div className={`w-2 h-2 rounded-full ${turnoActivo ? 'bg-success animate-pulse' : 'bg-white/20'}`} />
-                                    <span className="text-[10px] font-black tracking-widest uppercase">{turnoActivo ? 'En Línea' : 'Fuera de Servicio'}</span>
+                                    <div className={`w-2 h-2 rounded-full ${turnoActivo ? 'bg-success animate-pulse' : 'bg-white/40'}`} />
+                                    <span className="text-[10px] font-black tracking-widest uppercase">{turnoActivo ? 'En Línea' : 'Turno Cerrado'}</span>
                                 </div>
                                 {turnoActivo && (
                                     <span className="text-[11px] font-mono text-white/40 font-medium tracking-wide">
@@ -483,12 +483,12 @@ export default function FlujoCajaView({ user, profile }) {
                                         <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -mr-32 -mt-32 blur-[80px] transition-transform duration-1000 group-hover:scale-150" />
                                         <div className="grid grid-cols-2 gap-12 relative">
                                             <div>
-                                                <p className="text-[10px] font-black text-muted uppercase tracking-widest mb-3 opacity-60">Responsable de Caja</p>
+                                                <p className="text-[10px] font-black text-navy/50 uppercase tracking-widest mb-3">Responsable de Caja</p>
                                                 <p className="text-3xl font-black text-navy mb-8 uppercase tracking-tight leading-tight">{ultimoTurno.responsable}</p>
                                                 <div className="space-y-4">
                                                     <div>
-                                                        <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-1 opacity-60">Finalización el</p>
-                                                        <p className="text-xs font-bold text-text">{new Date(ultimoTurno.cerrado_at).toLocaleString(undefined, { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>
+                                                        <p className="text-[9px] font-black text-navy/50 uppercase tracking-widest mb-1">Finalización el</p>
+                                                        <p className="text-xs font-bold text-navy">{new Date(ultimoTurno.cerrado_at).toLocaleString(undefined, { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>
                                                     </div>
                                                     <div className="inline-flex bg-navy text-white px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.3em] shadow-lg shadow-navy/30">
                                                         Turno {ultimoTurno.turno}
@@ -497,7 +497,7 @@ export default function FlujoCajaView({ user, profile }) {
                                             </div>
                                             <div className="text-right flex flex-col justify-between">
                                                 <div>
-                                                    <p className="text-[10px] font-black text-muted uppercase tracking-widest mb-3 opacity-60">Total en Efectivo</p>
+                                                    <p className="text-[10px] font-black text-navy/50 uppercase tracking-widest mb-3">Total en Efectivo</p>
                                                     <p className="text-6xl font-black text-navy font-mono tracking-tighter leading-none">Bs {ultimoTurno.monto_final.toLocaleString()}</p>
                                                 </div>
                                                 <div className="pt-1 or-8">
@@ -513,8 +513,8 @@ export default function FlujoCajaView({ user, profile }) {
                                     </div>
                                 ) : (
                                     <div className="p-32 text-center glass rounded-[4.5rem] border-4 border-dashed border-border/40">
-                                        <Wallet size={64} className="mx-auto text-muted/30 mb-6" />
-                                        <p className="text-xs text-muted/60 font-black uppercase tracking-[0.3em]">No existen registros previos para visualización rápida</p>
+                                        <Wallet size={64} className="mx-auto text-navy/20 mb-6" />
+                                        <p className="text-xs text-navy/60 font-black uppercase tracking-[0.3em]">No existen registros previos para visualización rápida</p>
                                     </div>
                                 )}
 
@@ -532,7 +532,7 @@ export default function FlujoCajaView({ user, profile }) {
                                 <div className="glass rounded-[4.5rem] border border-border/40 overflow-hidden shadow-2xl bg-white/50 backdrop-blur-md">
                                     <table className="w-full text-left border-collapse">
                                         <thead className="bg-[#fcfdfe]/80 border-b border-border/40">
-                                            <tr className="text-[9px] font-black text-muted/40 uppercase tracking-[0.3em]">
+                                            <tr className="text-[9px] font-black text-navy/50 uppercase tracking-[0.3em]">
                                                 <th className="p-8">Calendario / Turno</th>
                                                 <th className="p-8">Auditor Responsable</th>
                                                 <th className="p-8 text-right">Saldo Finalizado</th>
@@ -561,7 +561,7 @@ export default function FlujoCajaView({ user, profile }) {
                                             ))}
                                             {historialTurnos.length === 0 && (
                                                 <tr>
-                                                <td colSpan="4" className="p-32 text-center text-muted/60 uppercase font-black text-xs tracking-[0.5em] italic">Historial de sesiones vacío</td>
+                                                <td colSpan="4" className="p-32 text-center text-navy/60 uppercase font-black text-xs tracking-[0.5em] italic">Historial de sesiones vacío</td>
                                                 </tr>
                                             )}
                                         </tbody>
@@ -621,7 +621,7 @@ export default function FlujoCajaView({ user, profile }) {
                     <div className="glass rounded-[5rem] border border-border/40 shadow-[0_60px_150px_-30px_rgba(0,0,0,0.2)] overflow-hidden bg-white/60 backdrop-blur-xl">
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-[#fcfdfe]/80 border-b border-border/40">
-                                <tr className="text-[10px] font-black uppercase tracking-[0.3em] text-muted/50">
+                                <tr className="text-[10px] font-black uppercase tracking-[0.3em] text-navy/60">
                                     <th className="p-10">Referencia de Sesión</th>
                                     <th className="p-10">Responsable Auditor</th>
                                     <th className="p-10">Turno</th>
@@ -641,20 +641,20 @@ export default function FlujoCajaView({ user, profile }) {
                                         <td className="p-10">
                                             <span className="text-[10px] font-black uppercase bg-navy text-white px-6 py-2.5 rounded-full shadow-2xl shadow-navy/40 border border-white/5">{h.turno}</span>
                                         </td>
-                                        <td className="p-10 text-right font-bold text-muted/50 font-mono italic text-xs">Bs {h.monto_inicial.toLocaleString()}</td>
+                                        <td className="p-10 text-right font-bold text-navy/30 font-mono italic text-xs">Bs {h.monto_inicial.toLocaleString()}</td>
                                         <td className="p-10 text-right">
                                             <div className="font-black text-navy font-mono text-3xl tracking-tighter shadow-primary leading-none">Bs {h.monto_final?.toLocaleString()}</div>
                                             <div className="text-[9px] font-black text-success mt-1 tracking-widest opacity-60 uppercase">Cerrado Correctamente</div>
                                         </td>
                                         <td className="p-10">
                                             <div className="flex items-center justify-end gap-3 translate-x-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-500">
-                                                <button onClick={() => setShowDetailModal(h)} className="p-5 bg-white rounded-3xl text-muted hover:text-primary shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Informe Detallado">
+                                                <button onClick={() => setShowDetailModal(h)} className="p-5 bg-white rounded-3xl text-navy/60 hover:text-primary shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Informe Detallado">
                                                     <Eye size={22} className="group-hover/btn:scale-110 transition-transform" />
                                                 </button>
-                                                <button onClick={() => setShowEditModal(h)} className="p-5 bg-white rounded-3xl text-muted hover:text-accent shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Modificar Registro">
+                                                <button onClick={() => setShowEditModal(h)} className="p-5 bg-white rounded-3xl text-navy/60 hover:text-accent shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Modificar Registro">
                                                     <Edit3 size={22} className="group-hover/btn:rotate-12 transition-transform" />
                                                 </button>
-                                                <button onClick={() => handleDeleteTurno(h.id)} className="p-5 bg-white rounded-3xl text-muted hover:text-error shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Anular Registro Maestro">
+                                                <button onClick={() => handleDeleteTurno(h.id)} className="p-5 bg-white rounded-3xl text-navy/60 hover:text-error shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Anular Registro Maestro">
                                                     <Trash2 size={22} className="group-hover/btn:-rotate-12 transition-transform" />
                                                 </button>
                                             </div>
@@ -665,8 +665,8 @@ export default function FlujoCajaView({ user, profile }) {
                                     <tr>
                                         <td colSpan="6" className="p-52 text-center">
                                             <div className="flex flex-col items-center gap-8 text-muted/30">
-                                                <Search size={80} className="stroke-[1px] opacity-40 text-primary" />
-                                                <p className="text-[11px] uppercase font-black tracking-[0.6em] italic leading-relaxed text-muted/80">No se encontraron registros que satisfagan la auditoría actual</p>
+                                                <Search size={80} className="stroke-[1px] opacity-60 text-primary" />
+                                                <p className="text-[11px] uppercase font-black tracking-[0.6em] italic leading-relaxed text-navy/70">No se encontraron registros que satisfagan la auditoría actual</p>
                                                 <button 
                                                     onClick={() => {setDateRange({from: '', to: ''}); setSearchTerm('');}}
                                                     className="text-[9px] font-black text-primary border-b border-primary/40 pb-1 hover:text-navy hover:border-navy transition-all"
@@ -758,6 +758,15 @@ export default function FlujoCajaView({ user, profile }) {
                                         <p className="text-[10px] font-bold text-error leading-relaxed uppercase">
                                             Diferencia detectada: el turno anterior cerró con <span className="underline">Bs {ultimoTurno.monto_final.toLocaleString()}</span>. 
                                             Faltan/Sobran Bs {(parseFloat(openForm.monto_inicial) - ultimoTurno.monto_final).toLocaleString()}.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {ultimoTurno && openForm.monto_inicial && parseFloat(openForm.monto_inicial) === ultimoTurno.monto_final && (
+                                    <div className="bg-success/5 border border-success/20 p-4 rounded-2xl flex gap-3 items-center">
+                                        <CheckCircle2 size={20} className="text-success shrink-0" />
+                                        <p className="text-[10px] font-bold text-success leading-relaxed uppercase tracking-wider">
+                                            ¡El monto coincide perfectamente con el cierre anterior! Saldo verificado.
                                         </p>
                                     </div>
                                 )}
