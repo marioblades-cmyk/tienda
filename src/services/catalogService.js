@@ -230,6 +230,46 @@ export const catalogService = {
     },
 
     /**
+     * Actualiza el stock de productos específicos en la caché local SIN recargar todo.
+     * Mucho más eficiente que clearCache() para operaciones de venta/devolución.
+     * @param {Array} items - Array de { id, delta } donde delta es el cambio (+/-) de stock
+     */
+    patchStockInCache(items) {
+        try {
+            const cachedData = localStorage.getItem(CACHE_KEY);
+            if (!cachedData) return; // Si no hay caché, no hay nada que parchear
+
+            const compressed = JSON.parse(cachedData);
+            let changed = false;
+
+            // Construir mapa id -> índice para búsqueda O(1)
+            const idIndex = {};
+            compressed.forEach((item, idx) => {
+                if (item.i) idIndex[item.i] = idx;
+            });
+
+            // Aplicar el delta de stock a cada item
+            for (const { id, delta } of items) {
+                const idx = idIndex[id];
+                if (idx !== undefined) {
+                    const currentStock = compressed[idx].sf ?? 0;
+                    compressed[idx].sf = Math.max(0, currentStock + delta);
+                    changed = true;
+                    console.log(`📦 Cache parcheada: id=${id} stock ${currentStock} → ${compressed[idx].sf}`);
+                }
+            }
+
+            if (changed) {
+                localStorage.setItem(CACHE_KEY, JSON.stringify(compressed));
+                // Mantener el tiempo de caché original (no reiniciar el TTL)
+            }
+        } catch (e) {
+            console.warn('⚠️ No se pudo parchear la caché, limpiando completamente:', e);
+            this.clearCache(); // Fallback: limpiar todo si algo falla
+        }
+    },
+
+    /**
      * Sincroniza una lista de items con el catálogo maestro (Upsert)
      */
     async upsertMaster(items) {

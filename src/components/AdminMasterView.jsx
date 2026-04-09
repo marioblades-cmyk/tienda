@@ -308,16 +308,85 @@ export default function AdminMasterView() {
     };
 
     const handleUpdateTitle = async () => {
-        if (!newTitleValue.trim() || !existingMaster) return;
+        if (!newTitleValue.trim() || !existingMaster || !selectedSemana) return;
         setProcessing(true);
         try {
-            await supabase.from('master_confirmaciones').update({ titulo_despacho: newTitleValue.trim() }).eq('id', existingMaster.id);
-            setExistingMaster({ ...existingMaster, titulo_despacho: newTitleValue.trim() });
-            setSuccess("Título actualizado.");
+            const oldTitle = existingMaster.titulo_despacho;
+            const newTitle = newTitleValue.trim();
+            const semanaObj = semanas.find(s => s.id === selectedSemana);
+            const nombreMostrar = semanaObj ? semanaObj.nombre : selectedSemana;
+
+            const oldPedidoName = `${oldTitle} (${nombreMostrar})`;
+            const newPedidoName = `${newTitle} (${nombreMostrar})`;
+
+            // 1. Update master_confirmaciones
+            await supabase.from('master_confirmaciones').update({ titulo_despacho: newTitle }).eq('id', existingMaster.id);
+
+            // 2. Propagate to app_state 'distribuidor'
+            const { data: distDataRes } = await supabase.from('app_state').select('data').eq('id', 'distribuidor').maybeSingle();
+            if (distDataRes?.data) {
+                let distData = { ...distDataRes.data };
+                let modifiedDist = false;
+                const weekSuffix = `(${nombreMostrar.toLowerCase()})`;
+
+                if (Array.isArray(distData.pedidos)) {
+                    distData.pedidos = distData.pedidos.map(p => {
+                        const curName = (p.nombre || '').trim().toLowerCase();
+                        const oldFull = oldPedidoName.toLowerCase();
+                        const oldBase = oldTitle.toLowerCase();
+
+                        // Prioridad: 1. Sufijo de Semana coincidente (muy fiable) 2. Match exacto 3. Contención mutua
+                        const isMatch = curName.endsWith(weekSuffix) || 
+                                      curName === oldFull || 
+                                      (oldBase && curName.includes(oldBase)) || 
+                                      (curName.length > 5 && oldBase.includes(curName));
+
+                        if (isMatch) {
+                            modifiedDist = true;
+                            return { ...p, nombre: newPedidoName };
+                        }
+                        return p;
+                    });
+                }
+                if (modifiedDist) {
+                    await supabase.from('app_state').update({ data: distData }).eq('id', 'distribuidor');
+                }
+            }
+
+            // 3. Propagate to app_state 'remitos'
+            const { data: remDataRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
+            if (remDataRes?.data) {
+                let remRows = Array.isArray(remDataRes.data) ? remDataRes.data : (remDataRes.data.rows || []);
+                let modifiedRem = false;
+                const weekSuffix = `(${nombreMostrar.toLowerCase()})`;
+
+                const updatedRows = remRows.map(r => {
+                    const curName = (r.pedido || '').trim().toLowerCase();
+                    const oldFull = oldPedidoName.toLowerCase();
+                    const oldBase = oldTitle.toLowerCase();
+
+                    const isMatch = curName.endsWith(weekSuffix) || 
+                                  curName === oldFull || 
+                                  (oldBase && curName.includes(oldBase)) || 
+                                  (curName.length > 5 && oldBase.includes(curName));
+
+                    if (isMatch) {
+                        modifiedRem = true;
+                        return { ...r, pedido: newPedidoName };
+                    }
+                    return r;
+                });
+                if (modifiedRem) {
+                    await supabase.from('app_state').update({ data: updatedRows }).eq('id', 'remitos');
+                }
+            }
+
+            setExistingMaster({ ...existingMaster, titulo_despacho: newTitle });
+            setSuccess("Título actualizado y sincronizado en Gestión Integral.");
             setIsEditingTitle(false);
         } catch (err) {
             console.error(err);
-            setError("Error al actualizar título.");
+            setError("Error al actualizar y sincronizar el título.");
         } finally {
             setProcessing(false);
         }

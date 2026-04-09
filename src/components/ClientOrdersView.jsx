@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight } from 'lucide-react';
+import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 export default function ClientOrdersView() {
@@ -63,6 +63,7 @@ export default function ClientOrdersView() {
     const [selectedPayItems, setSelectedPayItems] = useState([]);
     const [payMonto, setPayMonto] = useState('');
     const [pagoConcepto, setPagoConcepto] = useState('');
+    const [payMethod, setPayMethod] = useState('Efectivo'); // 'Efectivo' | 'Banco / Transferencia' | 'QR / Tigo Money'
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
     const [batchDiscount, setBatchDiscount] = useState('');
     const [batchAbono, setBatchAbono] = useState('');
@@ -726,10 +727,39 @@ export default function ClientOrdersView() {
             setPayMonto('');
             setPagoConcepto('');
             setSelectedPayItems([]);
+             setSelectedPayItems([]);
+
+            // --- SINCRONIZACIÓN CON FLUJO DE CAJA MAESTRO (SÓLO SI ES EFECTIVO) ---
+            if (payMethod === 'Efectivo') {
+                const { data: activeTurno, error: tErr } = await supabase
+                    .from('turnos_caja')
+                    .select('id, responsable')
+                    .eq('estado', 'ABIERTO')
+                    .maybeSingle();
+
+                if (tErr) throw tErr;
+                if (!activeTurno) {
+                    throw new Error("⚠️ BLOQUEO DE SEGURIDAD: No hay un TURNO DE CAJA abierto. Debes abrir caja en 'OPERATIVA DIARIA' para recibir efectivo.");
+                }
+
+                // Registrar ingreso automático en la caja activa
+                const { error: moveErr } = await supabase.from('caja_movimientos').insert([{
+                    turno_id: activeTurno.id,
+                    tipo: 'INGRESO',
+                    categoria: 'Venta Pedido',
+                    concepto: `ABONO PEDIDO: Cliente ID #${clienteId}${pagoConcepto ? ' - ' + pagoConcepto : ''}`,
+                    monto: amt,
+                    vendedor_id: user?.id
+                }]);
+                
+                if (moveErr) throw moveErr;
+            }
+
             await fetchData();
+            alert("✓ Pago registrado con éxito y sincronizado con Caja Maestra.");
         } catch (e) {
             console.error(e);
-            alert("Error al registrar pago");
+            alert(e.message || "Error al registrar pago");
         } finally {
             setLoading(false);
         }
@@ -1692,7 +1722,7 @@ export default function ClientOrdersView() {
                                                                                 <option value="fisico">✨ STOCK FÍSICO ({c.stockOptions.fisico})</option>
                                                                             </optgroup>
                                                                         )}
-
+                                
                                                                         {/* 2. SEMANAS FLOTANTES (CONFIRMADAS O POR LLEGAR) */}
                                                                         {c.stockOptions?.flotantes && c.stockOptions.flotantes.length > 0 && (
                                                                             <optgroup label="🛳️ PRODUCTOS EN CAMINO" className="text-primary font-black uppercase">
@@ -1852,6 +1882,23 @@ export default function ClientOrdersView() {
                                         <input type="text" value={pagoConcepto} onChange={e=>setPagoConcepto(e.target.value)} className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary" placeholder="Ej: Depósito QR..."/>
                                     </div>
                                 )}
+
+                                <div className="mb-6">
+                                    <label className="text-[10px] font-black text-muted uppercase flex items-center gap-2 mb-3">
+                                        <Wallet size={14} className="text-secondary"/> Método de Recaudación
+                                    </label>
+                                    <div className="grid grid-cols-3 gap-2 p-1 bg-background border border-border rounded-xl">
+                                        {['Efectivo', 'Banco / Transferencia', 'QR / Tigo Money'].map(m => (
+                                            <button 
+                                                key={m}
+                                                onClick={() => setPayMethod(m)}
+                                                className={`py-2.5 text-[8px] font-black uppercase rounded-lg transition-all ${payMethod === m ? 'bg-navy text-white shadow-lg shadow-navy/20' : 'text-muted hover:bg-white'} border border-transparent ${payMethod === m ? 'border-border/0' : 'border-transparent'}`}
+                                            >
+                                                {m}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
 
                                 <div>
                                     <label className="block text-xs font-bold mb-1 text-success uppercase">Monto a Abonar (BS)</label>

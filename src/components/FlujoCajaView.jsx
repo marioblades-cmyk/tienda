@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
+import { catalogService } from '../services/catalogService';
 import { 
     Wallet, Plus, Minus, Eye, History, User, 
     ArrowUpRight, ArrowDownLeft, Trash2, Edit3, 
-    XCircle, CheckCircle2, AlertCircle, Clock, Search, LayoutDashboard
+    XCircle, CheckCircle2, AlertCircle, Clock, Search, LayoutDashboard,
+    ShoppingBag, Package, Trash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function FlujoCajaView({ user, profile }) {
+    const isAdmin = profile?.is_admin === true ||
+                    profile?.email === 'admin@gmail.com' ||
+                    profile?.email === 'testadmin@mangascomics.bo';
     const [loading, setLoading] = useState(true);
     const [turnoActivo, setTurnoActivo] = useState(null);
     const [historialTurnos, setHistorialTurnos] = useState([]);
@@ -23,7 +28,13 @@ export default function FlujoCajaView({ user, profile }) {
     
     // Form states
     const [openForm, setOpenForm] = useState({ responsable: '', turno: 'MAÑANA', monto_inicial: '' });
-    const [moveForm, setMoveForm] = useState({ tipo: 'INGRESO', categoria: 'Venta Stock', concepto: '', monto: '' });
+    const [moveForm, setMoveForm] = useState({ tipo: 'INGRESO', categoria: '', concepto: '', monto: '' });
+
+    // Categorías
+    const [categorias, setCategorias] = useState([]);
+    const [showCategoriasModal, setShowCategoriasModal] = useState(false);
+    const [categoriaForm, setCategoriaForm] = useState({ nombre: '', tipo: 'INGRESO' });
+    const [editingCategoria, setEditingCategoria] = useState(null); // {id, nombre, tipo}
     
     // View state
     const [currentView, setCurrentView] = useState('panel'); // 'panel' | 'historial'
@@ -38,6 +49,52 @@ export default function FlujoCajaView({ user, profile }) {
     });
     const [hasMore, setHasMore] = useState(true);
     
+    // Venta Directa States
+    const [showVentaModal, setShowVentaModal] = useState(false);
+    const [ventaSearch, setVentaSearch] = useState('');
+    const [ventaResults, setVentaResults] = useState([]);
+    const [ventaCart, setVentaCart] = useState([]); // [{id, titulo, precio, cantidad, stock_max, editorial}]
+    const [ventaDiscount, setVentaDiscount] = useState(0); // Porcentaje de descuento
+    const [ventaLoading, setVentaLoading] = useState(false);
+    const [montoFinalOverride, setMontoFinalOverride] = useState(null); // null = usar cálculo automático
+    const [activeOpTab, setActiveOpTab] = useState('pos'); // 'pos' | 'manual'
+
+    // --- SISTEMA DE NOTIFICACIONES PERSONALIZADAS ---
+    const [toasts, setToasts] = useState([]); // [{id, type, message}]
+    const [confirmModal, setConfirmModal] = useState(null); // {message, resolve}
+
+    const showToast = (message, type = 'info') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, type, message }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+    };
+
+    const showConfirm = (message) => new Promise(resolve => {
+        setConfirmModal({ message, resolve });
+    });
+
+    const handleConfirmResolve = (result) => {
+        if (confirmModal) confirmModal.resolve(result);
+        setConfirmModal(null);
+    };
+
+    
+    // --- POS MULTI-ITEM LOGIC ---
+    const handleVentaSearch = async (val) => {
+        setVentaSearch(val);
+        if (val.trim().length < 2) { setVentaResults([]); return; }
+        
+        const { data } = await supabase
+            .from('catalogo_productos')
+            .select('*')
+            .ilike('titulo', `%${val.trim()}%`)
+            .order('stock_fisico', { ascending: false })
+            .order('titulo', { ascending: true })
+            .limit(10);
+            
+        if (data) setVentaResults(data);
+    };
+
     useEffect(() => {
         init();
     }, []);
@@ -55,9 +112,53 @@ export default function FlujoCajaView({ user, profile }) {
         await Promise.all([
             fetchVendedores(),
             fetchTurnoStatus(),
-            fetchHistorial()
+            fetchHistorial(),
+            fetchCategorias()
         ]);
         setLoading(false);
+    };
+
+    const fetchCategorias = async () => {
+        const { data } = await supabase
+            .from('categorias_caja')
+            .select('*')
+            .order('tipo')
+            .order('nombre');
+        if (data) {
+            setCategorias(data);
+            // Preseleccionar primera categoría si el form está vacío
+            if (!moveForm.categoria && data.length > 0) {
+                setMoveForm(prev => ({ ...prev, categoria: data.find(c => c.tipo === 'INGRESO')?.nombre || data[0].nombre }));
+            }
+        }
+    };
+
+    const handleSaveCategoria = async () => {
+        if (!categoriaForm.nombre.trim()) return showToast('El nombre no puede estar vacío.', 'warning');
+        if (editingCategoria) {
+            const { error } = await supabase.from('categorias_caja')
+                .update({ nombre: categoriaForm.nombre.trim(), tipo: categoriaForm.tipo })
+                .eq('id', editingCategoria.id);
+            if (error) return showToast('Error al actualizar: ' + error.message, 'error');
+            showToast('Categoría actualizada.', 'success');
+        } else {
+            const { error } = await supabase.from('categorias_caja')
+                .insert([{ nombre: categoriaForm.nombre.trim(), tipo: categoriaForm.tipo }]);
+            if (error) return showToast('Error al crear: ' + error.message, 'error');
+            showToast('Categoría creada.', 'success');
+        }
+        setCategoriaForm({ nombre: '', tipo: 'INGRESO' });
+        setEditingCategoria(null);
+        fetchCategorias();
+    };
+
+    const handleDeleteCategoria = async (id, nombre) => {
+        const ok = await showConfirm(`¿Eliminar la categoría "${nombre}"?`);
+        if (!ok) return;
+        const { error } = await supabase.from('categorias_caja').delete().eq('id', id);
+        if (error) return showToast('Error al eliminar: ' + error.message, 'error');
+        showToast('Categoría eliminada.', 'success');
+        fetchCategorias();
     };
 
     const fetchVendedores = async () => {
@@ -129,6 +230,132 @@ export default function FlujoCajaView({ user, profile }) {
         }
     };
 
+    const addToCart = (product) => {
+        setVentaCart(prev => {
+            const exists = prev.find(i => i.id === product.id);
+            if (exists) {
+                if (exists.cantidad + 1 > product.stock_fisico) {
+                    showToast('No hay más stock disponible de este producto.', 'warning');
+                    return prev;
+                }
+                return prev.map(i => i.id === product.id ? { ...i, cantidad: i.cantidad + 1 } : i);
+            }
+            return [...prev, { 
+                id: product.id, 
+                titulo: product.titulo, 
+                precio: product.precio_venta_bs || 0, 
+                precioOriginal: product.precio_venta_bs || 0, // Para detectar cambios manuales
+                cantidad: 1, 
+                stock_max: product.stock_fisico,
+                editorial: product.editorial,
+                imagen: product.imagen_url
+            }];
+        });
+        setVentaSearch('');
+        setVentaResults([]);
+    };
+
+    const updateCartQty = (id, delta) => {
+        setVentaCart(prev => prev.map(i => {
+            if (i.id === id) {
+                const n = Math.max(0, i.cantidad + delta);
+                if (n > i.stock_max) {
+                    showToast('Stock máximo alcanzado.', 'warning');
+                    return i;
+                }
+                return { ...i, cantidad: n };
+            }
+            return i;
+        }).filter(i => i.cantidad > 0));
+    };
+
+    const updateCartPrice = (id, newPrice) => {
+        setVentaCart(prev => prev.map(i => 
+            i.id === id ? { ...i, precio: parseFloat(newPrice) || 0 } : i
+        ));
+    };
+
+    const handleConfirmVenta = async () => {
+        if (ventaCart.length === 0) return;
+        
+        const subtotal = ventaCart.reduce((acc, i) => acc + (i.precio * i.cantidad), 0);
+        const totalCalculado = subtotal * (1 - (ventaDiscount / 100));
+        // Usar el monto override si fue editado manualmente, sino el calculado
+        const totalVenta = montoFinalOverride !== null ? montoFinalOverride : totalCalculado;
+
+        const confirmText = `¿Confirmar venta de ${ventaCart.length} producto(s) por un TOTAL de Bs ${totalVenta.toLocaleString()}?`;
+        const ok = await showConfirm(confirmText);
+        if (!ok) return;
+        
+        setVentaLoading(true);
+        try {
+            // Preparar metadatos ANTES de descontar (para la reversión futura)
+            const itemsMetadata = ventaCart.map(i => ({
+                id: i.id,
+                cantidad: parseInt(i.cantidad),
+                titulo: i.titulo
+            }));
+
+            console.log('🛒 Iniciando venta. Items:', JSON.stringify(itemsMetadata));
+
+            // 1. Descontar stock de cada producto via RPC
+            for (const item of itemsMetadata) {
+                console.log(`📦 Descontando stock: ${item.titulo} x${item.cantidad} (id: ${item.id})`);
+                const { error: stockErr } = await supabase.rpc('adjust_product_stock', {
+                    p_id: item.id,
+                    p_delta: -item.cantidad
+                });
+
+                if (stockErr) {
+                    console.error(`❌ Error RPC descuento ${item.titulo}:`, stockErr);
+                    showToast(`Error al descontar stock (${item.titulo}): ${stockErr.message}`, 'error');
+                    throw stockErr;
+                }
+                console.log(`✅ Stock descontado OK: ${item.titulo}`);
+            }
+
+            // 2. Registrar movimiento en Flujo de Caja con metadatos
+            if (turnoActivo) {
+                const detalle = ventaCart.map(i => `${i.titulo} (x${i.cantidad})`).join(', ');
+                const conceptoMsg = `VENTA DIRECTA: ${detalle}${ventaDiscount > 0 ? ` [Dcto ${ventaDiscount}%]` : ''}`;
+
+                console.log('💰 Registrando movimiento con items_json:', itemsMetadata);
+                const { error: moveErr } = await supabase.from('caja_movimientos').insert([{
+                    turno_id: turnoActivo.id,
+                    tipo: 'INGRESO',
+                    categoria: 'Venta Stock',
+                    concepto: conceptoMsg.substring(0, 500),
+                    monto: totalVenta,
+                    vendedor_id: user?.id,
+                    items_json: itemsMetadata
+                }]);
+                if (moveErr) {
+                    console.error('❌ Error al registrar movimiento:', moveErr);
+                    throw moveErr;
+                }
+                console.log('✅ Movimiento registrado con items_json OK');
+            } else {
+                console.warn('⚠️ No hay turno activo, el movimiento NO se registró en caja.');
+            }
+
+            catalogService.patchStockInCache(
+                itemsMetadata.map(i => ({ id: i.id, delta: -i.cantidad }))
+            );
+
+            showToast(`Venta procesada por Bs ${totalVenta.toLocaleString()}`, 'success');
+            setVentaCart([]);
+            setVentaDiscount(0);
+            setMontoFinalOverride(null);
+            if (turnoActivo) await fetchMovimientos(turnoActivo.id);
+            if (searchTerm) fetchVentaResults(searchTerm);
+        } catch (e) {
+            console.error('❌ Fallo en venta:', e);
+            showToast(`Error: ${e.message || 'Error desconocido'}`, 'error');
+        } finally {
+            setVentaLoading(false);
+        }
+    };
+
     const handleOpenCaja = async () => {
         const responsable = profile?.nombre || user?.email || 'Desconocido';
         if (!openForm.monto_inicial) return alert('Ingresa el monto inicial');
@@ -165,10 +392,61 @@ export default function FlujoCajaView({ user, profile }) {
     };
 
     const deleteMovement = async (id) => {
-        if (!confirm('¿Eliminar este movimiento?')) return;
+        // Buscar en estado local primero
+        let movement = movimientos.find(m => m.id === id);
+        
+        // Si no está en el estado local, buscarlo directamente en la BD
+        if (!movement) {
+            const { data: fresh } = await supabase
+                .from('caja_movimientos')
+                .select('*')
+                .eq('id', id)
+                .single();
+            movement = fresh;
+        }
+        if (!movement) return showToast('No se encontró el movimiento.', 'error');
+
+        console.log('🗑️ deleteMovement - movement:', JSON.stringify(movement));
+        console.log('🗑️ items_json:', JSON.stringify(movement.items_json));
+
+        const hasMetadata = movement.items_json && Array.isArray(movement.items_json) && movement.items_json.length > 0;
+        console.log('🗑️ hasMetadata:', hasMetadata);
+        
+        const confirmMsg = hasMetadata 
+            ? `¿Eliminar esta venta? Se RESTAURARÁ el stock de ${movement.items_json.length} producto(s).`
+            : '¿Eliminar este movimiento?';
+
+        const ok = await showConfirm(confirmMsg);
+        if (!ok) return;
+
+        // 1. Restaurar stock si hay metadatos
+        if (hasMetadata) {
+            for (const item of movement.items_json) {
+                const qty = parseInt(item.cantidad);
+                console.log(`🔄 Restaurando: ${item.titulo} +${qty} (id: ${item.id})`);
+                const { error: rpcErr } = await supabase.rpc('adjust_product_stock', {
+                    p_id: item.id,
+                    p_delta: qty
+                });
+                if (rpcErr) {
+                    console.error('❌ Error RPC restauración:', rpcErr);
+                    return showToast(`No se pudo restaurar stock de ${item.titulo}: ${rpcErr.message}`, 'error');
+                }
+                console.log(`✅ Stock restaurado OK: ${item.titulo}`);
+            }
+            catalogService.patchStockInCache(
+                movement.items_json.map(i => ({ id: i.id, delta: parseInt(i.cantidad) }))
+            );
+
+        }
+
+        // 2. Eliminar el registro
         const { error } = await supabase.from('caja_movimientos').delete().eq('id', id);
-        if (error) return alert('Error: ' + error.message);
-        setMovimientos(movimientos.filter(m => m.id !== id));
+        if (error) return alert('Error al eliminar: ' + error.message);
+        
+        setMovimientos(prev => prev.filter(m => m.id !== id));
+        if (searchTerm) fetchVentaResults(searchTerm);
+        console.log('✅ Movimiento eliminado y stock restaurado correctamente.');
     };
 
     const handleCloseCaja = async () => {
@@ -188,9 +466,10 @@ export default function FlujoCajaView({ user, profile }) {
     };
 
     const handleDeleteTurno = async (id) => {
-        if (!confirm('¿Seguro que deseas ELIMINAR este turno? (Se borrarán todos sus movimientos asociados)')) return;
+        const ok = await showConfirm('¿Seguro que deseas ELIMINAR este turno? (Se borrarán todos sus movimientos asociados)');
+        if (!ok) return;
         const { error } = await supabase.from('turnos_caja').delete().eq('id', id);
-        if (error) return alert('Error al eliminar: ' + error.message);
+        if (error) return showToast('Error al eliminar: ' + error.message, 'error');
         setTurnoActivo(null);
         init();
     };
@@ -207,7 +486,7 @@ export default function FlujoCajaView({ user, profile }) {
             })
             .eq('id', newData.id);
             
-        if (error) return alert('Error al actualizar turno: ' + error.message);
+        if (error) return showToast('Error al actualizar turno: ' + error.message, 'error');
         setShowEditModal(null);
         init();
     };
@@ -225,19 +504,80 @@ export default function FlujoCajaView({ user, profile }) {
 
     return (
         <div className="space-y-6 max-w-[1440px] mx-auto animate-in fade-in duration-700 pb-20 px-4">
+
+            {/* ===== SISTEMA DE NOTIFICACIONES ===== */}
+            {/* Toasts flotantes */}
+            <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
+                <AnimatePresence>
+                    {toasts.map(toast => (
+                        <motion.div
+                            key={toast.id}
+                            initial={{ opacity: 0, x: 60, scale: 0.9 }}
+                            animate={{ opacity: 1, x: 0, scale: 1 }}
+                            exit={{ opacity: 0, x: 60, scale: 0.9 }}
+                            className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-2xl shadow-2xl min-w-[280px] max-w-[380px] border backdrop-blur-sm
+                                ${ toast.type === 'success' ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-100' 
+                                 : toast.type === 'error'   ? 'bg-red-950/90 border-red-500/30 text-red-100'
+                                 : toast.type === 'warning' ? 'bg-amber-950/90 border-amber-500/30 text-amber-100'
+                                 : 'bg-navy/90 border-navy/30 text-white'}`}
+                        >
+                            <span className="text-lg flex-shrink-0 mt-0.5">
+                                {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : 'ℹ️'}
+                            </span>
+                            <span className="text-sm font-semibold leading-snug">{toast.message}</span>
+                        </motion.div>
+                    ))}
+                </AnimatePresence>
+            </div>
+
+            {/* Modal de Confirmación personalizado */}
+            <AnimatePresence>
+                {confirmModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[9998] flex items-center justify-center bg-navy/60 backdrop-blur-sm px-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.85, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.85, opacity: 0, y: 20 }}
+                            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                            className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full border border-border/20"
+                        >
+                            <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-5">
+                                <CheckCircle2 size={28} className="text-primary" />
+                            </div>
+                            <h3 className="text-center text-lg font-black text-navy mb-2">Confirmar Acción</h3>
+                            <p className="text-center text-sm text-navy/60 font-medium leading-relaxed mb-8">{confirmModal.message}</p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => handleConfirmResolve(false)}
+                                    className="flex-1 py-3 rounded-2xl border-2 border-border text-navy/60 font-bold text-sm hover:bg-navy/5 transition-all"
+                                >Cancelar</button>
+                                <button
+                                    onClick={() => handleConfirmResolve(true)}
+                                    className="flex-1 py-3 rounded-2xl bg-navy text-white font-bold text-sm hover:brightness-110 transition-all shadow-md shadow-navy/20"
+                                >Confirmar</button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {/* --- TOP NAVIGATION BAR --- */}
-            <div className="flex gap-4 p-2 bg-surface/40 border border-border/20 rounded-[2rem] w-fit shadow-lg shadow-navy/5 backdrop-blur-xl sticky top-4 z-40 mx-auto transition-all">
+            <div className="flex bg-white/50 border border-border/20 p-1 rounded-xl w-fit mx-auto sticky top-4 z-40 backdrop-blur-md shadow-sm">
                 <button 
                     onClick={() => setCurrentView('panel')}
-                    className={`flex items-center gap-3 px-10 py-4 rounded-[1.5rem] text-[10px] font-black transition-all uppercase tracking-[0.2em] ${currentView === 'panel' ? 'bg-navy text-white shadow-2xl shadow-navy/20 scale-105' : 'text-muted hover:bg-white/80'}`}
+                    className={`flex items-center gap-2.5 px-5 py-1.5 rounded-lg text-xs font-bold transition-all uppercase tracking-widest ${currentView === 'panel' ? 'bg-navy text-white shadow-sm' : 'text-navy/60 hover:bg-navy/5'}`}
                 >
-                    <LayoutDashboard size={16} className={currentView === 'panel' ? 'text-primary' : ''} /> Operativa Diaria
+                    <LayoutDashboard size={14} className={currentView === 'panel' ? 'text-primary' : ''} /> Operativa
                 </button>
                 <button 
                     onClick={() => setCurrentView('historial')}
-                    className={`flex items-center gap-3 px-10 py-4 rounded-[1.5rem] text-[10px] font-black transition-all uppercase tracking-[0.2em] ${currentView === 'historial' ? 'bg-navy text-white shadow-2xl shadow-navy/20 scale-105' : 'text-muted hover:bg-white/80'}`}
+                    className={`flex items-center gap-2.5 px-5 py-1.5 rounded-lg text-[10px] font-bold transition-all uppercase tracking-widest ${currentView === 'historial' ? 'bg-navy text-white shadow-sm' : 'text-navy/40 hover:bg-navy/5'}`}
                 >
-                    <History size={16} className={currentView === 'historial' ? 'text-primary' : ''} /> Auditoría Histórica
+                    <History size={14} className={currentView === 'historial' ? 'text-primary' : ''} /> Auditoría
                 </button>
             </div>
 
@@ -247,225 +587,478 @@ export default function FlujoCajaView({ user, profile }) {
                     <motion.div 
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex flex-col md:flex-row md:items-center justify-between gap-8 bg-navy text-white p-10 rounded-[3.5rem] shadow-[0_32px_80px_-20px_rgba(0,0,0,0.4)] relative overflow-hidden group border border-white/5"
+                        className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm relative overflow-hidden group border border-border/40"
                     >
-                        <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-primary/10 rounded-full -mr-48 -mt-48 blur-[120px] transition-all duration-1000 group-hover:bg-primary/20" />
+                        <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-primary/5 rounded-full -mr-16 -mt-16 blur-[40px]" />
                         <div className="relative">
-                            <div className="flex items-center gap-4 text-white/50 text-[10px] font-black tracking-[0.4em] uppercase mb-3">
-                                <span className="w-8 h-[1px] bg-primary/40 block" /> Gestión de Efectivo en Sucursal
+                            <div className="flex items-center gap-2.5 text-primary font-bold text-xs uppercase tracking-widest mb-1">
+                                <span className="w-4 h-[1px] bg-primary" /> Gestión Operativa
                             </div>
-                            <h2 className="text-5xl font-display uppercase tracking-tight leading-none text-white font-black">
+                            <h2 className="text-xl font-display uppercase tracking-tight text-navy font-black">
                                 {turnoActivo ? `Caja: ${turnoActivo.responsable}` : 'Caja Cerrada'}
                             </h2>
-                            <div className="flex items-center gap-6 mt-6">
-                                <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-full border border-white/10">
-                                    <div className={`w-2 h-2 rounded-full ${turnoActivo ? 'bg-success animate-pulse' : 'bg-white/40'}`} />
-                                    <span className="text-[10px] font-black tracking-widest uppercase">{turnoActivo ? 'En Línea' : 'Turno Cerrado'}</span>
+                            <div className="flex items-center gap-4 mt-2.5">
+                                <div className="flex items-center gap-2 px-2 py-0.5 bg-background border border-border/20 rounded-md">
+                                    <div className={`w-1.5 h-1.5 rounded-full ${turnoActivo ? 'bg-success shadow-[0_0_8px_rgba(22,163,74,0.4)] animate-pulse' : 'bg-muted/40'}`} />
+                                    <span className="text-xs font-bold text-navy tracking-widest uppercase">{turnoActivo ? 'Canal Activo' : 'Inactivo'}</span>
                                 </div>
                                 {turnoActivo && (
-                                    <span className="text-[11px] font-mono text-white/40 font-medium tracking-wide">
-                                        Turno {turnoActivo.turno} • Apertura: {new Date(turnoActivo.abierto_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    <span className="text-xs font-mono text-navy font-bold uppercase tracking-tighter">
+                                        ID: {turnoActivo.turno} • {new Date(turnoActivo.abierto_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                 )}
                             </div>
                         </div>
-                        <div className="relative flex items-center gap-4">
+                        <div className="relative flex items-center gap-2">
                             {turnoActivo ? (
                                 <>
                                     <button 
                                         onClick={() => handleDeleteTurno(turnoActivo.id)} 
-                                        className="p-5 bg-white/5 text-white/60 rounded-[1.5rem] hover:bg-error/20 hover:text-error transition-all group border border-white/10 backdrop-blur-md"
-                                        title="Anular Apertura (Error)"
+                                        className="p-2.5 bg-background text-navy/30 rounded-lg hover:text-error hover:bg-error/5 transition-all border border-border/20"
                                     >
-                                        <Trash2 size={24} className="group-hover:rotate-12 transition-transform" />
+                                        <Trash2 size={16} />
                                     </button>
                                     <button 
                                         onClick={() => setShowCloseModal(true)} 
-                                        className="bg-error text-white px-12 py-5 rounded-[1.5rem] text-sm font-black uppercase tracking-[0.2em] hover:brightness-110 active:scale-95 transition-all shadow-2xl shadow-error/30 hover:shadow-error/50 border border-error/30"
+                                        className="bg-navy text-white px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-navy/10"
                                     >
-                                        Cierre de Caja
+                                        Cierre de Turno
                                     </button>
                                 </>
                             ) : (
                                 <button 
                                     onClick={() => setShowOpenModal(true)} 
-                                    className="bg-primary text-navy px-12 py-5 rounded-[1.5rem] text-sm font-black uppercase tracking-[0.2em] hover:brightness-110 active:scale-95 transition-all shadow-2xl shadow-primary/40 hover:shadow-primary/60 border border-primary/40"
+                                    className="bg-primary text-navy px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:brightness-105 active:scale-95 transition-all shadow-md shadow-primary/20"
                                 >
-                                    Iniciar Nuevo Turno
+                                    Iniciar Jornada
                                 </button>
                             )}
                         </div>
                     </motion.div>
 
                     {turnoActivo ? (
-                        /* --- DASHBOARD ACTIVO --- */
-                        <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+                        /* --- DASHBOARD ACTIVO (Unified Fragment) --- */
+                        <>
+                            <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
                             {/* Panel Lateral: Saldo */}
                             <motion.div 
                                 initial={{ opacity: 0, x: -20 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                className="space-y-6"
+                                className="space-y-3"
                             >
-                                <div className="bg-white p-8 rounded-[3rem] border border-border/40 shadow-sm transition-all hover:shadow-md">
-                                    <p className="text-[10px] font-black text-muted uppercase tracking-widest mb-3 opacity-60 px-1">Fondo Inicial</p>
-                                    <p className="text-3xl font-black font-mono text-navy tracking-tighter">Bs {turnoActivo.monto_inicial.toLocaleString()}</p>
+                                <div className="bg-white p-3.5 rounded-lg border border-border/40 shadow-sm flex justify-between items-baseline">
+                                    <p className="text-xs font-bold text-navy uppercase tracking-widest">Apertura</p>
+                                    <p className="text-lg font-black font-mono text-navy tracking-tight">Bs {turnoActivo.monto_inicial.toLocaleString()}</p>
                                 </div>
-                                <div className="bg-success/5 p-8 rounded-[3rem] border border-success/20 transition-all hover:bg-success/10 group">
-                                    <p className="text-[10px] font-black text-success uppercase tracking-widest mb-3 px-1 flex items-center gap-2">
-                                        <ArrowDownLeft size={14} className="group-hover:-translate-x-1 group-hover:translate-y-1 transition-transform" /> Flujo Ingresos
-                                    </p>
-                                    <p className="text-3xl font-black font-mono text-success tracking-tighter">+ {totals.ingresos.toLocaleString()}</p>
+                                <div className="bg-success/5 p-3.5 rounded-lg border border-success/10 flex justify-between items-baseline">
+                                   <p className="text-xs font-bold text-success uppercase tracking-widest flex items-center gap-1.5">
+                                       <ArrowDownLeft size={10} /> Ingresos
+                                   </p>
+                                   <p className="text-lg font-black font-mono text-success tracking-tight">+{totals.ingresos.toLocaleString()}</p>
                                 </div>
-                                <div className="bg-error/5 p-8 rounded-[3rem] border border-error/20 transition-all hover:bg-error/10 group">
-                                    <p className="text-[10px] font-black text-error uppercase tracking-widest mb-3 px-1 flex items-center gap-2">
-                                        <ArrowUpRight size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" /> Flujo Egresos
-                                    </p>
-                                    <p className="text-3xl font-black font-mono text-error tracking-tighter">- {totals.egresos.toLocaleString()}</p>
+                                <div className="bg-error/5 p-3.5 rounded-lg border border-error/10 flex justify-between items-baseline">
+                                   <p className="text-xs font-bold text-error uppercase tracking-widest flex items-center gap-1.5">
+                                       <ArrowUpRight size={10} /> Egresos
+                                   </p>
+                                   <p className="text-lg font-black font-mono text-error tracking-tight">-{totals.egresos.toLocaleString()}</p>
                                 </div>
-                                <div className="bg-text p-10 rounded-[3.5rem] shadow-[0_24px_60px_-15px_rgba(0,0,0,0.3)] relative overflow-hidden group">
-                                     <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-primary/20 blur-[60px] rounded-full transition-all duration-700 group-hover:bg-primary/40 group-hover:scale-125" />
-                                     <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em] mb-3 px-1">Saldo Líquido</p>
-                                     <p className="text-5xl font-black font-mono text-white tracking-tighter relative z-10">Bs {totals.saldoActual.toLocaleString()}</p>
+                                <div className="bg-slate-50/50 p-4 rounded-xl border border-border/40 shadow-sm flex flex-col justify-center">
+                                     <p className="text-xs font-bold text-navy uppercase tracking-widest mb-1 relative z-10">Efectivo en Caja</p>
+                                     <div className="flex items-baseline gap-1.5 text-navy relative z-10">
+                                         <span className="text-xs font-bold opacity-30">Bs</span>
+                                         <span className="text-2xl font-black font-mono tracking-tighter">{totals.saldoActual.toLocaleString()}</span>
+                                     </div>
                                 </div>
                             </motion.div>
 
-                            {/* Panel Central: Operaciones */}
-                            <div className="xl:col-span-3 space-y-8">
-                                <motion.div 
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="bg-white p-10 rounded-[3.5rem] border border-border/40 shadow-xl"
-                                >
-                                    <div className="flex items-center gap-4 mb-8 border-b border-border/20 pb-4">
-                                        <div className="w-3 h-3 bg-primary rounded-full animate-pulse shadow-md shadow-primary/40" />
-                                        <h4 className="text-[11px] font-black text-navy uppercase tracking-[0.3em]">Registro de Operación Inmediata</h4>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
-                                        <div className="space-y-3">
-                                            <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Naturaleza</label>
-                                            <select 
-                                                value={moveForm.tipo}
-                                                onChange={e => setMoveForm({...moveForm, tipo: e.target.value})}
-                                                className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-black uppercase outline-none focus:border-primary/50 transition-all cursor-pointer"
-                                            >
-                                                <option value="INGRESO">INGRESO (+)</option>
-                                                <option value="EGRESO">EGRESO (-)</option>
-                                            </select>
-                                        </div>
-                                        <div className="space-y-3">
-                                            <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Clasificación</label>
-                                            <select 
-                                                value={moveForm.categoria}
-                                                onChange={e => setMoveForm({...moveForm, categoria: e.target.value})}
-                                                className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-black uppercase outline-none focus:border-primary/50 transition-all cursor-pointer"
-                                            >
-                                                {moveForm.tipo === 'INGRESO' ? (
-                                                    <>
-                                                        <option>Venta Stock</option>
-                                                        <option>Cobro Pedido</option>
-                                                        <option>Cobro Seña</option>
-                                                        <option>Otro Ingreso</option>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <option>Compra/Gasto</option>
-                                                        <option>Retiro</option>
-                                                        <option>Pago Proveedor</option>
-                                                        <option>Otro Egreso</option>
-                                                    </>
-                                                )}
-                                            </select>
-                                        </div>
-                                        <div className="space-y-3">
-                                            <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Importe (BS)</label>
-                                            <input 
-                                                type="number" 
-                                                placeholder="0.00"
-                                                value={moveForm.monto}
-                                                onChange={e => setMoveForm({...moveForm, monto: e.target.value})}
-                                                className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl font-mono font-black text-navy focus:border-primary/50 outline-none text-lg transition-all text-center tracking-tighter"
-                                            />
-                                        </div>
-                                        <button 
-                                            onClick={handleAddMovement} 
-                                            className="bg-navy text-white h-[60px] rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-navy/30 flex items-center justify-center gap-3 text-[11px] font-black uppercase tracking-[0.3em] font-display"
-                                        >
-                                            <Plus size={20} className="text-primary" /> Validar
-                                        </button>
-                                        <div className="md:col-span-4 mt-2 space-y-3">
-                                            <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Referencia / Observaciones</label>
-                                            <input 
-                                                type="text" 
-                                                placeholder="Detalle de la transacción para auditoría rápida..."
-                                                value={moveForm.concepto}
-                                                onChange={e => setMoveForm({...moveForm, concepto: e.target.value})}
-                                                className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-bold outline-none focus:border-primary/50 transition-all px-6"
-                                            />
-                                        </div>
-                                    </div>
-                                </motion.div>
+                            {/* Panel Central: Operaciones (POS-First) */}
+                            <div className="xl:col-span-3 bg-white rounded-xl border border-border/30 overflow-hidden shadow-sm flex flex-col">
+                                <div className="flex bg-slate-50 border-b border-border/20 p-1">
+                                    <button 
+                                        onClick={() => setActiveOpTab('pos')}
+                                        className={`flex-1 py-1.5 px-4 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeOpTab === 'pos' ? 'bg-white text-primary shadow-sm border border-border/10' : 'text-navy/30 hover:bg-white/50'}`}
+                                    >
+                                        <ShoppingBag size={14} /> Punto de Venta
+                                    </button>
+                                    <button 
+                                        onClick={() => setActiveOpTab('manual')}
+                                        className={`flex-1 py-1.5 px-4 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeOpTab === 'manual' ? 'bg-white text-primary shadow-sm border border-border/10' : 'text-navy/30 hover:bg-white/50'}`}
+                                    >
+                                        <Plus size={14} /> Movimientos Otros
+                                    </button>
+                                </div>
 
-                                <div className="glass rounded-[4rem] border border-border/40 overflow-hidden shadow-2xl bg-white/40 backdrop-blur-md">
-                                    <div className="p-8 border-b border-border/20 flex items-center justify-between bg-white/20">
-                                        <h4 className="text-[10px] font-black text-navy uppercase tracking-[0.4em]">Libro de Movimientos — Sesión Activa</h4>
-                                        <div className="flex items-center gap-6">
-                                            <span className="text-[9px] font-black text-muted/60 uppercase tracking-widest">{movimientos.length} OPERACIONES</span>
-                                        </div>
-                                    </div>
-                                    <div className="overflow-x-auto max-h-[500px] custom-scrollbar">
-                                        <table className="w-full text-left border-collapse">
-                                            <thead className="bg-[#fcfdfe]/60 border-b border-border/40 text-[9px] font-black text-muted/50 uppercase tracking-[0.2em]">
-                                                <tr>
-                                                    <th className="p-6">Cronología</th>
-                                                    <th className="p-6">Categoría de Flujo</th>
-                                                    <th className="p-6">Concepto Operativo</th>
-                                                    <th className="p-6 text-right">Efecto Neto</th>
-                                                    <th className="p-6"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-border/10">
-                                                <AnimatePresence initial={false}>
-                                                    {movimientos.map(m => (
-                                                        <motion.tr 
-                                                            key={m.id}
-                                                            initial={{ opacity: 0, x: -15 }}
-                                                            animate={{ opacity: 1, x: 0 }}
-                                                            exit={{ opacity: 0, x: 15 }}
-                                                            className="hover:bg-white/60 transition-all group"
+                                <div className="p-4 pt-1">
+                                        {activeOpTab === 'pos' ? (
+                                            /* --- PUNTO DE VENTA DIRECTO --- */
+                                            <div className="space-y-6">
+                                                <div className="relative group">
+                                                    <label className="text-xs font-bold text-navy uppercase tracking-widest block mb-3 px-2">Buscador de Manga / Cómic (Venta Inmediata)</label>
+                                                    <div className="relative">
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="Buscar manga o cómic..."
+                                                            value={ventaSearch}
+                                                            onChange={(e) => handleVentaSearch(e.target.value)}
+                                                            className="w-full bg-white border border-border/20 p-3.5 rounded-lg text-sm font-bold text-navy outline-none focus:border-primary/40 transition-all pr-12 shadow-sm"
+                                                            autoFocus
+                                                        />
+                                                        <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-navy/20 group-focus-within:text-primary transition-colors" size={18} />
+                                                    </div>
+
+                                                    <AnimatePresence>
+                                                        {ventaSearch.length >= 2 && (
+                                                            <motion.div 
+                                                                initial={{ opacity: 0, scale: 0.98 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                className="absolute z-[100] w-full mt-2 bg-white border border-border/20 shadow-xl rounded-xl overflow-hidden max-h-[400px] overflow-y-auto"
+                                                            >
+                                                                {ventaResults.length > 0 ? (
+                                                                    ventaResults.map(p => {
+                                                                        // Stock real disponible = stock en BD - lo ya reservado en carrito
+                                                                        const enCarrito = ventaCart.find(i => i.id === p.id)?.cantidad || 0;
+                                                                        const stockDisponible = (p.stock_fisico || 0) - enCarrito;
+                                                                        return (
+                                                                        <button 
+                                                                            key={p.id}
+                                                                            onClick={() => stockDisponible > 0 ? addToCart(p) : alert('⚠️ No hay más unidades disponibles de este producto.')}
+                                                                            className={`w-full p-4 hover:bg-primary/5 border-b border-border/5 last:border-0 flex items-center gap-5 group/item transition-all ${stockDisponible <= 0 && 'opacity-40 grayscale'}`}
+                                                                        >
+                                                                            <div className="w-14 h-14 bg-navy/5 rounded-xl overflow-hidden shadow-sm flex-shrink-0">
+                                                                                {p.imagen_url ? (
+                                                                                    <img src={p.imagen_url} alt="" className="w-full h-full object-cover" />
+                                                                                ) : (
+                                                                                    <div className="w-full h-full flex items-center justify-center text-navy/20">
+                                                                                        <Package size={20} />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="font-black text-navy text-sm uppercase truncate group-hover/item:text-primary transition-colors">{p.titulo}</div>
+                                                                                <div className="text-[10px] font-bold text-muted uppercase mt-0.5">{p.editorial} • Bs {p.precio_venta_bs?.toLocaleString()}</div>
+                                                                            </div>
+                                                                            <div className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${stockDisponible > 0 ? 'bg-navy text-white' : 'bg-error/10 text-error'}`}>
+                                                                                {stockDisponible > 0 ? `Quedan: ${stockDisponible}` : enCarrito > 0 ? 'En carrito' : 'Agotado'}
+                                                                            </div>
+                                                                        </button>
+                                                                        );
+                                                                    })
+                                                                ) : (
+                                                                    <div className="p-10 text-center">
+                                                                        <div className="w-12 h-12 bg-muted/10 rounded-full flex items-center justify-center mx-auto mb-3">
+                                                                            <AlertCircle className="text-muted/40" size={24} />
+                                                                        </div>
+                                                                        <p className="text-[10px] font-black text-navy uppercase tracking-widest">Sin resultados</p>
+                                                                    </div>
+                                                                )}
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
+
+                                                {/* CARRITO DE VENTAS */}
+                                                <AnimatePresence>
+                                                    {ventaCart.length > 0 && (
+                                                        <motion.div 
+                                                            initial={{ opacity: 0, y: 10 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                            className="space-y-4"
                                                         >
-                                                            <td className="p-6 font-mono text-muted/60 text-[10px] font-bold italic">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
-                                                            <td className="p-6">
-                                                                <span className={`px-4 py-1.5 rounded-full font-black text-[8px] uppercase tracking-[0.15em] border-2 shadow-sm ${m.tipo === 'INGRESO' ? 'bg-success/5 text-success border-success/10' : 'bg-error/5 text-error border-error/10'}`}>
-                                                                    {m.categoria}
-                                                                </span>
-                                                            </td>
-                                                            <td className="p-6 text-navy font-black text-[12px] uppercase tracking-tighter truncate max-w-[250px]">{m.concepto || '—'}</td>
-                                                            <td className={`p-6 text-right font-black font-mono text-lg tracking-tighter ${m.tipo === 'INGRESO' ? 'text-success' : 'text-error'}`}>
-                                                                {m.tipo === 'INGRESO' ? '+' : '-'} {m.monto.toLocaleString()}
-                                                            </td>
-                                                            <td className="p-6 text-right w-20">
-                                                                <button 
-                                                                    onClick={() => deleteMovement(m.id)} 
-                                                                    className="p-3 text-muted hover:text-error transition-all opacity-0 group-hover:opacity-100 hover:bg-error/10 rounded-xl"
-                                                                    title="Eliminar Movimiento"
-                                                                >
-                                                                    <Trash2 size={18} />
-                                                                </button>
-                                                            </td>
-                                                        </motion.tr>
-                                                    ))}
+                                                            <div className="bg-navy/[0.03] rounded-3xl p-5 border border-navy/5">
+                                                                <h4 className="text-xs font-bold text-navy uppercase tracking-widest mb-4 px-2">Resumen del Carrito</h4>
+                                                                <div className="space-y-2">
+                                                                    {ventaCart.map(item => {
+                                                                        const precioEditado = item.precio !== item.precioOriginal;
+                                                                        return (
+                                                                        <div key={item.id} className={`bg-white p-3 rounded-2xl shadow-sm flex items-center justify-between border transition-all ${precioEditado ? 'border-amber-300 bg-amber-50/30' : 'border-border/10'}`}>
+                                                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                                                <div className="w-10 h-10 bg-navy/5 rounded-lg overflow-hidden flex-shrink-0">
+                                                                                    {item.imagen ? (
+                                                                                        <img src={item.imagen} alt="" className="w-full h-full object-cover" />
+                                                                                    ) : (
+                                                                                        <div className="w-full h-full flex items-center justify-center text-navy/20">
+                                                                                            <Package size={16} />
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <div className="text-[11px] font-black text-navy uppercase leading-tight truncate">{item.titulo}</div>
+                                                                                    {/* Campo de Precio Manual */}
+                                                                                    <div className="flex items-center gap-2 mt-1">
+                                                                                        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-all ${precioEditado ? 'border-amber-400 bg-amber-100' : 'border-navy/10 bg-navy/5 hover:border-primary/30'}`}>
+                                                                                            <Edit3 size={9} className={precioEditado ? 'text-amber-600' : 'text-muted/50'} />
+                                                                                            <span className="text-[9px] font-bold text-muted uppercase">Bs</span>
+                                                                                            <input 
+                                                                                                type="number" 
+                                                                                                value={item.precio}
+                                                                                                onChange={(e) => updateCartPrice(item.id, e.target.value)}
+                                                                                                onFocus={(e) => e.target.select()}
+                                                                                                className={`bg-transparent outline-none text-[11px] font-black w-12 ${precioEditado ? 'text-amber-700' : 'text-navy'}`}
+                                                                                            />
+                                                                                        </div>
+                                                                                        {precioEditado && (
+                                                                                            <span className="text-[9px] text-muted line-through opacity-60">Bs {item.precioOriginal}</span>
+                                                                                        )}
+                                                                                        {precioEditado && (
+                                                                                            <button 
+                                                                                                onClick={() => updateCartPrice(item.id, item.precioOriginal)}
+                                                                                                className="text-[8px] font-black text-amber-600 hover:text-amber-800 uppercase tracking-tighter border border-amber-300 rounded px-1 transition-colors"
+                                                                                            >↩ Reset</button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            <div className="flex items-center gap-3 flex-shrink-0">
+                                                                                <div className="flex items-center bg-background rounded-xl p-1 border border-border/10">
+                                                                                    <button onClick={() => updateCartQty(item.id, -1)} className="w-7 h-7 rounded-lg hover:bg-white transition-all font-black text-muted text-sm">-</button>
+                                                                                    <span className="w-8 text-center text-xs font-black font-mono">{item.cantidad}</span>
+                                                                                    <button onClick={() => updateCartQty(item.id, 1)} className="w-7 h-7 rounded-lg hover:bg-white transition-all font-black text-navy text-sm">+</button>
+                                                                                </div>
+                                                                                <div className="text-right min-w-[60px]">
+                                                                                    <div className={`text-xs font-black font-mono ${precioEditado ? 'text-amber-700' : 'text-navy'}`}>Bs {(item.precio * item.cantidad).toLocaleString()}</div>
+                                                                                </div>
+                                                                                <button onClick={() => updateCartQty(item.id, -item.cantidad)} className="p-1.5 text-error/30 hover:text-error transition-colors">
+                                                                                    <Trash2 size={15} />
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                        );
+                                                                    })}
+
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="bg-white border-2 border-navy border-dashed rounded-xl p-4 shadow-sm space-y-3">
+                                                                {/* Fila 1: Descuento + Total calculado */}
+                                                                <div className="flex items-center gap-6">
+                                                                    <div className="flex flex-col gap-0.5 px-2 border-r border-navy/10 pr-6">
+                                                                        <label className="text-xs font-bold text-navy uppercase tracking-widest">Descuento (%)</label>
+                                                                        <input 
+                                                                            type="number"
+                                                                            min="0"
+                                                                            max="100"
+                                                                            value={ventaDiscount}
+                                                                            onChange={(e) => {
+                                                                                setVentaDiscount(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)));
+                                                                                setMontoFinalOverride(null); // Reset override al cambiar descuento
+                                                                            }}
+                                                                            onFocus={(e) => e.target.select()}
+                                                                            className="w-16 bg-navy/5 border border-navy/10 py-1.5 rounded-xl text-base font-black font-mono text-navy outline-none focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all text-center"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex flex-col flex-1">
+                                                                        <p className="text-xs font-bold text-navy/50 uppercase tracking-widest mb-0.5">Total Calculado</p>
+                                                                        <div className="flex items-baseline gap-2">
+                                                                            <span className={`text-lg font-black font-mono ${montoFinalOverride !== null ? 'text-navy/30 line-through text-base' : 'text-navy'}`}>
+                                                                                Bs {(ventaCart.reduce((acc, i) => acc + (i.precio * i.cantidad), 0) * (1 - (ventaDiscount / 100))).toLocaleString()}
+                                                                            </span>
+                                                                            {ventaDiscount > 0 && montoFinalOverride === null && (
+                                                                                <span className="text-[10px] font-bold text-error line-through opacity-40">
+                                                                                    Bs {ventaCart.reduce((acc, i) => acc + (i.precio * i.cantidad), 0).toLocaleString()}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Fila 2: Monto Final a Cobrar + Botones Redondeo */}
+                                                                {(() => {
+                                                                    const calc = ventaCart.reduce((acc, i) => acc + (i.precio * i.cantidad), 0) * (1 - (ventaDiscount / 100));
+                                                                    const monto = montoFinalOverride !== null ? montoFinalOverride : calc;
+                                                                    const roundDown = Math.floor(calc);
+                                                                    const roundUp = Math.ceil(calc);
+                                                                    return (
+                                                                    <div className={`flex items-center gap-3 pt-2 border-t ${montoFinalOverride !== null ? 'border-amber-200' : 'border-navy/5'}`}>
+                                                                        <div className="flex flex-col flex-1">
+                                                                            <p className="text-[10px] font-bold text-navy/50 uppercase tracking-widest mb-1">💵 Cobrar</p>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="text-xs font-bold text-navy/40">Bs</span>
+                                                                                <input
+                                                                                    type="number"
+                                                                                    value={monto}
+                                                                                    onChange={(e) => setMontoFinalOverride(parseFloat(e.target.value) || 0)}
+                                                                                    onFocus={(e) => e.target.select()}
+                                                                                    className={`w-28 border-b-2 outline-none text-2xl font-black font-mono pb-0.5 transition-all ${montoFinalOverride !== null ? 'border-amber-400 text-amber-700' : 'border-navy/20 text-navy'}`}
+                                                                                />
+                                                                                {montoFinalOverride !== null && (
+                                                                                    <button onClick={() => setMontoFinalOverride(null)} className="text-[9px] font-black text-amber-600 border border-amber-300 rounded px-1.5 py-0.5 hover:bg-amber-50 transition-colors">↩ Auto</button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                        {/* Botones de redondeo a entero */}
+                                                                        {calc !== Math.floor(calc) && (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <p className="text-[9px] font-bold text-navy/30 uppercase tracking-widest">Redondear</p>
+                                                                            <div className="flex gap-1">
+                                                                                {[roundDown, roundUp].map(val => (
+                                                                                    <button
+                                                                                        key={val}
+                                                                                        onClick={() => setMontoFinalOverride(val)}
+                                                                                        className={`px-3 py-1.5 rounded-lg text-[11px] font-black border transition-all hover:scale-105 active:scale-95 ${montoFinalOverride === val ? 'bg-amber-400 text-white border-amber-400' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}
+                                                                                    >
+                                                                                        Bs {val}
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                        )}
+                                                                        <button 
+                                                                            onClick={handleConfirmVenta}
+                                                                            disabled={ventaLoading}
+                                                                            className="bg-navy text-white px-6 h-12 rounded-lg text-xs font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-navy/10 flex items-center gap-2.5 flex-shrink-0"
+                                                                        >
+                                                                            {ventaLoading ? 'Procesando...' : <><CheckCircle2 size={16} className="text-primary" /> Finalizar </>}
+                                                                        </button>
+                                                                    </div>
+                                                                    );
+                                                                })()}
+                                                            </div>
+                                                        </motion.div>
+                                                    )}
                                                 </AnimatePresence>
-                                                {movimientos.length === 0 && (
-                                                    <tr>
-                                                        <td colSpan="5" className="p-32 text-center text-muted uppercase font-black tracking-[0.5em] italic opacity-20 text-xs">Aún no se registran movimientos en este turno</td>
-                                                    </tr>
-                                                )}
-                                            </tbody>
-                                        </table>
+                                            </div>
+                                        ) : (
+                                            /* --- OTROS MOVIMIENTOS (MANUAL) --- */
+                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+                                                <div className="space-y-3">
+                                                    <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Naturaleza</label>
+                                                    <select 
+                                                        value={moveForm.tipo}
+                                                        onChange={e => setMoveForm({...moveForm, tipo: e.target.value})}
+                                                        className="w-full bg-white border border-border/20 p-3 rounded-lg text-[10px] font-bold uppercase outline-none focus:border-primary/30 transition-all cursor-pointer shadow-sm"
+                                                    >
+                                                        <option value="INGRESO">INGRESO (+)</option>
+                                                        <option value="EGRESO">EGRESO (-)</option>
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center justify-between px-2">
+                                                        <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em]">Categoría</label>
+                                                        {isAdmin && (
+                                                            <button
+                                                                onClick={() => setShowCategoriasModal(true)}
+                                                                className="text-[8px] font-black text-primary/60 hover:text-primary uppercase tracking-widest flex items-center gap-1 transition-colors"
+                                                            >
+                                                                <Edit3 size={9} /> Gestionar
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <select 
+                                                        value={moveForm.categoria}
+                                                        onChange={e => setMoveForm({...moveForm, categoria: e.target.value})}
+                                                        className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-black uppercase outline-none focus:border-primary/50 transition-all cursor-pointer"
+                                                    >
+                                                        {categorias
+                                                            .filter(c => c.tipo === moveForm.tipo || c.tipo === 'AMBOS')
+                                                            .map(c => (
+                                                                <option key={c.id} value={c.nombre}>{c.nombre}</option>
+                                                            ))
+                                                        }
+                                                        {categorias.filter(c => c.tipo === moveForm.tipo || c.tipo === 'AMBOS').length === 0 && (
+                                                            <option value="">Sin categorías</option>
+                                                        )}
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    <label className="text-xs font-bold text-navy uppercase tracking-widest block px-2">Importe (BS)</label>
+                                                    <input 
+                                                        type="number" 
+                                                        placeholder="0"
+                                                        value={moveForm.monto}
+                                                        onChange={e => setMoveForm({...moveForm, monto: e.target.value})}
+                                                        className="w-full bg-white border border-border/20 p-3 rounded-lg font-mono font-bold text-navy focus:border-primary/30 outline-none text-base transition-all text-center shadow-sm"
+                                                    />
+                                                </div>
+                                                <button onClick={handleAddMovement} className="bg-navy text-white h-12 rounded-lg hover:brightness-110 transition-all shadow-md shadow-navy/10 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest">
+                                                    <Plus size={16} className="text-primary" /> Registrar
+                                                </button>
+                                                <div className="md:col-span-4 mt-2 space-y-3">
+                                                    <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Referencia / Observaciones</label>
+                                                    <input 
+                                                        type="text" 
+                                                        placeholder="Detalle de la transacción..."
+                                                        value={moveForm.concepto}
+                                                        onChange={e => setMoveForm({...moveForm, concepto: e.target.value})}
+                                                        className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-bold outline-none focus:border-primary/50 transition-all px-6"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        
+                        {/* --- LIBRO DE OPERACIONES DIARIAS (Full-Width Relocated) --- */}
+                        <motion.div 
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-white rounded-xl border border-border/20 overflow-hidden shadow-sm mt-8 w-full"
+                        >
+                            <div className="p-4 border-b border-border/20 flex items-center justify-between bg-slate-50/50">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-1.5 h-6 bg-navy rounded-full" />
+                                    <h4 className="text-xs font-bold text-navy uppercase tracking-widest px-1">Libro de Operaciones Diarias</h4>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <span className="text-xs font-bold text-navy/30 uppercase tracking-widest">{movimientos.length} REGISTROS</span>
+                                </div>
+                            </div>
+                            <div className="overflow-x-auto custom-scrollbar">
+                                <table className="w-full text-left border-collapse min-w-[800px]">
+                                    <thead className="bg-slate-50 border-b border-border/40 text-xs font-bold text-navy uppercase tracking-widest">
+                                        <tr>
+                                            <th className="p-5 w-32">Cronología</th>
+                                            <th className="p-5 w-40">Flujo</th>
+                                            <th className="p-5">Concepto Operativo</th>
+                                            <th className="p-5 text-right w-48">Efecto Neto</th>
+                                            <th className="p-5 text-center w-24">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/10">
+                                        <AnimatePresence initial={false}>
+                                            {movimientos.map(m => (
+                                                <motion.tr 
+                                                    key={m.id}
+                                                    initial={{ opacity: 0, x: -15 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    exit={{ opacity: 0, x: 15 }}
+                                                    className="hover:bg-slate-50/50 transition-all group"
+                                                >
+                                                    <td className="p-5 font-mono text-navy/60 text-xs font-bold leading-tight">
+                                                        {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </td>
+                                                    <td className="p-5">
+                                                        <span className={`px-3 py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider border shadow-sm ${m.tipo === 'INGRESO' ? 'bg-success/10 text-success border-success/20' : 'bg-error/10 text-error border-error/20'}`}>
+                                                            {m.categoria}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-5 text-navy font-bold text-sm uppercase tracking-tight">{m.concepto || '—'}</td>
+                                                    <td className={`p-5 text-right font-black font-mono text-base tracking-tighter ${m.tipo === 'INGRESO' ? 'text-success' : 'text-error'}`}>
+                                                        {m.tipo === 'INGRESO' ? '+' : '-'} {m.monto.toLocaleString()}
+                                                    </td>
+                                                    <td className="p-5 text-center">
+                                                        <button 
+                                                            onClick={() => deleteMovement(m.id)} 
+                                                            className="p-3 text-muted hover:text-error transition-all opacity-0 group-hover:opacity-100 hover:bg-error/10 rounded-xl"
+                                                            title="Eliminar Movimiento"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </td>
+                                                </motion.tr>
+                                            ))}
+                                        </AnimatePresence>
+                                        {movimientos.length === 0 && (
+                                            <tr>
+                                                <td colSpan="5" className="p-20 text-center text-navy/20 uppercase font-black tracking-widest text-xs italic">No se registran movimientos en esta sesión</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </motion.div>
+                    </>
                     ) : (
                         /* --- STANDBY: ÚLTIMAS 10 SESIONES --- */
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
@@ -476,48 +1069,50 @@ export default function FlujoCajaView({ user, profile }) {
                             >
                                 <div className="flex items-center gap-4 px-6">
                                     <History size={18} className="text-primary" />
-                                    <h4 className="text-[11px] font-black text-navy uppercase tracking-[0.3em]">Cierre Reciente del Módulo</h4>
+                                    <h4 className="text-sm font-black text-navy uppercase tracking-[0.3em] flex items-center gap-3">
+                                        <div className="w-2 h-6 bg-primary rounded-full" />
+                                        Cierre Reciente del Módulo
+                                    </h4>
                                 </div>
                                 {ultimoTurno ? (
-                                    <div className="bg-white p-12 rounded-[4.5rem] border border-border/40 shadow-2xl relative overflow-hidden group">
-                                        <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -mr-32 -mt-32 blur-[80px] transition-transform duration-1000 group-hover:scale-150" />
-                                        <div className="grid grid-cols-2 gap-12 relative">
+                                    <div className="bg-white p-7 rounded-3xl border border-border/40 shadow-xl relative overflow-hidden group">
+                                        <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -mr-32 -mt-32 blur-[80px]" />
+                                        <div className="grid grid-cols-2 gap-8 relative">
                                             <div>
-                                                <p className="text-[10px] font-black text-navy/50 uppercase tracking-widest mb-3">Responsable de Caja</p>
-                                                <p className="text-3xl font-black text-navy mb-8 uppercase tracking-tight leading-tight">{ultimoTurno.responsable}</p>
-                                                <div className="space-y-4">
+                                                <p className="text-xs font-bold text-navy uppercase tracking-widest mb-1">Último Responsable</p>
+                                                <p className="text-2xl font-black text-navy mb-6 uppercase tracking-tight leading-tight">{ultimoTurno.responsable}</p>
+                                                <div className="space-y-3">
                                                     <div>
-                                                        <p className="text-[9px] font-black text-navy/50 uppercase tracking-widest mb-1">Finalización el</p>
-                                                        <p className="text-xs font-bold text-navy">{new Date(ultimoTurno.cerrado_at).toLocaleString(undefined, { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>
+                                                        <p className="text-xs font-bold text-navy uppercase tracking-widest mb-1">Cierre de Caja</p>
+                                                        <p className="text-sm font-bold text-navy tracking-tight">{new Date(ultimoTurno.cerrado_at).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
                                                     </div>
-                                                    <div className="inline-flex bg-navy text-white px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.3em] shadow-lg shadow-navy/30">
+                                                    <div className="inline-flex bg-navy text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest shadow-lg shadow-navy/20">
                                                         Turno {ultimoTurno.turno}
                                                     </div>
                                                 </div>
                                             </div>
                                             <div className="text-right flex flex-col justify-between">
                                                 <div>
-                                                    <p className="text-[10px] font-black text-navy/50 uppercase tracking-widest mb-3">Total en Efectivo</p>
-                                                    <p className="text-6xl font-black text-navy font-mono tracking-tighter leading-none">Bs {ultimoTurno.monto_final.toLocaleString()}</p>
+                                                    <p className="text-xs font-bold text-navy uppercase tracking-widest mb-2">Efectivo de Cierre</p>
+                                                    <p className="text-4xl font-black text-navy font-mono tracking-tighter leading-none">Bs {ultimoTurno.monto_final.toLocaleString()}</p>
                                                 </div>
-                                                <div className="pt-1 or-8">
+                                                <div className="pt-4">
                                                      <button 
                                                         onClick={() => setShowDetailModal(ultimoTurno)} 
-                                                        className="group text-[10px] font-black text-primary uppercase tracking-[0.3em] flex items-center gap-3 justify-end hover:underline transition-all"
+                                                        className="group text-sm font-black text-navy hover:text-primary uppercase tracking-widest flex items-center gap-2 justify-end transition-all"
                                                      >
-                                                        Detalles Auditoría <Eye size={18} className="group-hover:scale-125 transition-transform" />
+                                                        Auditar <Eye size={18} className="text-primary group-hover:scale-110 transition-transform" />
                                                      </button>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="p-32 text-center glass rounded-[4.5rem] border-4 border-dashed border-border/40">
-                                        <Wallet size={64} className="mx-auto text-navy/20 mb-6" />
-                                        <p className="text-xs text-navy/60 font-black uppercase tracking-[0.3em]">No existen registros previos para visualización rápida</p>
+                                    <div className="p-16 text-center bg-white/50 border-2 border-dashed border-border/40 rounded-3xl">
+                                        <Wallet size={48} className="mx-auto text-navy/20 mb-4" />
+                                        <p className="text-[10px] text-navy/60 font-black uppercase tracking-[0.2em]">Sin registros previos</p>
                                     </div>
                                 )}
-
                             </motion.div>
 
                             <motion.div 
@@ -526,42 +1121,43 @@ export default function FlujoCajaView({ user, profile }) {
                                 className="space-y-8"
                             >
                                 <div className="flex items-center gap-4 px-6">
-                                    <Clock size={18} className="text-primary" />
-                                    <h4 className="text-[11px] font-black text-navy uppercase tracking-[0.3em]">Resumen Actividad (Últimas 10 Sesiones)</h4>
+                                    <h4 className="text-sm font-black text-navy uppercase tracking-[0.3em] flex items-center gap-3">
+                                        <div className="w-2 h-6 bg-primary rounded-full" />
+                                        Historial de Actividad (Resumen Inteligente)
+                                    </h4>
                                 </div>
-                                <div className="glass rounded-[4.5rem] border border-border/40 overflow-hidden shadow-2xl bg-white/50 backdrop-blur-md">
+                                <div className="bg-white rounded-xl border border-border/20 overflow-hidden shadow-sm">
                                     <table className="w-full text-left border-collapse">
-                                        <thead className="bg-[#fcfdfe]/80 border-b border-border/40">
-                                            <tr className="text-[9px] font-black text-navy/50 uppercase tracking-[0.3em]">
-                                                <th className="p-8">Calendario / Turno</th>
-                                                <th className="p-8">Auditor Responsable</th>
-                                                <th className="p-8 text-right">Saldo Finalizado</th>
-                                                <th className="p-8 text-center">Acceso</th>
+                                        <thead className="bg-slate-50 border-b border-border/20">
+                                            <tr className="text-xs font-bold text-navy uppercase tracking-widest">
+                                                <th className="p-4">Sesión / Turno</th>
+                                                <th className="p-4">Auditor Responsable</th>
+                                                <th className="p-4 text-right">Efectivo Final</th>
+                                                <th className="p-4 text-center px-8">Acciones</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border/10">
                                             {historialTurnos.map(h => (
-                                                <tr key={h.id} className="hover:bg-white transition-all group">
-                                                    <td className="p-8">
-                                                        <div className="font-mono font-black text-text text-sm tracking-tighter">{new Date(h.fecha).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })}</div>
-                                                        <div className="text-[8px] font-black uppercase text-primary mt-1 tracking-widest">{h.turno}</div>
+                                                <tr key={h.id} className="hover:bg-primary/5 transition-all group">
+                                                    <td className="p-4">
+                                                        <div className="font-bold text-navy text-sm uppercase tracking-tight mb-0.5">{new Date(h.cerrado_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                                                        <div className="text-xs font-bold uppercase text-primary tracking-widest">TURNO: {h.turno}</div>
                                                     </td>
-                                                    <td className="p-8 font-black text-navy text-xs uppercase tracking-tighter leading-tight">{h.responsable}</td>
-                                                    <td className="p-8 text-right font-black font-mono text-lg text-navy tracking-tighter">Bs {h.monto_final?.toLocaleString()}</td>
-                                                    <td className="p-8 text-center">
+                                                    <td className="p-4 font-bold text-navy text-sm uppercase truncate max-w-[150px]">{h.responsable}</td>
+                                                    <td className="p-4 text-right font-black font-mono text-base text-navy tracking-tighter leading-none">Bs {h.monto_final?.toLocaleString()}</td>
+                                                    <td className="p-4 text-center">
                                                         <button 
                                                             onClick={() => setShowDetailModal(h)} 
-                                                            className="p-4 bg-white rounded-2xl text-muted hover:text-primary shadow-sm hover:shadow-xl transition-all active:scale-90 border border-border/20" 
-                                                            title="Ver Auditoría"
+                                                            className="p-2 bg-background rounded-lg text-navy/40 hover:text-primary transition-all border border-border/20 shadow-sm" 
                                                         >
-                                                            <Eye size={20} />
+                                                            <Eye size={14} />
                                                         </button>
                                                     </td>
                                                 </tr>
                                             ))}
                                             {historialTurnos.length === 0 && (
                                                 <tr>
-                                                <td colSpan="4" className="p-32 text-center text-navy/60 uppercase font-black text-xs tracking-[0.5em] italic">Historial de sesiones vacío</td>
+                                                    <td colSpan="4" className="p-12 text-center text-navy/20 uppercase font-black text-[9px] tracking-widest">Historial de caja vacío</td>
                                                 </tr>
                                             )}
                                         </tbody>
@@ -578,84 +1174,95 @@ export default function FlujoCajaView({ user, profile }) {
                     animate={{ opacity: 1, scale: 1 }}
                     className="space-y-10"
                 >
-                    {/* Barra de Auditoría */}
-                    <div className="bg-navy text-white p-12 rounded-[5rem] shadow-[0_48px_120px_-20px_rgba(0,0,0,0.5)] flex flex-col xl:flex-row justify-between items-center gap-10 border border-white/5 relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-primary/10 blur-[150px] rounded-full -ml-40 -mt-40 transition-all duration-1000 group-hover:scale-125" />
-                        <div className="relative shrink-0 text-center xl:text-left">
-                           <h2 className="text-5xl font-display uppercase tracking-tight leading-none text-white font-black">Caja Maestra</h2>
-                           <p className="text-white/60 text-[11px] font-mono uppercase tracking-[0.6em] mt-5">Inteligencia y Auditoría de Flujos Históricos</p>
+                    {/* Barra de Auditoría Unificada (Uniformity Fix) */}
+                    <motion.div 
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm relative overflow-hidden group border border-border/40"
+                    >
+                        <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-primary/5 rounded-full -mr-16 -mt-16 blur-[40px]" />
+                        <div className="relative">
+                            <div className="flex items-center gap-2.5 text-primary font-bold text-xs uppercase tracking-widest mb-1">
+                                <span className="w-4 h-[1px] bg-primary" /> Archivo de Sesiones
+                            </div>
+                            <h2 className="text-xl font-display uppercase tracking-tight text-navy font-black">
+                                Caja Maestra
+                            </h2>
+                            <p className="text-navy/60 text-xs font-bold uppercase tracking-widest mt-1">Análisis y Auditoría de Flujos Históricos</p>
                         </div>
-                        <div className="flex flex-wrap items-center justify-center gap-6 relative">
-                            <div className="flex items-center gap-5 bg-white/5 border border-white/10 rounded-[2.5rem] px-10 py-5 backdrop-blur-2xl shadow-inner group hover:bg-white/10 transition-all">
-                                <Clock size={20} className="text-primary" />
-                                <div className="flex items-center gap-4">
+                        <div className="flex flex-wrap items-center justify-center gap-4 relative">
+                            <div className="flex items-center gap-4 bg-background border border-border/20 rounded-xl px-4 py-2 shadow-sm">
+                                <Clock size={16} className="text-primary" />
+                                <div className="flex items-center gap-3">
                                     <input 
                                         type="date" 
                                         value={dateRange.from}
                                         onChange={e => setDateRange({...dateRange, from: e.target.value})}
-                                        className="bg-transparent text-[11px] font-black font-mono outline-none text-white w-32 uppercase opacity-80 focus:opacity-100 transition-opacity"
+                                        className="bg-transparent text-[11px] font-black font-mono outline-none text-navy w-32 uppercase focus:text-primary transition-colors"
                                     />
-                                    <span className="text-white/20 select-none font-black text-[10px] tracking-widest">— AL —</span>
+                                    <span className="text-navy/20 font-black text-[9px]">—</span>
                                     <input 
                                         type="date" 
                                         value={dateRange.to}
                                         onChange={e => setDateRange({...dateRange, to: e.target.value})}
-                                        className="bg-transparent text-[11px] font-black font-mono outline-none text-white w-32 uppercase opacity-80 focus:opacity-100 transition-opacity"
+                                        className="bg-transparent text-[11px] font-black font-mono outline-none text-navy w-32 uppercase focus:text-primary transition-colors"
                                     />
                                 </div>
                             </div>
-                            <div className="relative group">
+                            <div className="relative group min-w-[280px]">
                                 <input 
                                     type="text" 
-                                    placeholder="Auditar por responsable..." 
-                                    className="bg-white/5 border border-white/10 rounded-[2.5rem] px-12 py-5 text-xs font-black outline-none focus:border-primary/50 w-96 text-white placeholder-white/20 transition-all focus:bg-white/10 focus:shadow-[0_0_40px_rgba(245,168,0,0.1)] shadow-inner"
+                                    placeholder="Auditador / Responsable..." 
+                                    className="bg-white border border-border/20 rounded-xl pl-10 pr-4 py-2.5 text-sm font-bold outline-none focus:border-primary/40 w-full text-navy placeholder-navy/20 transition-all shadow-sm"
                                     value={searchTerm}
                                     onChange={e => setSearchTerm(e.target.value)}
                                 />
-                                <Search className="absolute right-8 top-5.5 text-white/40 group-focus-within:text-primary transition-all duration-300 group-hover:scale-110" size={20} />
+                                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-navy/20 group-focus-within:text-primary transition-all" size={16} />
                             </div>
                         </div>
-                    </div>
+                    </motion.div>
 
                     {/* Tabla Maestra */}
-                    <div className="glass rounded-[5rem] border border-border/40 shadow-[0_60px_150px_-30px_rgba(0,0,0,0.2)] overflow-hidden bg-white/60 backdrop-blur-xl">
+                    <div className="bg-white rounded-3xl border border-border/40 shadow-xl overflow-hidden">
                         <table className="w-full text-left border-collapse">
-                            <thead className="bg-[#fcfdfe]/80 border-b border-border/40">
-                                <tr className="text-[10px] font-black uppercase tracking-[0.3em] text-navy/60">
-                                    <th className="p-10">Referencia de Sesión</th>
-                                    <th className="p-10">Responsable Auditor</th>
-                                    <th className="p-10">Turno</th>
-                                    <th className="p-10 text-right">Saldo Apertura</th>
-                                    <th className="p-10 text-right">Cierre Efectivo</th>
-                                    <th className="p-10 text-right">Gestión Administrativa</th>
+                            <thead className="bg-[#fcfdfe] border-b border-border/20">
+                                <tr className="text-xs font-bold uppercase tracking-widest text-navy">
+                                    <th className="p-6">Referencia</th>
+                                    <th className="p-6">Auditor Responsable</th>
+                                    <th className="p-6">Turno</th>
+                                    <th className="p-6 text-right">Apertura</th>
+                                    <th className="p-6 text-right">Cierre Efectivo</th>
+                                    <th className="p-6 text-right px-10">Gestión</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border/10">
                                 {historialTurnos.map(h => (
                                     <tr key={h.id} className="hover:bg-primary/5 transition-all group">
-                                        <td className="p-10">
-                                            <div className="font-black text-navy text-sm uppercase tracking-tighter leading-none mb-2">{new Date(h.fecha).toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' })}</div>
-                                            <div className="text-[9px] opacity-40 font-mono tracking-widest font-black">REF_ID: {h.id.slice(0,10).toUpperCase()}</div>
+                                        <td className="p-6">
+                                            <div className="font-bold text-navy text-sm uppercase tracking-tight mb-1">{new Date(h.cerrado_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                                            <div className="text-xs text-navy/60 font-mono tracking-tighter font-bold uppercase">ID: {h.id.slice(0,6)}</div>
                                         </td>
-                                        <td className="p-10 font-black text-navy text-sm uppercase tracking-tight leading-tight">{h.responsable}</td>
-                                        <td className="p-10">
-                                            <span className="text-[10px] font-black uppercase bg-navy text-white px-6 py-2.5 rounded-full shadow-2xl shadow-navy/40 border border-white/5">{h.turno}</span>
+                                        <td className="p-6 font-bold text-navy text-sm uppercase truncate max-w-[150px]">{h.responsable}</td>
+                                        <td className="p-6">
+                                            <span className="text-xs font-bold uppercase bg-navy text-white px-3 py-1.5 rounded-lg border border-white/5">{h.turno}</span>
                                         </td>
-                                        <td className="p-10 text-right font-bold text-navy/30 font-mono italic text-xs">Bs {h.monto_inicial.toLocaleString()}</td>
-                                        <td className="p-10 text-right">
-                                            <div className="font-black text-navy font-mono text-3xl tracking-tighter shadow-primary leading-none">Bs {h.monto_final?.toLocaleString()}</div>
-                                            <div className="text-[9px] font-black text-success mt-1 tracking-widest opacity-60 uppercase">Cerrado Correctamente</div>
+                                        <td className="p-6 text-right">
+                                            <div className="font-bold text-navy/60 font-mono text-xs">Bs {h.monto_inicial.toLocaleString()}</div>
                                         </td>
-                                        <td className="p-10">
-                                            <div className="flex items-center justify-end gap-3 translate-x-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-500">
-                                                <button onClick={() => setShowDetailModal(h)} className="p-5 bg-white rounded-3xl text-navy/60 hover:text-primary shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Informe Detallado">
-                                                    <Eye size={22} className="group-hover/btn:scale-110 transition-transform" />
+                                        <td className="p-6 text-right">
+                                            <div className="font-black text-navy font-mono text-xl tracking-tight leading-none">Bs {h.monto_final?.toLocaleString()}</div>
+                                            <div className="text-xs font-bold text-success mt-1.5 tracking-widest uppercase">✓ Cerrado</div>
+                                        </td>
+                                        <td className="p-6 text-right">
+                                            <div className="flex items-center justify-end gap-2">
+                                                <button onClick={() => setShowDetailModal(h)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-primary transition-all border border-border/20 shadow-sm" title="Detalle">
+                                                    <Eye size={16} />
                                                 </button>
-                                                <button onClick={() => setShowEditModal(h)} className="p-5 bg-white rounded-3xl text-navy/60 hover:text-accent shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Modificar Registro">
-                                                    <Edit3 size={22} className="group-hover/btn:rotate-12 transition-transform" />
+                                                <button onClick={() => setShowEditModal(h)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-accent transition-all border border-border/20 shadow-sm" title="Editar">
+                                                    <Edit3 size={16} />
                                                 </button>
-                                                <button onClick={() => handleDeleteTurno(h.id)} className="p-5 bg-white rounded-3xl text-navy/60 hover:text-error shadow-sm hover:shadow-2xl transition-all active:scale-90 border border-border/20 group/btn" title="Anular Registro Maestro">
-                                                    <Trash2 size={22} className="group-hover/btn:-rotate-12 transition-transform" />
+                                                <button onClick={() => handleDeleteTurno(h.id)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-error transition-all border border-border/20 shadow-sm" title="Eliminar">
+                                                    <Trash2 size={16} />
                                                 </button>
                                             </div>
                                         </td>
@@ -663,17 +1270,9 @@ export default function FlujoCajaView({ user, profile }) {
                                 ))}
                                 {historialTurnos.length === 0 && (
                                     <tr>
-                                        <td colSpan="6" className="p-52 text-center">
-                                            <div className="flex flex-col items-center gap-8 text-muted/30">
-                                                <Search size={80} className="stroke-[1px] opacity-60 text-primary" />
-                                                <p className="text-[11px] uppercase font-black tracking-[0.6em] italic leading-relaxed text-navy/70">No se encontraron registros que satisfagan la auditoría actual</p>
-                                                <button 
-                                                    onClick={() => {setDateRange({from: '', to: ''}); setSearchTerm('');}}
-                                                    className="text-[9px] font-black text-primary border-b border-primary/40 pb-1 hover:text-navy hover:border-navy transition-all"
-                                                >
-                                                    RESETEAR SISTEMA DE FILTRO
-                                                </button>
-                                            </div>
+                                        <td colSpan="6" className="p-32 text-center">
+                                            <Search size={40} className="mx-auto text-navy/10 mb-4" />
+                                            <p className="text-[10px] uppercase font-black tracking-widest text-navy/30">Sin registros encontrados</p>
                                         </td>
                                     </tr>
                                 )}
@@ -718,7 +1317,7 @@ export default function FlujoCajaView({ user, profile }) {
                             <div className="p-10 space-y-6">
                                 <div className="grid grid-cols-1 gap-4">
                                     <div>
-                                        <label className="text-[10px] font-black text-muted uppercase tracking-widest block mb-2 px-1">Turno</label>
+                                        <label className="text-xs font-bold text-navy uppercase tracking-widest block mb-2 px-1">Turno</label>
                                         <select 
                                             value={openForm.turno}
                                             onChange={e => setOpenForm({...openForm, turno: e.target.value})}
@@ -1074,10 +1673,106 @@ function TurnoDetailModal({ turno, onClose }) {
                     )}
                 </div>
 
+
                 <div className="p-6 bg-navy/5 border-t border-border/40 text-center shrink-0">
                     <p className="text-[10px] font-mono text-navy/30 uppercase tracking-[0.4em]">Fin del Reporte Auditado</p>
                 </div>
             </motion.div>
+
+            {/* ===== MODAL: GESTIÓN DE CATEGORÍAS (solo admin) ===== */}
+            <AnimatePresence>
+                {showCategoriasModal && isAdmin && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[9997] flex items-center justify-center bg-navy/60 backdrop-blur-sm px-4"
+                        onClick={(e) => e.target === e.currentTarget && setShowCategoriasModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-border/20"
+                        >
+                            {/* Header */}
+                            <div className="p-6 border-b border-border/10 flex items-center justify-between shrink-0">
+                                <div>
+                                    <h3 className="text-lg font-black text-navy uppercase tracking-widest">Categorías de Caja</h3>
+                                    <p className="text-xs text-muted mt-0.5">Gestiona las categorías de ingresos y egresos</p>
+                                </div>
+                                <button onClick={() => setShowCategoriasModal(false)} className="w-9 h-9 rounded-xl bg-navy/5 hover:bg-navy/10 flex items-center justify-center transition-colors">
+                                    <XCircle size={18} className="text-navy/40" />
+                                </button>
+                            </div>
+                            {/* Form: Crear / Editar */}
+                            <div className="p-6 border-b border-border/10 bg-navy/[0.02] shrink-0">
+                                <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-3">
+                                    {editingCategoria ? '✏️ Editando categoría' : '➕ Nueva categoría'}
+                                </p>
+                                <div className="flex gap-3">
+                                    <select
+                                        value={categoriaForm.tipo}
+                                        onChange={e => setCategoriaForm({...categoriaForm, tipo: e.target.value})}
+                                        className="bg-white border border-border/20 rounded-xl px-3 py-2.5 text-[11px] font-black uppercase outline-none focus:border-primary/40 transition-all cursor-pointer w-32 shrink-0"
+                                    >
+                                        <option value="INGRESO">Ingreso</option>
+                                        <option value="EGRESO">Egreso</option>
+                                        <option value="AMBOS">Ambos</option>
+                                    </select>
+                                    <input
+                                        type="text"
+                                        placeholder="Nombre de la categoría..."
+                                        value={categoriaForm.nombre}
+                                        onChange={e => setCategoriaForm({...categoriaForm, nombre: e.target.value})}
+                                        onKeyDown={e => e.key === 'Enter' && handleSaveCategoria()}
+                                        className="flex-1 bg-white border border-border/20 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:border-primary/40 transition-all"
+                                    />
+                                    <button
+                                        onClick={handleSaveCategoria}
+                                        className="bg-navy text-white px-4 rounded-xl text-xs font-bold hover:brightness-110 transition-all flex items-center gap-1.5 shrink-0"
+                                    >
+                                        {editingCategoria ? <><CheckCircle2 size={13} /> Guardar</> : <><Plus size={13} /> Crear</>}
+                                    </button>
+                                    {editingCategoria && (
+                                        <button
+                                            onClick={() => { setEditingCategoria(null); setCategoriaForm({ nombre: '', tipo: 'INGRESO' }); }}
+                                            className="px-3 rounded-xl border border-border text-navy/40 hover:bg-navy/5 transition-all text-xs font-bold"
+                                        >✕</button>
+                                    )}
+                                </div>
+                            </div>
+                            {/* Lista */}
+                            <div className="overflow-y-auto flex-1 p-4">
+                                {['INGRESO', 'EGRESO', 'AMBOS'].map(tipo => {
+                                    const grupo = categorias.filter(c => c.tipo === tipo);
+                                    if (grupo.length === 0) return null;
+                                    return (
+                                        <div key={tipo} className="mb-4">
+                                            <p className={`text-[9px] font-black uppercase tracking-widest mb-2 px-2 ${tipo === 'INGRESO' ? 'text-emerald-600' : tipo === 'EGRESO' ? 'text-red-500' : 'text-navy/40'}`}>
+                                                {tipo === 'INGRESO' ? '▲ Ingresos' : tipo === 'EGRESO' ? '▼ Egresos' : '⇅ Ambos'}
+                                            </p>
+                                            {grupo.map(cat => (
+                                                <div key={cat.id} className="flex items-center justify-between px-4 py-3 rounded-xl hover:bg-navy/[0.03] group transition-colors">
+                                                    <span className="text-sm font-bold text-navy">{cat.nombre}</span>
+                                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button onClick={() => { setEditingCategoria(cat); setCategoriaForm({ nombre: cat.nombre, tipo: cat.tipo }); }} className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-colors"><Edit3 size={12} /></button>
+                                                        <button onClick={() => handleDeleteCategoria(cat.id, cat.nombre)} className="w-7 h-7 rounded-lg bg-error/10 text-error flex items-center justify-center hover:bg-error/20 transition-colors"><Trash2 size={12} /></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })}
+                                {categorias.length === 0 && (
+                                    <div className="py-10 text-center text-muted text-sm">No hay categorías. Crea la primera ↑</div>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
