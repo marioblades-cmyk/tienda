@@ -19,13 +19,14 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3, ShoppingBag, Wallet
+    Truck, BarChart3, ShoppingBag, Wallet, BookMarked
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
 import CatalogUpdatedView from './components/CatalogUpdatedView';
 import ClientOrdersView from './components/ClientOrdersView';
 import FlujoCajaView from './components/FlujoCajaView';
+import ContabilidadView from './components/ContabilidadView';
 
 // --- Nav item ---
 function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
@@ -68,7 +69,8 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
-        { id: 'caja', icon: Wallet, label: 'Flujo de Caja' || 'POS System' },
+        { id: 'caja', icon: Wallet, label: 'Flujo de Caja' },
+        { id: 'contabilidad', icon: BookMarked, label: 'Contabilidad' },
     ];
 
     const sellerItems = [
@@ -79,7 +81,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
-        { id: 'caja', icon: Wallet, label: 'Flujo de Caja' || 'POS System' },
+        { id: 'caja', icon: Wallet, label: 'Flujo de Caja' },
     ];
 
     const items = isAdmin ? adminItems : sellerItems;
@@ -161,6 +163,7 @@ const TAB_TITLES = {
     cotizaciones: 'Generador de Cotizaciones',
     clientes: 'Pedidos de Clientes',
     caja: 'Flujo de Caja',
+    contabilidad: 'Contabilidad General',
     entelequia: 'Herramienta Editorial',
 };
 
@@ -267,6 +270,7 @@ function Main() {
         activeTab === 'cotizaciones' ? <QuotationTool /> :
         activeTab === 'clientes' ? <ClientOrdersView /> :
         activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
+        activeTab === 'contabilidad' ? <ContabilidadView /> :
         activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback

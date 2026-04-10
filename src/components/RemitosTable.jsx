@@ -144,7 +144,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [showAddPedido, setShowAddPedido] = useState(false);
     const [showAddPago, setShowAddPago] = useState(false);
     const [newPedido, setNewPedido] = useState({ nombre: '', monto: '' });
-    const [newPago, setNewPago] = useState({ fecha: '', monto: '', tc: '' });
+    const [newPago, setNewPago] = useState({ fecha: '', monto: '', tc: '', metodo: 'Efectivo' });
 
     // Inline Edit & Ajustes States
     const [editingPedidoIdx, setEditingPedidoIdx] = useState(null);
@@ -187,6 +187,16 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [loading, setLoading] = useState(true);
     const [compactMode, setCompactMode] = useState(false);
     const [toasts, setToasts] = useState([]); // [{id, msg, type}]
+
+    // Flete registration modal state
+    const [fleteModal, setFleteModal] = useState(null); // null | { rowId, fleteBS, nro, fecha }
+    const [fleteMetodo, setFleteMetodo] = useState('Efectivo Personal');
+    const [fleteSaving, setFleteSaving] = useState(false);
+
+    // Costo (Envío AR) registration modal state
+    const [costoModal, setCostoModal] = useState(null); // null | { rowId, costoBS, nro, fecha, compre, cambio }
+    const [costoMetodo, setCostoMetodo] = useState('Efectivo Personal');
+    const [costoSaving, setCostoSaving] = useState(false);
 
     // Custom Confirmation Modal State
     const [confirmModal, setConfirmModal] = useState({ show: false, title: '', msg: '', onConfirm: null });
@@ -441,6 +451,78 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     };
     // ----------------------------------------------------
 
+    const handleRegistrarFlete = async () => {
+        if (!fleteModal) return;
+        const { rowId, fleteBS, nro, fecha } = fleteModal;
+        if (!fleteBS || fleteBS <= 0) { showToast('El flete es 0, no hay nada que registrar.', 'error'); return; }
+        setFleteSaving(true);
+        try {
+            const row = rows.find(r => r.id === rowId);
+            const cg = num(row?.cg), cm = num(row?.cm), cp = num(row?.cp);
+            const partes = [];
+            if (cg > 0) partes.push(`${cg}G`);
+            if (cm > 0) partes.push(`${cm}M`);
+            if (cp > 0) partes.push(`${cp}P`);
+            const detalleCajas = partes.length > 0 ? ' · ' + partes.join(' ') : '';
+            const nroLabel = nro ? `Remito ${nro}` : 'Remito s/n';
+            const fechaLabel = fecha ? ` (${fecha})` : '';
+            const concepto = `Flete — ${nroLabel}${detalleCajas}${fechaLabel}`;
+            const { data: cajaMov, error } = await supabase.from('caja_movimientos').insert([{
+                turno_id: null,
+                tipo: 'EGRESO',
+                categoria: 'Flete / Envío',
+                concepto,
+                monto: fleteBS,
+                metodo_pago: fleteMetodo,
+                origen: 'Envios',
+            }]).select('id').single();
+            if (error) throw error;
+            const flete_caja_id = cajaMov?.id || null;
+            const newRows = rows.map(r => r.id === rowId ? { ...r, flete_caja_id } : r);
+            setRows(newRows);
+            await saveRemitos(newRows);
+            setFleteModal(null);
+            showToast('Flete registrado como egreso correctamente.', 'success');
+        } catch (e) {
+            showToast('Error al registrar el flete: ' + e.message, 'error');
+        } finally {
+            setFleteSaving(false);
+        }
+    };
+
+    const handleRegistrarCosto = async () => {
+        if (!costoModal) return;
+        const { rowId, costoBS, nro, fecha, compre, cambio } = costoModal;
+        if (!costoBS || costoBS <= 0) { showToast('El costo es 0, no hay nada que registrar.', 'error'); return; }
+        setCostoSaving(true);
+        try {
+            const nroLabel = nro ? `Remito ${nro}` : 'Remito s/n';
+            const fechaLabel = fecha ? ` (${fecha})` : '';
+            const detalle = compre && cambio ? ` · ARS ${Number(compre).toLocaleString()} × ${cambio}` : '';
+            const concepto = `Envío AR — ${nroLabel}${detalle}${fechaLabel}`;
+            const { data: cajaMov, error } = await supabase.from('caja_movimientos').insert([{
+                turno_id: null,
+                tipo: 'EGRESO',
+                categoria: 'Envío Argentina',
+                concepto,
+                monto: costoBS,
+                metodo_pago: costoMetodo,
+                origen: 'Proveedores',
+            }]).select('id').single();
+            if (error) throw error;
+            const costo_caja_id = cajaMov?.id || null;
+            const newRows = rows.map(r => r.id === rowId ? { ...r, costo_caja_id } : r);
+            setRows(newRows);
+            await saveRemitos(newRows);
+            setCostoModal(null);
+            showToast('Envío AR registrado como egreso correctamente.', 'success');
+        } catch (e) {
+            showToast('Error al registrar el costo: ' + e.message, 'error');
+        } finally {
+            setCostoSaving(false);
+        }
+    };
+
     // Función para inyectar los datos del Distribuidor en los Remitos (Adaptado a React State)
     const syncDistToRows = async (latestDist = dist, currentRows = rows) => {
         try {
@@ -540,6 +622,18 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         setDist(newDist);
         await saveDist(newDist);
 
+        // Registrar en contabilidad como EGRESO
+        const montoBS = tc > 0 ? monto * tc : monto;
+        await supabase.from('caja_movimientos').insert([{
+            turno_id: null,
+            tipo: 'EGRESO',
+            categoria: 'Pago Distribuidor',
+            concepto: `Pago distribuidor${fecha ? ' · ' + fecha : ''} · ARS ${monto.toLocaleString()}${tc > 0 ? ' (TC ' + tc + ')' : ''}`,
+            monto: montoBS,
+            metodo_pago: 'Efectivo',
+            origen: 'Proveedores',
+        }]);
+
         // Limpiar inputs
         setPagoFecha('');
         setPagoMonto('');
@@ -547,7 +641,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
         // Sincronizar con los remitos
         await syncDistToRows(newDist);
-        showToast('Pago guardado y sincronizado.', 'success');
+        showToast('Pago guardado, sincronizado y contabilizado.', 'success');
     };
 
     const startEditPedido = (idx, ped) => {
@@ -1043,6 +1137,28 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             }
         }
     };
+    const pagarMiParteAlq = async (idx) => {
+        const m = alq.meses[idx];
+        const monto = parseFloat(m.tuParteBS) || 0;
+        if (!monto) return showToast('El monto de tu parte es 0. Configura el alquiler primero.', 'error');
+        // Marcar mes como pagado por mí
+        const newAlq = { ...alq };
+        newAlq.meses[idx].pagadoPorMi = true;
+        setAlq(newAlq);
+        await saveAlq(newAlq);
+        // Registrar en contabilidad como EGRESO
+        await supabase.from('caja_movimientos').insert([{
+            turno_id: null,
+            tipo: 'EGRESO',
+            categoria: 'Alquiler',
+            concepto: `Alquiler ${formatMesAlq(m.ym)} — mi parte`,
+            monto,
+            metodo_pago: 'Efectivo Personal',
+            origen: 'Proveedores',
+        }]);
+        showToast(`Pago de alquiler ${formatMesAlq(m.ym)} registrado como egreso.`, 'success');
+    };
+
     const cargarAlqToCta = async (idx) => {
         const m = alq.meses[idx];
         if (!m.ym || !m.totalBS) return showToast('Datos de mes incompletos.', 'error');
@@ -1447,18 +1563,42 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Tasa de Cambio (TC)</label>
                                             <input type="number" step="0.0001" value={newPago.tc} onChange={e => setNewPago({ ...newPago, tc: e.target.value })} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }} placeholder="Ej: 0.1250" />
                                         </div>
-                                        <div style={{ marginBottom: '20px' }}>
+                                        <div style={{ marginBottom: '12px' }}>
                                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Fecha</label>
                                             <input type="date" value={newPago.fecha} onChange={e => setNewPago({ ...newPago, fecha: e.target.value })} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }} />
                                         </div>
+                                        <div style={{ marginBottom: '20px' }}>
+                                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Forma de Pago</label>
+                                            <select value={newPago.metodo} onChange={e => setNewPago({ ...newPago, metodo: e.target.value })} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', background: '#fff' }}>
+                                                {['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo Personal', 'Otros'].map(m => (
+                                                    <option key={m} value={m}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
                                             <button onClick={() => setShowAddPago(false)} style={{ flex: 1, padding: '10px', background: '#f1f1f1', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>Cancelar</button>
-                                            <button onClick={() => {
-                                                const newDist = { ...dist, pagos: [...(dist.pagos || []), { monto: parseFloat(newPago.monto) || 0, tc: parseFloat(newPago.tc) || 0, fecha: newPago.fecha }] };
+                                            <button onClick={async () => {
+                                                const monto = parseFloat(newPago.monto) || 0;
+                                                const tc = parseFloat(newPago.tc) || 0;
+                                                if (!monto) { showToast('Ingresa un monto válido.', 'error'); return; }
+                                                // Registrar en contabilidad como EGRESO y obtener el ID generado
+                                                const montoBS = tc > 0 ? monto * tc : monto;
+                                                const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
+                                                    turno_id: null,
+                                                    tipo: 'EGRESO',
+                                                    categoria: 'Pago Distribuidor',
+                                                    concepto: `Pago distribuidor${newPago.fecha ? ' · ' + newPago.fecha : ''} · ARS ${monto.toLocaleString()}${tc > 0 ? ' (TC ' + tc + ')' : ''}`,
+                                                    monto: montoBS,
+                                                    metodo_pago: newPago.metodo || 'Efectivo',
+                                                    origen: 'Proveedores',
+                                                }]).select('id').single();
+                                                // Guardar caja_id en el pago para permitir sincronización al borrar
+                                                const newDist = { ...dist, pagos: [...(dist.pagos || []), { monto, tc: tc || null, fecha: newPago.fecha, metodo: newPago.metodo || 'Efectivo', caja_id: cajaMov?.id || null }] };
                                                 setDist(newDist);
-                                                saveDist(newDist);
+                                                await saveDist(newDist);
                                                 setShowAddPago(false);
-                                                setNewPago({ fecha: '', monto: '', tc: '' });
+                                                setNewPago({ fecha: '', monto: '', tc: '', metodo: 'Efectivo' });
+                                                showToast('Pago guardado y contabilizado como egreso.', 'success');
                                             }} style={{ flex: 1, padding: '10px', background: 'var(--ok)', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>Guardar Pago</button>
                                         </div>
                                     </div>
@@ -1561,6 +1701,77 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                             </div>
                         </div >
 
+                        {/* MODAL: REGISTRAR FLETE */}
+                        {fleteModal && (
+                            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                                <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '360px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                                    <h3 style={{ margin: '0 0 4px 0', color: 'var(--navy)' }}>📤 Registrar Flete como Egreso</h3>
+                                    <p style={{ margin: '0 0 16px 0', fontSize: '0.8rem', color: '#666' }}>
+                                        {fleteModal.nro ? `Remito ${fleteModal.nro}` : 'Remito s/n'}
+                                        {fleteModal.fecha ? ` · ${fleteModal.fecha}` : ''}
+                                    </p>
+                                    <div style={{ marginBottom: '12px', padding: '12px', background: '#f8f8f8', borderRadius: '6px', textAlign: 'center' }}>
+                                        <span style={{ fontSize: '0.75rem', color: '#666', display: 'block', marginBottom: '4px' }}>Monto a registrar</span>
+                                        <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--navy)' }}>
+                                            BS {fleteModal.fleteBS.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                    <div style={{ marginBottom: '20px' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Forma de Pago</label>
+                                        <select value={fleteMetodo} onChange={e => setFleteMetodo(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', background: '#fff' }}>
+                                            {['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo Personal', 'Otros'].map(m => (
+                                                <option key={m} value={m}>{m}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <button onClick={() => setFleteModal(null)} disabled={fleteSaving} style={{ flex: 1, padding: '10px', background: '#f1f1f1', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>Cancelar</button>
+                                        <button onClick={handleRegistrarFlete} disabled={fleteSaving} style={{ flex: 1, padding: '10px', background: fleteSaving ? '#aaa' : 'var(--ok)', border: 'none', borderRadius: '4px', cursor: fleteSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
+                                            {fleteSaving ? 'Registrando...' : 'Confirmar Egreso'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* MODAL: REGISTRAR COSTO ENVÍO AR */}
+                        {costoModal && (
+                            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                                <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '360px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                                    <h3 style={{ margin: '0 0 4px 0', color: 'var(--navy)' }}>🚚 Registrar Envío AR como Egreso</h3>
+                                    <p style={{ margin: '0 0 16px 0', fontSize: '0.8rem', color: '#666' }}>
+                                        {costoModal.nro ? `Remito ${costoModal.nro}` : 'Remito s/n'}
+                                        {costoModal.fecha ? ` · ${costoModal.fecha}` : ''}
+                                    </p>
+                                    <div style={{ marginBottom: '12px', padding: '12px', background: '#f8f8f8', borderRadius: '6px', textAlign: 'center' }}>
+                                        <span style={{ fontSize: '0.75rem', color: '#666', display: 'block', marginBottom: '2px' }}>Monto a registrar</span>
+                                        <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--navy)' }}>
+                                            BS {costoModal.costoBS.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                        {costoModal.compre && costoModal.cambio && (
+                                            <span style={{ fontSize: '0.72rem', color: '#888', display: 'block', marginTop: '2px' }}>
+                                                ARS {Number(costoModal.compre).toLocaleString()} × TC {costoModal.cambio}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div style={{ marginBottom: '20px' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Forma de Pago</label>
+                                        <select value={costoMetodo} onChange={e => setCostoMetodo(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', background: '#fff' }}>
+                                            {['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo Personal', 'Otros'].map(m => (
+                                                <option key={m} value={m}>{m}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <button onClick={() => setCostoModal(null)} disabled={costoSaving} style={{ flex: 1, padding: '10px', background: '#f1f1f1', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>Cancelar</button>
+                                        <button onClick={handleRegistrarCosto} disabled={costoSaving} style={{ flex: 1, padding: '10px', background: costoSaving ? '#aaa' : 'var(--ok)', border: 'none', borderRadius: '4px', cursor: costoSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
+                                            {costoSaving ? 'Registrando...' : 'Confirmar Egreso'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Tabla Principal */}
                         < div className="table-wrapper" >
                             <table id="tbl">
@@ -1575,8 +1786,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                             />
                                         </th>
                                         <th colSpan="5">Remito + Envío Argentina</th>
-                                        <th colSpan={compactMode ? 2 : 3}>Compra ARS a BS</th>
-                                        <th colSpan={compactMode ? 3 : 4}>Flete Bolivia BS</th>
+                                        <th colSpan={compactMode ? (isSocio ? 2 : 3) : (isSocio ? 3 : 4)}>Compra ARS a BS</th>
+                                        <th colSpan={compactMode ? (isSocio ? 3 : 4) : (isSocio ? 4 : 5)}>Flete Bolivia BS</th>
                                         {!compactMode && <th colSpan="1">Costo Total</th>}
                                         <th colSpan="2" style={{ textAlign: "center" }}>Pedido</th>
                                         <th colSpan={compactMode ? 2 : 3} style={{ color: "var(--warn)", backgroundColor: "rgba(245, 168, 0, 0.05)" }}>Distribuidor</th>
@@ -1592,10 +1803,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         <th>Compré ARS</th>
                                         <th>Cambio día</th>
                                         {!compactMode && <th>Costo BS</th>}
+                                        {!isSocio && <th style={{ minWidth: '95px' }}>Envío AR Reg.</th>}
                                         <th>Cajas Gdes 70</th>
                                         <th>Cajas Med 40</th>
                                         <th>Cajas Peq 20</th>
                                         {!compactMode && <th>Total Flete BS</th>}
+                                        {!isSocio && <th style={{ minWidth: '95px' }}>Flete Reg.</th>}
                                         {!compactMode && <th>Costo Total BS</th>}
                                         <th>Pedido</th>
                                         <th>Pago Aprox ARS</th>
@@ -1721,6 +1934,25 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         {calcs.costoBS.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                     </td>
                                                 )}
+                                                {!isSocio && (
+                                                    <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '2px 4px' }}>
+                                                        {r.costo_caja_id ? (
+                                                            <span title="Eliminá el egreso desde Contabilidad para re-registrar" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(39,174,96,0.12)', color: 'var(--ok)', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(39,174,96,0.3)', whiteSpace: 'nowrap' }}>
+                                                                ✓ Registrado
+                                                            </span>
+                                                        ) : calcs.costoBS > 0 ? (
+                                                            <button
+                                                                onClick={() => { setCostoModal({ rowId: r.id, costoBS: calcs.costoBS, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio }); setCostoMetodo('Efectivo Personal'); }}
+                                                                style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                                                title={`Registrar BS ${calcs.costoBS.toFixed(2)} como egreso "Envío Argentina"`}
+                                                            >
+                                                                🚚 Reg. Envío AR
+                                                            </button>
+                                                        ) : (
+                                                            <span style={{ color: '#ccc', fontSize: '0.7rem' }}>—</span>
+                                                        )}
+                                                    </td>
+                                                )}
                                                 <td>
                                                     <input
                                                         type="number"
@@ -1751,6 +1983,25 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         disabled={isSocio}
                                                     />
                                                 </td>
+                                                {!isSocio && (
+                                                    <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '2px 4px' }}>
+                                                        {r.flete_caja_id ? (
+                                                            <span title="Eliminá el egreso desde Contabilidad para re-registrar" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(39,174,96,0.12)', color: 'var(--ok)', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(39,174,96,0.3)', whiteSpace: 'nowrap' }}>
+                                                                ✓ Registrado
+                                                            </span>
+                                                        ) : calcs.fleteBS > 0 ? (
+                                                            <button
+                                                                onClick={() => { setFleteModal({ rowId: r.id, fleteBS: calcs.fleteBS, nro: r.nro || '', fecha: r.fecha || '' }); setFleteMetodo('Efectivo Personal'); }}
+                                                                style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                                                title={`Registrar flete BS ${calcs.fleteBS.toFixed(2)} como egreso en caja`}
+                                                            >
+                                                                📤 Reg. Flete
+                                                            </button>
+                                                        ) : (
+                                                            <span style={{ color: '#ccc', fontSize: '0.7rem' }}>—</span>
+                                                        )}
+                                                    </td>
+                                                )}
                                                 {!compactMode && (
                                                     <>
                                                         <td style={{ textAlign: 'right', fontWeight: 'bold' }}>
@@ -2587,12 +2838,13 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '14px' }}>
                                 <thead>
                                     <tr style={{ background: 'var(--navy)', color: '#fff' }}>
-                                        <th style={{ padding: '16px', textAlign: 'left', width: '20%' }}>MES</th>
-                                        <th style={{ padding: '16px', width: '15%' }}>TOTAL BS</th>
-                                        <th style={{ padding: '16px', width: '15%' }}>TU PARTE BS</th>
-                                        <th style={{ padding: '16px', width: '15%' }}>SOCIO BS</th>
-                                        <th style={{ padding: '16px', width: '20%' }}>ESTADO ITEM</th>
-                                        <th style={{ padding: '16px', width: '15%' }}>ACCIONES</th>
+                                        <th style={{ padding: '16px', textAlign: 'left', width: '18%' }}>MES</th>
+                                        <th style={{ padding: '16px', width: '12%' }}>TOTAL BS</th>
+                                        <th style={{ padding: '16px', width: '12%' }}>TU PARTE BS</th>
+                                        <th style={{ padding: '16px', width: '12%' }}>SOCIO BS</th>
+                                        <th style={{ padding: '16px', width: '16%' }}>MI PAGO</th>
+                                        <th style={{ padding: '16px', width: '16%' }}>ESTADO SOCIO</th>
+                                        <th style={{ padding: '16px', width: '14%' }}>ACCIONES</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -2611,6 +2863,26 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 <td style={{ padding: '16px', fontWeight: '900', color: '#673ab7', fontFamily: 'monospace' }}>
                                                     {fBS(m.socioBS || 0)}
                                                 </td>
+                                                {/* MI PAGO */}
+                                                <td style={{ padding: '16px', textAlign: 'center' }}>
+                                                    {m.pagadoPorMi ? (
+                                                        <span style={{ color: '#27ae60', fontWeight: 'bold', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                                            ✓ Pagado
+                                                        </span>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => {
+                                                                openConfirm('Registrar Pago', `¿Registrar tu pago de alquiler ${formatMesAlq(m.ym)}?\n\nMonto: ${fBS(m.tuParteBS || 0)} BS\nMétodo: Efectivo Personal\n\nEsto se anotará automáticamente en Contabilidad > Egresos.`, async () => {
+                                                                    await pagarMiParteAlq(idx);
+                                                                });
+                                                            }}
+                                                            style={{ background: '#27ae60', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 6px rgba(39,174,96,0.3)' }}
+                                                        >
+                                                            💵 Pagar mi parte
+                                                        </button>
+                                                    )}
+                                                </td>
+                                                {/* ESTADO SOCIO */}
                                                 <td style={{ padding: '16px' }}>
                                                     {m.cargado ? (
                                                         <span style={{ color: '#27ae60', fontWeight: 'bold', fontSize: '0.85rem' }}>✓ Auto - En CTA</span>
@@ -2661,7 +2933,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         <td style={{ padding: '16px', fontWeight: '900', fontFamily: 'monospace', color: '#d9ccfe' }}>
                                             {fBS((alq.meses || []).reduce((s, m) => s + (parseFloat(m.socioBS) || 0), 0))}
                                         </td>
-                                        <td colSpan="2"></td>
+                                        <td colSpan="3"></td>
                                     </tr>
                                 </tfoot>
                             </table>

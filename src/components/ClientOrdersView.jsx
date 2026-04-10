@@ -63,10 +63,13 @@ export default function ClientOrdersView() {
     const [selectedPayItems, setSelectedPayItems] = useState([]);
     const [payMonto, setPayMonto] = useState('');
     const [pagoConcepto, setPagoConcepto] = useState('');
-    const [payMethod, setPayMethod] = useState('Efectivo'); // 'Efectivo' | 'Banco / Transferencia' | 'QR / Tigo Money'
+    const [payMethod, setPayMethod] = useState('Yasta (QR)'); // 'Efectivo' | 'Yasta (QR)' | 'Banco Unión (QR/Transf)' | 'BNB' | 'Otros'
+    const [payReference, setPayReference] = useState(''); // No. operación para pagos digitales
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
     const [batchDiscount, setBatchDiscount] = useState('');
     const [batchAbono, setBatchAbono] = useState('');
+    const [orderMethod, setOrderMethod] = useState('Yasta (QR)'); // método del abono inicial al crear pedido
+    const [editPago, setEditPago] = useState(null); // { id, concepto, monto, metodo_pago, caja_mov_id }
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -88,6 +91,7 @@ export default function ClientOrdersView() {
             setSelectedStockSource('');
             setBatchDiscount('');
             setBatchAbono('');
+            setOrderMethod('Yasta (QR)');
         }
     }, [showAddModal]);
 
@@ -671,7 +675,30 @@ export default function ClientOrdersView() {
             }
             
             if (typeof catalogService !== 'undefined') catalogService.clearCache();
-            
+
+            // 5. Registrar abono inicial en ledger si hubo pago
+            const totalAbonoInicial = cart.reduce((s, c) => s + (Number(c.monto_pagado) || 0), 0);
+            if (totalAbonoInicial > 0) {
+                const clienteNombre = clientes.find(c => c.id === clienteId)?.nombre || addForm.nombre || clienteId;
+                let turnoId = null;
+                if (orderMethod === 'Efectivo') {
+                    const { data: activeTurno } = await supabase
+                        .from('turnos_caja').select('id').eq('estado', 'ABIERTO').maybeSingle();
+                    if (!activeTurno) throw new Error("⚠️ BLOQUEO: No hay TURNO DE CAJA abierto para registrar el abono en efectivo.");
+                    turnoId = activeTurno.id;
+                }
+                await supabase.from('caja_movimientos').insert([{
+                    turno_id: turnoId,
+                    tipo: 'INGRESO',
+                    categoria: 'Cobro Pedido',
+                    concepto: `ABONO INICIAL [${clienteNombre}] · ${cart.length} ítem(s)`,
+                    monto: totalAbonoInicial,
+                    vendedor_id: user?.id,
+                    metodo_pago: orderMethod,
+                    origen: 'Pedidos'
+                }]);
+            }
+
             setShowAddModal(false);
             setCart([]);
             setAddForm({
@@ -697,69 +724,120 @@ export default function ClientOrdersView() {
             const amt = Number(payMonto);
             if (amt <= 0) return alert("Monto inválido");
 
+            const cli = clientes.find(c => c.id === clienteId);
+
+            // --- LEDGER: Registrar en caja_movimientos PRIMERO para capturar el ID ---
+            let turnoId = null;
+            if (payMethod === 'Efectivo') {
+                const { data: activeTurno, error: tErr } = await supabase
+                    .from('turnos_caja')
+                    .select('id')
+                    .eq('estado', 'ABIERTO')
+                    .maybeSingle();
+                if (tErr) throw tErr;
+                if (!activeTurno) {
+                    throw new Error("⚠️ BLOQUEO: No hay TURNO DE CAJA abierto. Abre caja en 'OPERATIVA DIARIA' para recibir efectivo.");
+                }
+                turnoId = activeTurno.id;
+            }
+
+            const concetoLedger = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
+            const { data: cajaMov, error: moveErr } = await supabase.from('caja_movimientos').insert([{
+                turno_id: turnoId,
+                tipo: 'INGRESO',
+                categoria: 'Cobro Pedido',
+                concepto: concetoLedger,
+                monto: amt,
+                vendedor_id: user?.id,
+                metodo_pago: payMethod,
+                origen: 'Pedidos'
+            }]).select('id').single();
+            if (moveErr) throw moveErr;
+
             if (payMode === 'general') {
                 const { error: pErr } = await supabase.from('cliente_pagos').insert([{
                     cliente_id: clienteId,
                     monto: amt,
                     concepto: pagoConcepto || 'Abono general',
-                    vendedor_id: user?.id
+                    vendedor_id: user?.id,
+                    metodo_pago: payMethod,
+                    referencia: payReference || null,
+                    caja_mov_id: cajaMov?.id || null,
                 }]);
                 if (pErr) throw pErr;
             } else {
                 if (selectedPayItems.length === 0) return alert("Seleccione al menos un ítem");
                 const splitAmt = amt / selectedPayItems.length;
-                
-                // Fetch current state to increment
+
                 const itemsToUpdate = items.filter(i => selectedPayItems.includes(i.id));
                 for (let eq of itemsToUpdate) {
                     const nuevoMonto = (Number(eq.monto_pagado) || 0) + splitAmt;
-                    let nuevoEstado = eq.estado;
-                    // Auto-Lista si paga completo y estaba en PEDIDO/CONFIRMADO (Opcional, omitido por requerir Recepcion para "En Tienda")
-                    // if (nuevoMonto >= eq.precio_venta && (eq.estado.startsWith('PEDIDO') || eq.estado.startsWith('CONFIRMADO'))) nuevoEstado = 'EN TIENDA';
-
                     await supabase.from('cliente_items').update({
                         monto_pagado: nuevoMonto,
-                        estado: nuevoEstado
+                        estado: eq.estado
                     }).eq('id', eq.id);
                 }
             }
+
             setShowPayModal(null);
             setPayMonto('');
             setPagoConcepto('');
+            setPayReference('');
+            setPayMethod('Yasta (QR)');
             setSelectedPayItems([]);
-             setSelectedPayItems([]);
-
-            // --- SINCRONIZACIÓN CON FLUJO DE CAJA MAESTRO (SÓLO SI ES EFECTIVO) ---
-            if (payMethod === 'Efectivo') {
-                const { data: activeTurno, error: tErr } = await supabase
-                    .from('turnos_caja')
-                    .select('id, responsable')
-                    .eq('estado', 'ABIERTO')
-                    .maybeSingle();
-
-                if (tErr) throw tErr;
-                if (!activeTurno) {
-                    throw new Error("⚠️ BLOQUEO DE SEGURIDAD: No hay un TURNO DE CAJA abierto. Debes abrir caja en 'OPERATIVA DIARIA' para recibir efectivo.");
-                }
-
-                // Registrar ingreso automático en la caja activa
-                const { error: moveErr } = await supabase.from('caja_movimientos').insert([{
-                    turno_id: activeTurno.id,
-                    tipo: 'INGRESO',
-                    categoria: 'Venta Pedido',
-                    concepto: `ABONO PEDIDO: Cliente ID #${clienteId}${pagoConcepto ? ' - ' + pagoConcepto : ''}`,
-                    monto: amt,
-                    vendedor_id: user?.id
-                }]);
-                
-                if (moveErr) throw moveErr;
-            }
 
             await fetchData();
-            alert("✓ Pago registrado con éxito y sincronizado con Caja Maestra.");
+            alert("✓ Pago registrado y contabilizado correctamente.");
         } catch (e) {
             console.error(e);
             alert(e.message || "Error al registrar pago");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeletePago = async (pago) => {
+        if (!confirm(`¿Eliminar este abono?\n${pago.concepto || 'Abono'} — BS ${Number(pago.monto).toLocaleString('es-BO', { minimumFractionDigits: 2 })}\n\nTambién se eliminará de Contabilidad.`)) return;
+        try {
+            setLoading(true);
+            // Borrar el movimiento de caja si existe el vínculo
+            if (pago.caja_mov_id) {
+                await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
+            }
+            await supabase.from('cliente_pagos').delete().eq('id', pago.id);
+            await fetchData();
+        } catch (e) {
+            console.error(e);
+            alert('Error al eliminar el abono: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUpdatePago = async () => {
+        if (!editPago) return;
+        const amt = Number(editPago.monto);
+        if (!amt || amt <= 0) return alert('Monto inválido.');
+        try {
+            setLoading(true);
+            await supabase.from('cliente_pagos').update({
+                monto: amt,
+                concepto: editPago.concepto,
+                metodo_pago: editPago.metodo_pago,
+            }).eq('id', editPago.id);
+            // Sincronizar con caja_movimientos si existe el vínculo
+            if (editPago.caja_mov_id) {
+                await supabase.from('caja_movimientos').update({
+                    monto: amt,
+                    concepto: editPago.concepto,
+                    metodo_pago: editPago.metodo_pago,
+                }).eq('id', editPago.caja_mov_id);
+            }
+            setEditPago(null);
+            await fetchData();
+        } catch (e) {
+            console.error(e);
+            alert('Error al editar el abono: ' + e.message);
         } finally {
             setLoading(false);
         }
@@ -1809,16 +1887,41 @@ export default function ClientOrdersView() {
                             </div>
                         </div>
 
-                        <div className="p-6 border-t border-border flex justify-end gap-4 bg-background rounded-b-2xl shrink-0">
+                        <div className="p-5 border-t border-border bg-background rounded-b-2xl shrink-0 space-y-4">
+                            {/* Método de pago global del pedido */}
+                            <div className="flex flex-col gap-2">
+                                <span className="text-[9px] font-black uppercase text-muted tracking-widest">Método de Pago del Abono</span>
+                                <div className="flex gap-1.5 flex-wrap">
+                                    {[
+                                        { id: 'Efectivo', icon: '💵' },
+                                        { id: 'Yasta (QR)', icon: '📲' },
+                                        { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
+                                        { id: 'BNB', icon: '🏛️' },
+                                        { id: 'Otros', icon: '💳' },
+                                    ].map(m => (
+                                        <button
+                                            key={m.id}
+                                            type="button"
+                                            onClick={() => setOrderMethod(m.id)}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${orderMethod === m.id ? 'bg-[var(--primary)] border-[var(--primary)] text-white shadow' : 'bg-surface border-border text-muted hover:border-primary/40'}`}
+                                        >
+                                            <span>{m.icon}</span>
+                                            <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-4">
                             <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="px-6 py-2.5 text-[11px] font-black uppercase tracking-widest text-muted hover:text-text">Cancelar</button>
-                            <button 
-                                onClick={handleSaveOrder} 
+                            <button
+                                onClick={handleSaveOrder}
                                 disabled={cart.length === 0 || loading}
                                 className={`px-12 py-3.5 rounded-2xl text-xs font-black uppercase tracking-[0.2em] flex items-center gap-3 shadow-2xl transition-all ${cart.length > 0 && !loading ? 'bg-primary text-background hover:scale-105 hover:shadow-primary/40 active:scale-95' : 'bg-muted text-surface cursor-not-allowed'}`}
                             >
                                 {loading ? <div className="animate-spin w-4 h-4 border-2 border-background border-t-transparent rounded-full" /> : <Check size={18}/>}
                                 Procesar Pedido Completo
                             </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1883,24 +1986,44 @@ export default function ClientOrdersView() {
                                     </div>
                                 )}
 
-                                <div className="mb-6">
+                                <div className="mb-4">
                                     <label className="text-[10px] font-black text-muted uppercase flex items-center gap-2 mb-3">
-                                        <Wallet size={14} className="text-secondary"/> Método de Recaudación
+                                        <Wallet size={14} className="text-secondary"/> Método de Pago
                                     </label>
-                                    <div className="grid grid-cols-3 gap-2 p-1 bg-background border border-border rounded-xl">
-                                        {['Efectivo', 'Banco / Transferencia', 'QR / Tigo Money'].map(m => (
-                                            <button 
-                                                key={m}
-                                                onClick={() => setPayMethod(m)}
-                                                className={`py-2.5 text-[8px] font-black uppercase rounded-lg transition-all ${payMethod === m ? 'bg-navy text-white shadow-lg shadow-navy/20' : 'text-muted hover:bg-white'} border border-transparent ${payMethod === m ? 'border-border/0' : 'border-transparent'}`}
+                                    <div className="grid grid-cols-5 gap-1.5 p-1 bg-background border border-border rounded-xl">
+                                        {[
+                                            { id: 'Efectivo', icon: '💵' },
+                                            { id: 'Yasta (QR)', icon: '📲' },
+                                            { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
+                                            { id: 'BNB', icon: '🏛️' },
+                                            { id: 'Otros', icon: '💳' },
+                                        ].map(m => (
+                                            <button
+                                                key={m.id}
+                                                onClick={() => setPayMethod(m.id)}
+                                                className={`py-2 flex flex-col items-center gap-0.5 text-[8px] font-black uppercase rounded-lg transition-all leading-tight ${payMethod === m.id ? 'bg-[var(--primary)] text-white shadow-md' : 'text-muted hover:bg-surface'}`}
                                             >
-                                                {m}
+                                                <span className="text-base leading-none">{m.icon}</span>
+                                                {m.id === 'Banco Unión (QR/Transf)' ? <span>B. Unión</span> : <span>{m.id}</span>}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
 
-                                <div>
+                                {payMethod !== 'Efectivo' && (
+                                    <div className="mb-4">
+                                        <label className="block text-[10px] font-black text-muted uppercase mb-1">No. Operación / Referencia</label>
+                                        <input
+                                            type="text"
+                                            value={payReference}
+                                            onChange={e => setPayReference(e.target.value)}
+                                            placeholder="Ej: TXN-1234567"
+                                            className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-[var(--primary)] font-mono"
+                                        />
+                                    </div>
+                                )}
+
+                                <div className="mb-4">
                                     <label className="block text-xs font-bold mb-1 text-success uppercase">Monto a Abonar (BS)</label>
                                     <input type="number" value={payMonto} onChange={e=>setPayMonto(e.target.value)} autoFocus className="w-full bg-background border-2 border-border focus:border-success px-4 py-3 rounded-lg text-xl text-center text-success font-bold font-mono outline-none shadow-inner"/>
                                     {payMode === 'items' && selectedPayItems.length > 0 && payMonto > 0 && (
@@ -1909,6 +2032,48 @@ export default function ClientOrdersView() {
                                         </div>
                                     )}
                                 </div>
+
+                                {/* Historial de Abonos */}
+                                {(() => {
+                                    const cli = clientes.find(c => c.id === showPayModal);
+                                    const historial = pagos.filter(p => p.cliente_id === showPayModal).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+                                    if (historial.length === 0) return null;
+                                    const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
+                                    return (
+                                        <div className="border-t border-border pt-3">
+                                            <div className="text-[10px] font-black text-muted uppercase mb-2">Historial de Abonos Generales</div>
+                                            <div className="max-h-32 overflow-y-auto space-y-1">
+                                                {historial.map(p => (
+                                                    <div key={p.id} className="flex items-center justify-between bg-background rounded-lg px-3 py-1.5 border border-border/50 group">
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className="text-base leading-none">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
+                                                            <div className="min-w-0">
+                                                                <div className="text-[10px] font-bold text-text truncate">{p.concepto || 'Abono'}</div>
+                                                                {p.referencia && <div className="text-[9px] text-muted font-mono">Ref: {p.referencia}</div>}
+                                                                <div className="text-[9px] text-muted">{p.metodo_pago || 'Efectivo'} · {new Date(p.fecha || p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: '2-digit' })}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-1 ml-2 shrink-0">
+                                                            <span className="text-success font-black text-xs font-mono whitespace-nowrap">+BS {formatS(p.monto)}</span>
+                                                            {isAdmin && (
+                                                                <>
+                                                                    <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })} title="Editar abono"
+                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
+                                                                        <Edit2 size={11} />
+                                                                    </button>
+                                                                    <button onClick={() => handleDeletePago(p)} title="Eliminar abono (también en Contabilidad)"
+                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all">
+                                                                        <Trash2 size={11} />
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             <div className="p-4 border-t border-border flex justify-end gap-3 bg-background rounded-b-2xl">
@@ -1919,6 +2084,50 @@ export default function ClientOrdersView() {
                     </div>
                 );
             })()}
+
+            {/* MODAL: EDITAR ABONO */}
+            {editPago && (
+                <div className="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-sm p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-black text-text flex items-center gap-2">
+                                <Edit2 size={15} className="text-primary" /> Editar Abono
+                            </h3>
+                            <button onClick={() => setEditPago(null)} className="text-muted hover:text-text"><X size={18} /></button>
+                        </div>
+                        {editPago.caja_mov_id && (
+                            <p className="text-[10px] text-primary bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 font-bold">
+                                📋 Los cambios también se sincronizarán en Contabilidad.
+                            </p>
+                        )}
+                        <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase text-muted tracking-widest">Concepto</label>
+                            <input type="text" value={editPago.concepto} onChange={e => setEditPago({ ...editPago, concepto: e.target.value })}
+                                className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-[var(--primary)]" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase text-muted tracking-widest">Monto (BS)</label>
+                            <input type="number" value={editPago.monto} onChange={e => setEditPago({ ...editPago, monto: e.target.value })}
+                                className="w-full bg-background border-2 border-border px-3 py-2.5 rounded-xl text-lg text-center font-black font-mono outline-none focus:border-success" />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-[10px] font-black uppercase text-muted tracking-widest">Método de Pago</label>
+                            <div className="flex flex-wrap gap-1.5">
+                                {['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Otros'].map(m => (
+                                    <button key={m} onClick={() => setEditPago({ ...editPago, metodo_pago: m })}
+                                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition-all ${editPago.metodo_pago === m ? 'bg-[var(--primary)] border-[var(--primary)] text-white' : 'bg-background border-border text-muted hover:border-[var(--primary)]/40'}`}>
+                                        {m === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                            <button onClick={() => setEditPago(null)} className="flex-1 py-2 rounded-xl text-sm font-bold text-muted bg-background border border-border">Cancelar</button>
+                            <button onClick={handleUpdatePago} className="flex-1 py-2 rounded-xl text-sm font-black text-white bg-[var(--primary)] hover:brightness-105 shadow">Guardar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* REPROGRAM MODAL */}
             {reprogrammingItem && (
