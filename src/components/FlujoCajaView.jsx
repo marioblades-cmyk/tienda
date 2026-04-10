@@ -28,7 +28,7 @@ export default function FlujoCajaView({ user, profile }) {
     
     // Form states
     const [openForm, setOpenForm] = useState({ responsable: '', turno: 'MAÑANA', monto_inicial: '' });
-    const [moveForm, setMoveForm] = useState({ tipo: 'INGRESO', categoria: '', concepto: '', monto: '' });
+    const [moveForm, setMoveForm] = useState({ tipo: 'INGRESO', categoria: '', concepto: '', monto: '', metodo_pago: 'Efectivo' });
 
     // Categorías
     const [categorias, setCategorias] = useState([]);
@@ -58,6 +58,10 @@ export default function FlujoCajaView({ user, profile }) {
     const [ventaLoading, setVentaLoading] = useState(false);
     const [montoFinalOverride, setMontoFinalOverride] = useState(null); // null = usar cálculo automático
     const [activeOpTab, setActiveOpTab] = useState('pos'); // 'pos' | 'manual'
+    const [ventaMethod, setVentaMethod] = useState('Efectivo'); // método de pago del POS
+    const [splitEnabled, setSplitEnabled] = useState(false); // pago mixto
+    const [splitMethod2, setSplitMethod2] = useState('Yasta (QR)'); // segundo método en pago mixto
+    const [splitAmount2, setSplitAmount2] = useState(''); // monto del segundo método
 
     // --- SISTEMA DE NOTIFICACIONES PERSONALIZADAS ---
     const [toasts, setToasts] = useState([]); // [{id, type, message}]
@@ -320,15 +324,18 @@ export default function FlujoCajaView({ user, profile }) {
                 const conceptoMsg = `VENTA DIRECTA: ${detalle}${ventaDiscount > 0 ? ` [Dcto ${ventaDiscount}%]` : ''}`;
 
                 console.log('💰 Registrando movimiento con items_json:', itemsMetadata);
-                const { error: moveErr } = await supabase.from('caja_movimientos').insert([{
-                    turno_id: turnoActivo.id,
-                    tipo: 'INGRESO',
-                    categoria: 'Venta Stock',
-                    concepto: conceptoMsg.substring(0, 500),
-                    monto: totalVenta,
-                    vendedor_id: user?.id,
-                    items_json: itemsMetadata
-                }]);
+                const movimientosAInsertar = [];
+                if (splitEnabled && splitAmount2 > 0) {
+                    const amt2 = parseFloat(splitAmount2) || 0;
+                    const amt1 = Math.max(0, totalVenta - amt2);
+                    movimientosAInsertar.push(
+                        { turno_id: turnoActivo.id, tipo: 'INGRESO', categoria: 'Venta Stock', concepto: conceptoMsg.substring(0, 500), monto: amt1, vendedor_id: user?.id, items_json: itemsMetadata, metodo_pago: ventaMethod, origen: 'Tienda' },
+                        { turno_id: turnoActivo.id, tipo: 'INGRESO', categoria: 'Venta Stock', concepto: `${conceptoMsg.substring(0, 480)} [PARTE 2]`, monto: amt2, vendedor_id: user?.id, metodo_pago: splitMethod2, origen: 'Tienda' }
+                    );
+                } else {
+                    movimientosAInsertar.push({ turno_id: turnoActivo.id, tipo: 'INGRESO', categoria: 'Venta Stock', concepto: conceptoMsg.substring(0, 500), monto: totalVenta, vendedor_id: user?.id, items_json: itemsMetadata, metodo_pago: ventaMethod, origen: 'Tienda' });
+                }
+                const { error: moveErr } = await supabase.from('caja_movimientos').insert(movimientosAInsertar);
                 if (moveErr) {
                     console.error('❌ Error al registrar movimiento:', moveErr);
                     throw moveErr;
@@ -346,6 +353,10 @@ export default function FlujoCajaView({ user, profile }) {
             setVentaCart([]);
             setVentaDiscount(0);
             setMontoFinalOverride(null);
+            setVentaMethod('Efectivo');
+            setSplitEnabled(false);
+            setSplitAmount2('');
+            setSplitMethod2('Yasta (QR)');
             if (turnoActivo) await fetchMovimientos(turnoActivo.id);
             if (searchTerm) fetchVentaResults(searchTerm);
         } catch (e) {
@@ -376,14 +387,16 @@ export default function FlujoCajaView({ user, profile }) {
 
     const handleAddMovement = async () => {
         if (!moveForm.monto) return;
-        
+
         const { data, error } = await supabase.from('caja_movimientos').insert([{
             turno_id: turnoActivo.id,
             tipo: moveForm.tipo,
             categoria: moveForm.categoria,
             concepto: moveForm.concepto,
             monto: parseFloat(moveForm.monto) || 0,
-            vendedor_id: user?.id
+            vendedor_id: user?.id,
+            metodo_pago: moveForm.metodo_pago || 'Efectivo',
+            origen: 'Tienda'
         }]).select().single();
         
         if (error) return alert('Error al registrar movimiento: ' + error.message);
@@ -669,6 +682,39 @@ export default function FlujoCajaView({ user, profile }) {
                                          <span className="text-2xl font-black font-mono tracking-tighter">{totals.saldoActual.toLocaleString()}</span>
                                      </div>
                                 </div>
+
+                                {/* Desglose por método de pago */}
+                                {(() => {
+                                    const METODOS = [
+                                        { id: 'Efectivo', icon: '💵', color: 'text-success' },
+                                        { id: 'Yasta (QR)', icon: '📲', color: 'text-blue-500' },
+                                        { id: 'Banco Unión (QR/Transf)', icon: '🏦', color: 'text-indigo-500' },
+                                        { id: 'BNB', icon: '🏛️', color: 'text-purple-500' },
+                                        { id: 'Otros', icon: '💳', color: 'text-muted' },
+                                    ];
+                                    const ingresosPorMetodo = METODOS.map(m => ({
+                                        ...m,
+                                        total: movimientos
+                                            .filter(mov => mov.tipo === 'INGRESO' && (mov.metodo_pago || 'Efectivo') === m.id)
+                                            .reduce((s, mov) => s + (parseFloat(mov.monto) || 0), 0)
+                                    })).filter(m => m.total > 0);
+
+                                    if (ingresosPorMetodo.length === 0) return null;
+                                    return (
+                                        <div className="bg-white p-3.5 rounded-xl border border-border/40 shadow-sm space-y-2">
+                                            <p className="text-[9px] font-black text-navy/40 uppercase tracking-widest">Ingresos por Método</p>
+                                            {ingresosPorMetodo.map(m => (
+                                                <div key={m.id} className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-sm leading-none">{m.icon}</span>
+                                                        <span className="text-[10px] font-bold text-navy/60">{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
+                                                    </div>
+                                                    <span className={`text-xs font-black font-mono ${m.color}`}>Bs {m.total.toLocaleString()}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
                             </motion.div>
 
                             {/* Panel Central: Operaciones (POS-First) */}
@@ -903,7 +949,61 @@ export default function FlujoCajaView({ user, profile }) {
                                                                             </div>
                                                                         </div>
                                                                         )}
-                                                                        <button 
+                                                                        <div className="flex flex-col gap-1.5 flex-shrink-0">
+                                                                            <p className="text-[9px] font-black text-navy/40 uppercase tracking-widest px-1">Método de Pago</p>
+                                                                            <div className="flex gap-1">
+                                                                                {[
+                                                                                    { id: 'Efectivo', icon: '💵', label: 'Efectivo' },
+                                                                                    { id: 'Yasta (QR)', icon: '📲', label: 'Yasta' },
+                                                                                    { id: 'Banco Unión (QR/Transf)', icon: '🏦', label: 'B. Unión' },
+                                                                                    { id: 'BNB', icon: '🏛️', label: 'BNB' },
+                                                                                    { id: 'Otros', icon: '💳', label: 'Otros' },
+                                                                                ].map(m => (
+                                                                                    <button
+                                                                                        key={m.id}
+                                                                                        onClick={() => setVentaMethod(m.id)}
+                                                                                        className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[9px] font-black transition-all border ${ventaMethod === m.id ? 'bg-[var(--primary)] border-[var(--primary)] text-white shadow-md' : 'bg-white border-border/30 text-navy/50 hover:border-border hover:text-navy'}`}
+                                                                                    >
+                                                                                        <span className="text-sm leading-none">{m.icon}</span>
+                                                                                        <span>{m.label}</span>
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex flex-col gap-1.5 flex-shrink-0 min-w-0">
+                                                                            {splitEnabled && (
+                                                                                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                                                                                    <div className="flex gap-1">
+                                                                                        {[
+                                                                                            { id: 'Yasta (QR)', icon: '📲', label: 'Yasta' },
+                                                                                            { id: 'Banco Unión (QR/Transf)', icon: '🏦', label: 'B. Unión' },
+                                                                                            { id: 'BNB', icon: '🏛️', label: 'BNB' },
+                                                                                            { id: 'Otros', icon: '💳', label: 'Otros' },
+                                                                                        ].map(m => (
+                                                                                            <button key={m.id} onClick={() => setSplitMethod2(m.id)}
+                                                                                                className={`flex flex-col items-center px-1.5 py-1 rounded text-[8px] font-black border transition-all ${splitMethod2 === m.id ? 'bg-amber-400 border-amber-400 text-white' : 'bg-white border-amber-200 text-amber-700'}`}>
+                                                                                                <span className="text-sm leading-none">{m.icon}</span>
+                                                                                                <span>{m.label}</span>
+                                                                                            </button>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="text-[8px] font-black text-amber-600 uppercase">Monto 2do método</span>
+                                                                                        <div className="flex items-center gap-1">
+                                                                                            <span className="text-[10px] font-bold text-amber-600">Bs</span>
+                                                                                            <input type="number" value={splitAmount2} onChange={e => setSplitAmount2(e.target.value)}
+                                                                                                className="w-20 border-b-2 border-amber-400 outline-none text-base font-black font-mono text-amber-700 bg-transparent text-center"
+                                                                                                placeholder="0"/>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                            <button onClick={() => setSplitEnabled(!splitEnabled)}
+                                                                                className={`text-[9px] font-black uppercase tracking-wider py-1 px-3 rounded-lg border transition-all ${splitEnabled ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-border/30 text-navy/40 hover:border-border'}`}>
+                                                                                {splitEnabled ? '✕ Cancelar pago mixto' : '⇄ Pago Mixto'}
+                                                                            </button>
+                                                                        </div>
+                                                                        <button
                                                                             onClick={handleConfirmVenta}
                                                                             disabled={ventaLoading}
                                                                             className="bg-navy text-white px-6 h-12 rounded-lg text-xs font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-navy/10 flex items-center gap-2.5 flex-shrink-0"
@@ -975,13 +1075,35 @@ export default function FlujoCajaView({ user, profile }) {
                                                 </button>
                                                 <div className="md:col-span-4 mt-2 space-y-3">
                                                     <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Referencia / Observaciones</label>
-                                                    <input 
-                                                        type="text" 
+                                                    <input
+                                                        type="text"
                                                         placeholder="Detalle de la transacción..."
                                                         value={moveForm.concepto}
                                                         onChange={e => setMoveForm({...moveForm, concepto: e.target.value})}
                                                         className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-bold outline-none focus:border-primary/50 transition-all px-6"
                                                     />
+                                                </div>
+                                                <div className="md:col-span-4 space-y-2">
+                                                    <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Método de Pago</label>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {[
+                                                            { id: 'Efectivo', icon: '💵' },
+                                                            { id: 'Yasta (QR)', icon: '📲' },
+                                                            { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
+                                                            { id: 'BNB', icon: '🏛️' },
+                                                            { id: 'Otros', icon: '💳' },
+                                                        ].map(m => (
+                                                            <button
+                                                                key={m.id}
+                                                                onClick={() => setMoveForm({...moveForm, metodo_pago: m.id})}
+                                                                title={m.id}
+                                                                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-black border transition-all ${moveForm.metodo_pago === m.id ? 'bg-[var(--primary)] border-[var(--primary)] text-white shadow' : 'bg-white border-border/30 text-muted hover:border-border'}`}
+                                                            >
+                                                                <span>{m.icon}</span>
+                                                                <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
@@ -1011,14 +1133,26 @@ export default function FlujoCajaView({ user, profile }) {
                                             <th className="p-5 w-32">Cronología</th>
                                             <th className="p-5 w-40">Flujo</th>
                                             <th className="p-5">Concepto Operativo</th>
+                                            <th className="p-5 w-40">Método</th>
                                             <th className="p-5 text-right w-48">Efecto Neto</th>
                                             <th className="p-5 text-center w-24">Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-border/10">
                                         <AnimatePresence initial={false}>
-                                            {movimientos.map(m => (
-                                                <motion.tr 
+                                            {movimientos.map(m => {
+                                                const METHOD_META = {
+                                                    'Efectivo':                   { icon: '💵', color: 'bg-success/10 text-success border-success/20' },
+                                                    'Yasta (QR)':                 { icon: '📲', color: 'bg-blue-50 text-blue-600 border-blue-200' },
+                                                    'Banco Unión (QR/Transf)':    { icon: '🏦', color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
+                                                    'BNB':                        { icon: '🏛️', color: 'bg-purple-50 text-purple-600 border-purple-200' },
+                                                    'Otros':                      { icon: '💳', color: 'bg-slate-100 text-slate-500 border-slate-200' },
+                                                };
+                                                const metodo = m.metodo_pago || 'Efectivo';
+                                                const meta = METHOD_META[metodo] || METHOD_META['Otros'];
+                                                const label = metodo === 'Banco Unión (QR/Transf)' ? 'B. Unión' : metodo;
+                                                return (
+                                                <motion.tr
                                                     key={m.id}
                                                     initial={{ opacity: 0, x: -15 }}
                                                     animate={{ opacity: 1, x: 0 }}
@@ -1034,12 +1168,18 @@ export default function FlujoCajaView({ user, profile }) {
                                                         </span>
                                                     </td>
                                                     <td className="p-5 text-navy font-bold text-sm uppercase tracking-tight">{m.concepto || '—'}</td>
+                                                    <td className="p-5">
+                                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-bold text-[10px] border ${meta.color}`}>
+                                                            <span>{meta.icon}</span>
+                                                            <span>{label}</span>
+                                                        </span>
+                                                    </td>
                                                     <td className={`p-5 text-right font-black font-mono text-base tracking-tighter ${m.tipo === 'INGRESO' ? 'text-success' : 'text-error'}`}>
                                                         {m.tipo === 'INGRESO' ? '+' : '-'} {m.monto.toLocaleString()}
                                                     </td>
                                                     <td className="p-5 text-center">
-                                                        <button 
-                                                            onClick={() => deleteMovement(m.id)} 
+                                                        <button
+                                                            onClick={() => deleteMovement(m.id)}
                                                             className="p-3 text-muted hover:text-error transition-all opacity-0 group-hover:opacity-100 hover:bg-error/10 rounded-xl"
                                                             title="Eliminar Movimiento"
                                                         >
@@ -1047,7 +1187,8 @@ export default function FlujoCajaView({ user, profile }) {
                                                         </button>
                                                     </td>
                                                 </motion.tr>
-                                            ))}
+                                                );
+                                            })}
                                         </AnimatePresence>
                                         {movimientos.length === 0 && (
                                             <tr>
