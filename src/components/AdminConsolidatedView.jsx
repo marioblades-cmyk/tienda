@@ -415,12 +415,14 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                     {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                                 </select>
                             </div>
-                            <button
-                                onClick={exportExcel}
-                                className="w-full flex items-center justify-center gap-2 bg-text text-white p-3 rounded-xl text-xs font-bold hover:bg-black transition-all shadow-lg active:scale-95"
-                            >
-                                <Download size={16} className="text-primary" /> EXPORTAR CONSOLIDADO
-                            </button>
+                            {!sellerIdFilter && (
+                                <button
+                                    onClick={exportExcel}
+                                    className="w-full flex items-center justify-center gap-2 bg-text text-white p-3 rounded-xl text-xs font-bold hover:bg-black transition-all shadow-lg active:scale-95"
+                                >
+                                    <Download size={16} className="text-primary" /> EXPORTAR CONSOLIDADO
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

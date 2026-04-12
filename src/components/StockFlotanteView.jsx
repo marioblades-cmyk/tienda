@@ -27,38 +27,15 @@ export default function ConfirmationInfoView() {
     const fetchDashboardData = async () => {
         setLoading(true);
         try {
-            // 1. Fetch Summary Stats (Paginated to get ALL products)
-            let totalFisico = 0;
-            let fromCat = 0;
-            while(true) {
-                const { data: catChunk, error: catErr } = await supabase
-                    .from('catalogo_productos')
-                    .select('stock_fisico')
-                    .range(fromCat, fromCat + 999);
-                
-                if (catErr) throw catErr;
-                if (!catChunk || catChunk.length === 0) break;
-                
-                totalFisico += catChunk.reduce((sum, p) => sum + (p.stock_fisico || 0), 0);
-                if (catChunk.length < 1000) break;
-                fromCat += 1000;
-            }
-
-            // 2. Fetch Weeks
-            const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false });
-
-            // 3. Fetch Master Confirmations, Receptions and Orders (Paginated to get ALL rows)
-            const mastersRes = await supabase.from('master_confirmaciones').select('semana_id, datos_json');
-            
-            const fetchAll = async (table, select = '*') => {
+            // Función helper para paginación
+            const fetchAll = async (table, select = '*', filters = null) => {
                 let all = [];
                 let from = 0;
                 while(true) {
-                    const { data, error } = await supabase.from(table).select(select).range(from, from + 999);
-                    if (error) {
-                        console.error(`Error in fetchAll(${table}):`, error);
-                        throw error;
-                    }
+                    let q = supabase.from(table).select(select).range(from, from + 999);
+                    if (filters) q = filters(q);
+                    const { data, error } = await q;
+                    if (error) { console.error(`Error in fetchAll(${table}):`, error); throw error; }
                     if (!data || data.length === 0) break;
                     all = [...all, ...data];
                     if (data.length < 1000) break;
@@ -67,12 +44,29 @@ export default function ConfirmationInfoView() {
                 return all;
             };
 
-            const masters = mastersRes.data || [];
-            const [receptions, orders, cItems] = await Promise.all([
+            // Todo en paralelo desde el inicio
+            const [weeksRes, mastersRes, receptions, orders, cItems] = await Promise.all([
+                supabase.from('semanas').select('*').order('created_at', { ascending: false }),
+                supabase.from('master_confirmaciones').select('semana_id, datos_json'),
                 fetchAll('pedido_items_recepcion', 'semana_id, cantidad_recibida, titulo'),
                 fetchAll('pedido_items', 'cantidad, titulo, pedido:pedidos(semana_id, tipo)'),
                 fetchAll('cliente_items', '*, clientes(nombre), vendedores(nombre)')
             ]);
+
+            // catalogo_productos puede tener miles de filas — paginar correctamente
+            const totalFisico = await (async () => {
+                let total = 0, from = 0;
+                while (true) {
+                    const { data } = await supabase.from('catalogo_productos').select('stock_fisico').range(from, from + 999);
+                    if (!data || data.length === 0) break;
+                    total += data.reduce((s, p) => s + (p.stock_fisico || 0), 0);
+                    if (data.length < 1000) break;
+                    from += 1000;
+                }
+                return total;
+            })();
+            const weeks = weeksRes.data || [];
+            const masters = mastersRes.data || [];
 
             setClientItems(cItems || []);
 
@@ -156,6 +150,40 @@ export default function ConfirmationInfoView() {
                 return a.isPending ? -1 : 1;
             });
 
+            // Auto-adjudicar títulos sin recorte (confirmado >= pedido)
+            const toAutoAdjudicate = [];
+            for (const week of details) {
+                for (const t of week.titleDetails) {
+                    if (t.isCut || t.isMissing || t.confirmado === 0) continue; // recorte o sin confirmación → manual
+                    const key = (t.titulo || '').toLowerCase().trim();
+                    const pending = (cItems || []).filter(ci =>
+                        ci.semana_id === week.id &&
+                        (ci.titulo || '').toLowerCase().trim() === key &&
+                        ((ci.estado || '').startsWith('PEDIDO') || (ci.estado || '').startsWith('CONFIRMADO'))
+                    ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                    const alreadyAllocated = (cItems || []).filter(ci =>
+                        ci.semana_id === week.id &&
+                        (ci.titulo || '').toLowerCase().trim() === key &&
+                        (ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA')
+                    ).length;
+                    const available = Math.max(0, t.confirmado - alreadyAllocated);
+                    const toUpdate = pending.slice(0, available);
+                    toAutoAdjudicate.push(...toUpdate.map(ci => ci.id));
+                }
+            }
+            if (toAutoAdjudicate.length > 0) {
+                // Actualizar en lotes de 100
+                for (let i = 0; i < toAutoAdjudicate.length; i += 100) {
+                    await supabase.from('cliente_items')
+                        .update({ estado: 'ADJUDICADO' })
+                        .in('id', toAutoAdjudicate.slice(i, i + 100));
+                }
+                // Refrescar cItems con el nuevo estado para que la UI quede correcta
+                for (const ci of cItems) {
+                    if (toAutoAdjudicate.includes(ci.id)) ci.estado = 'ADJUDICADO';
+                }
+            }
+
             setSemanaDetails(details);
             setGlobalStats({
                 fisico: totalFisico,
@@ -176,7 +204,7 @@ export default function ConfirmationInfoView() {
         const key = title.toLowerCase().trim();
         const pendingItems = clientItems
             .filter(ci => ci.semana_id === weekId && (ci.titulo || '').toLowerCase().trim() === key)
-            .filter(ci => ci.estado === 'PEDIDO' || ci.estado === 'CONFIRMADO')
+            .filter(ci => (ci.estado || '').startsWith('PEDIDO') || (ci.estado || '').startsWith('CONFIRMADO'))
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
         const currentlyAllocated = clientItems
@@ -494,9 +522,10 @@ export default function ConfirmationInfoView() {
                                                                                                 {titleOrders.map(ci => {
                                                                                                     const isAdjudicado = ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA';
                                                                                                     const canAdjudicate = allocatedCount < t.confirmado || isAdjudicado;
-                                                                                                    
+                                                                                                    const vendedorNombre = ci.vendedores?.nombre || 'Sin vendedor';
+
                                                                                                     return (
-                                                                                                        <div 
+                                                                                                        <div
                                                                                                             key={ci.id}
                                                                                                             onClick={async () => {
                                                                                                                 if (!isAdmin || saving || (!isAdjudicado && !canAdjudicate)) return;
@@ -509,16 +538,20 @@ export default function ConfirmationInfoView() {
                                                                                                                 } catch (err) { alert(err.message); }
                                                                                                                 finally { setSaving(false); }
                                                                                                             }}
-                                                                                                            className={`p-2 rounded-lg border flex items-center justify-between transition-all ${isAdmin ? 'cursor-pointer' : ''} ${isAdjudicado ? 'border-secondary bg-secondary/5' : (canAdjudicate ? 'border-border/40 hover:border-secondary/30' : 'opacity-40 grayscale pointer-events-none')}`}
+                                                                                                            className={`p-3 rounded-lg border flex items-center justify-between gap-2 transition-all ${isAdmin ? 'cursor-pointer' : ''} ${isAdjudicado ? 'border-secondary bg-secondary/5' : (canAdjudicate ? 'border-border/40 hover:border-secondary/30' : 'opacity-40 grayscale pointer-events-none')}`}
                                                                                                         >
-                                                                                                            <div className="text-[11px] font-bold text-navy truncate max-w-[120px]">{ci.clientes?.nombre}</div>
-                                                                                                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${isAdjudicado ? 'bg-secondary border-secondary text-white' : 'border-border'}`}>
-                                                                                                                {isAdjudicado && <Check size={10} />}
+                                                                                                            <div className="flex flex-col min-w-0">
+                                                                                                                <span className="text-[12px] font-black text-navy truncate">{ci.clientes?.nombre || 'Cliente desconocido'}</span>
+                                                                                                                <span className="text-[9px] text-muted truncate">{ci.clientes?.celular || ''}{vendedorNombre !== 'Sin vendedor' ? ` · ${vendedorNombre}` : ''}</span>
+                                                                                                                <span className={`text-[8px] font-black uppercase mt-0.5 ${isAdjudicado ? 'text-secondary' : 'text-orange-500'}`}>{isAdjudicado ? '✓ ADJUDICADO' : '⏳ PENDIENTE'}</span>
+                                                                                                            </div>
+                                                                                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isAdjudicado ? 'bg-secondary border-secondary text-white' : 'border-border'}`}>
+                                                                                                                {isAdjudicado && <Check size={11} />}
                                                                                                             </div>
                                                                                                         </div>
                                                                                                     );
                                                                                                 })}
-                                                                                                {titleOrders.length === 0 && <div className="col-span-full py-2 text-center text-[10px] text-muted italic">No hay pedidos pendientes de clientes.</div>}
+                                                                                                {titleOrders.length === 0 && <div className="col-span-full py-2 text-center text-[10px] text-muted italic">No hay pedidos de clientes registrados para este título.</div>}
                                                                                             </div>
                                                                                             
                                                                                             {isAdmin && t.isCut && titleOrders.some(ci => ci.estado !== 'ADJUDICADO' && ci.estado !== 'EN TIENDA') && (

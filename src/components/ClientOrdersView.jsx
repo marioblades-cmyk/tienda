@@ -69,7 +69,16 @@ export default function ClientOrdersView() {
     const [batchDiscount, setBatchDiscount] = useState('');
     const [batchAbono, setBatchAbono] = useState('');
     const [orderMethod, setOrderMethod] = useState('Yasta (QR)'); // método del abono inicial al crear pedido
+    const [orderPayAmt, setOrderPayAmt] = useState(''); // monto del pago inicial general
     const [editPago, setEditPago] = useState(null); // { id, concepto, monto, metodo_pago, caja_mov_id }
+    const [modoHistorico, setModoHistorico] = useState(false);
+    const [histSemana, setHistSemana] = useState(''); // semana_id para modo histórico
+    const [editItem, setEditItem] = useState(null); // { id, titulo, precio_venta, estado, nota, semana_id }
+    const [bulkEstadoTarget, setBulkEstadoTarget] = useState('ENTREGADO');
+    const [distribuirMontos, setDistribuirMontos] = useState({}); // { itemId: monto }
+    const [cartSelected, setCartSelected] = useState(new Set()); // índices seleccionados en el carrito histórico
+    const [cartBulkSemana, setCartBulkSemana] = useState('');
+    const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -310,13 +319,17 @@ export default function ClientOrdersView() {
 
     const renderStatus = (it) => {
         const week = semanas.find(s => s.id === it.semana_id);
-        const isFloating = it.estado.startsWith('CONFIRMADO') || it.estado.startsWith('PEDIDO');
+        // ADJUDICADO = confirmado y reservado para este cliente, mostrar como CONFIRMADO + semana
+        const isAdjudicado = it.estado === 'ADJUDICADO';
+        const displayEstado = isAdjudicado
+            ? `CONFIRMADO${week ? ' ' + week.nombre : ''}`
+            : it.estado;
+        const isFloating = isAdjudicado || it.estado.startsWith('CONFIRMADO') || it.estado.startsWith('PEDIDO');
         let dateStr = null;
         if (isFloating && week) {
             const d = week.fecha_estimada_llegada ? new Date(week.fecha_estimada_llegada) : new Date(new Date(week.created_at).getTime() + (22*24*60*60*1000));
             dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
         } else if (it.estado === 'PEDIDO (Siguiente)') {
-            // Unificado: 22 días después del PRÓXIMO SÁBADO de Hoy
             const now = new Date();
             const day = now.getDay();
             const diff = (6 - day + 7) % 7 || 7;
@@ -327,18 +340,17 @@ export default function ClientOrdersView() {
 
         return (
             <div className="flex flex-col items-center gap-0.5">
-                <span 
+                <span
                     onClick={()=>setEditingState(it.id)}
                     className={`px-2 py-1 rounded text-[10px] font-bold tracking-wider cursor-pointer border transition-colors ${
                         it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 shadow-sm animate-pulse' :
-                        it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' : 
+                        it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
                         it.estado === 'EN TIENDA' ? 'bg-success/10 border-success/30 text-success shadow-sm shadow-success/20' :
-                        it.estado === 'ADJUDICADO' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-sm shadow-emerald-500/20' :
-                        it.estado.startsWith('CONFIRMADO') ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
+                        (isAdjudicado || it.estado.startsWith('CONFIRMADO')) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
                         'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'
                     }`}
                 >
-                    {it.estado}
+                    {displayEstado}
                 </span>
                 {it.estado === 'RECORTADO' && (
                     <button 
@@ -381,10 +393,12 @@ export default function ClientOrdersView() {
         });
         setShowSuggestions(false);
         
-        // Analyze Stock inline to populate the row selector immediately
-        const stock = await analyzeStockForItem(item.titulo);
-        setStockAnalysis(stock);
-        setSelectedStockSource(stock.defaultSource);
+        // Analyze Stock inline (solo en modo normal)
+        if (!modoHistorico) {
+            const stock = await analyzeStockForItem(item.titulo);
+            setStockAnalysis(stock);
+            setSelectedStockSource(stock.defaultSource);
+        }
     };
 
     const analyzeStockForItem = async (title) => {
@@ -473,8 +487,10 @@ export default function ClientOrdersView() {
                     precio_venta: Number(addForm.precio_final) || Number(addForm.precio_venta) || 0,
                     monto_pagado: Number(addForm.monto_pagado) || 0,
                     nota: addForm.nota_item,
-                    source: selectedStockSource,
-                    stockOptions: stockAnalysis
+                    source: modoHistorico ? 'historico' : selectedStockSource,
+                    hist_semana_id: modoHistorico ? (addForm.hist_semana_id || null) : undefined,
+                    hist_estado: modoHistorico ? (addForm.hist_estado || 'PEDIDO') : undefined,
+                    stockOptions: modoHistorico ? null : stockAnalysis
                 }]);
 
                 // Reset item fields
@@ -484,17 +500,88 @@ export default function ClientOrdersView() {
                 setCatalogSuggestions([]);
             } else {
                 // Batch addition
-                const toAdd = bulkResults.filter(p => bulkSelected.has(p.id));
+                const toAdd = Array.from(bulkSelected).map(id => bulkResults.find(r => r.id === id)).filter(Boolean);
                 if (toAdd.length === 0) return alert("No hay ítems seleccionados");
 
-                const newItems = [];
-                for (const it of Array.from(bulkSelected).map(id => bulkResults.find(r => r.id === id))) {
-                    if (!it) continue;
-                    
-                    // Obtener análisis individual para cada ítem del lote
-                    const analysis = await analyzeStockForItem(it.titulo);
-                    
-                    newItems.push({
+                if (modoHistorico) {
+                    // Modo histórico: sin análisis de stock, usar semana/estado globales del carrito
+                    const newItems = toAdd.map(it => ({
+                        titulo: it.titulo,
+                        catalog_id: it.id,
+                        product_id: it.product_id || it.id,
+                        precio_original: Number(it.precio_venta_bs || it.precio_tapa || 0),
+                        descuento: 0,
+                        precio_venta: Number(it.precio_venta_bs || it.precio_tapa || 0),
+                        monto_pagado: 0,
+                        source: 'historico',
+                        hist_semana_id: histSemana || null,
+                        hist_estado: 'PEDIDO',
+                        stockOptions: null
+                    }));
+                    setCart([...cart, ...newItems]);
+                    setBulkSelected(new Set());
+                    setBulkSearch('');
+                    setBulkRange('');
+                    setBulkResults([]);
+                    return;
+                }
+
+                // 1 sola ronda de queries para todos los títulos
+                const titulos = toAdd.map(it => it.titulo);
+                const [mastersRes2, recsRes, allOrdersRes, catProdsRes] = await Promise.all([
+                    supabase.from('master_confirmaciones').select('semana_id, datos_json'),
+                    supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').in('titulo', titulos),
+                    supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)').in('titulo', titulos),
+                    supabase.from('catalogo_productos').select('titulo, stock_fisico').in('titulo', titulos),
+                ]);
+                const masters2 = mastersRes2.data || [];
+                const recs2 = recsRes.data || [];
+                const allOrders2 = allOrdersRes.data || [];
+                const catProds2 = catProdsRes.data || [];
+
+                const analyzeInMemory = (title) => {
+                    const pTitle = title.toLowerCase().trim();
+                    const catProd = catProds2.find(p => (p.titulo||'').toLowerCase().trim() === pTitle);
+                    const fisico = catProd?.stock_fisico || 0;
+                    const flotantes = [];
+
+                    semanas.forEach(w => {
+                        const master = masters2.find(m => m.semana_id === w.id);
+                        const isConfirmed = !!master;
+                        let qtyFlot = 0;
+                        if (isConfirmed) {
+                            const totalConf = (master.datos_json || []).filter(i => (i.titulo||'').toLowerCase().trim() === pTitle).reduce((s,i) => s + (i.cantidad||0), 0);
+                            const sellerRequested = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
+                            const totalRec = recs2.filter(r => r.semana_id === w.id && (r.titulo||'').toLowerCase().trim() === pTitle).reduce((s,r) => s + (r.cantidad_recibida||0), 0);
+                            const clientReserved = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && it.estado.includes('CONFIRMADO')).length;
+                            qtyFlot = Math.max(0, (totalConf - sellerRequested) - totalRec - clientReserved);
+                        } else {
+                            const storeTotal = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
+                            const clientWaitlist = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && it.estado.includes('PEDIDO')).length;
+                            qtyFlot = Math.max(0, storeTotal - clientWaitlist);
+                        }
+                        if (qtyFlot > 0) {
+                            const d = w.fecha_estimada_llegada ? new Date(w.fecha_estimada_llegada) : new Date(new Date(w.created_at).getTime() + (22*24*60*60*1000));
+                            flotantes.push({ id: w.id, nombre: w.nombre, qty: qtyFlot, fechaArribo: d, isConfirmed });
+                        }
+                    });
+
+                    let defaultSource = 'pedido_PENDIENTE';
+                    if (fisico > 0) defaultSource = 'fisico';
+                    else if (flotantes.length > 0) {
+                        const bestFlot = flotantes.find(f => f.isConfirmed);
+                        if (bestFlot) defaultSource = `flotante_conf_${bestFlot.id}`;
+                        else defaultSource = `flotante_noc_${flotantes[0].id}`;
+                    } else {
+                        const openWeek = semanas.find(s => s.abierta);
+                        if (openWeek) defaultSource = `pedido_${openWeek.id}`;
+                    }
+                    return { fisico, flotantes, defaultSource };
+                };
+
+                const newItems = toAdd.map(it => {
+                    const analysis = analyzeInMemory(it.titulo);
+                    return {
                         titulo: it.titulo,
                         catalog_id: it.id,
                         product_id: it.product_id || it.id,
@@ -504,8 +591,9 @@ export default function ClientOrdersView() {
                         monto_pagado: 0,
                         source: analysis.defaultSource,
                         stockOptions: analysis
-                    });
-                }
+                    };
+                });
+
                 setCart([...cart, ...newItems]);
                 setBulkSelected(new Set());
                 setBulkSearch('');
@@ -613,31 +701,43 @@ export default function ClientOrdersView() {
             for (let cItem of cart) {
                 let targetSemanaId = null;
                 let estadoTarget = 'PEDIDO';
-                
-                if (cItem.source === 'fisico') {
-                    estadoTarget = 'EN TIENDA';
-                } else if (cItem.source.startsWith('flotante_conf_')) {
-                    targetSemanaId = cItem.source.replace('flotante_conf_', '');
-                    const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
-                    estadoTarget = `CONFIRMADO ${wName}`;
-                } else if (cItem.source.startsWith('flotante_noc_')) {
-                    targetSemanaId = cItem.source.replace('flotante_noc_', '');
-                    const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
-                    estadoTarget = `PEDIDO ${wName}`;
-                } else if (cItem.source === 'pedido_PENDIENTE') {
-                    targetSemanaId = null;
-                    estadoTarget = 'PEDIDO (Siguiente)';
-                } else if (cItem.source.startsWith('pedido_')) {
-                    targetSemanaId = cItem.source.replace('pedido_', '');
-                    const sFound = semanas.find(s=>s.id === targetSemanaId);
-                    const wName = sFound?.nombre || '';
-                    estadoTarget = `PEDIDO ${wName}`;
+
+                if (modoHistorico) {
+                    // Modo histórico: usar estado y semana definidos manualmente
+                    estadoTarget = cItem.hist_estado || 'PEDIDO';
+                    targetSemanaId = cItem.hist_semana_id || null;
+                    if (targetSemanaId) {
+                        const wName = semanas.find(s => s.id === targetSemanaId)?.nombre || '';
+                        // Prefijamos el nombre de semana solo en PEDIDO/CONFIRMADO
+                        if (estadoTarget === 'PEDIDO' && wName) estadoTarget = `PEDIDO ${wName}`;
+                        else if (estadoTarget === 'CONFIRMADO' && wName) estadoTarget = `CONFIRMADO ${wName}`;
+                    }
+                } else {
+                    if (cItem.source === 'fisico') {
+                        estadoTarget = 'EN TIENDA';
+                    } else if (cItem.source.startsWith('flotante_conf_')) {
+                        targetSemanaId = cItem.source.replace('flotante_conf_', '');
+                        const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
+                        estadoTarget = `CONFIRMADO ${wName}`;
+                    } else if (cItem.source.startsWith('flotante_noc_')) {
+                        targetSemanaId = cItem.source.replace('flotante_noc_', '');
+                        const wName = semanas.find(s=>s.id === targetSemanaId)?.nombre || '';
+                        estadoTarget = `PEDIDO ${wName}`;
+                    } else if (cItem.source === 'pedido_PENDIENTE') {
+                        targetSemanaId = null;
+                        estadoTarget = 'PEDIDO (Siguiente)';
+                    } else if (cItem.source.startsWith('pedido_')) {
+                        targetSemanaId = cItem.source.replace('pedido_', '');
+                        const sFound = semanas.find(s=>s.id === targetSemanaId);
+                        const wName = sFound?.nombre || '';
+                        estadoTarget = `PEDIDO ${wName}`;
+                    }
                 }
 
                 itemsToInsert.push({
                     cliente_id: clienteId,
                     titulo: cItem.titulo,
-                    product_id: cItem.product_id || null, 
+                    product_id: cItem.product_id || null,
                     catalog_id: cItem.catalog_id || null,
                     semana_id: targetSemanaId,
                     precio_venta: cItem.precio_venta,
@@ -653,9 +753,9 @@ export default function ClientOrdersView() {
             const { error: insErr } = await supabase.from('cliente_items').insert(itemsToInsert);
             if (insErr) throw insErr;
 
-            // 4. Subtract stock
+            // 4. Subtract stock (solo en modo normal, no histórico)
             for (let cItem of cart) {
-                if (cItem.source === 'fisico') {
+                if (!modoHistorico && cItem.source === 'fisico') {
                     const lookupCol = cItem.catalog_id ? 'id' : (cItem.product_id ? 'product_id' : null);
                     const lookupVal = cItem.catalog_id || cItem.product_id;
                     
@@ -676,31 +776,55 @@ export default function ClientOrdersView() {
             
             if (typeof catalogService !== 'undefined') catalogService.clearCache();
 
-            // 5. Registrar abono inicial en ledger si hubo pago
-            const totalAbonoInicial = cart.reduce((s, c) => s + (Number(c.monto_pagado) || 0), 0);
+            // 5. Registrar pago inicial
+            const totalAbonoInicial = Number(orderPayAmt) || 0;
             if (totalAbonoInicial > 0) {
                 const clienteNombre = clientes.find(c => c.id === clienteId)?.nombre || addForm.nombre || clienteId;
-                let turnoId = null;
-                if (orderMethod === 'Efectivo') {
-                    const { data: activeTurno } = await supabase
-                        .from('turnos_caja').select('id').eq('estado', 'ABIERTO').maybeSingle();
-                    if (!activeTurno) throw new Error("⚠️ BLOQUEO: No hay TURNO DE CAJA abierto para registrar el abono en efectivo.");
-                    turnoId = activeTurno.id;
+                if (modoHistorico) {
+                    // Modo histórico: solo registrar en cliente_pagos, sin tocar caja_movimientos
+                    await supabase.from('cliente_pagos').insert([{
+                        cliente_id: clienteId,
+                        monto: totalAbonoInicial,
+                        concepto: 'Pago anterior (histórico)',
+                        vendedor_id: user?.id,
+                        metodo_pago: orderMethod,
+                        caja_mov_id: null,
+                    }]);
+                } else {
+                    let turnoId = null;
+                    if (orderMethod === 'Efectivo') {
+                        const { data: activeTurno } = await supabase
+                            .from('turnos_caja').select('id').eq('estado', 'ABIERTO').maybeSingle();
+                        if (!activeTurno) throw new Error("⚠️ BLOQUEO: No hay TURNO DE CAJA abierto para registrar el abono en efectivo.");
+                        turnoId = activeTurno.id;
+                    }
+                    const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
+                        turno_id: turnoId,
+                        tipo: 'INGRESO',
+                        categoria: 'Cobro Pedido',
+                        concepto: `ABONO INICIAL [${clienteNombre}] · ${cart.length} ítem(s)`,
+                        monto: totalAbonoInicial,
+                        vendedor_id: user?.id,
+                        metodo_pago: orderMethod,
+                        origen: 'Pedidos'
+                    }]).select('id').single();
+                    await supabase.from('cliente_pagos').insert([{
+                        cliente_id: clienteId,
+                        monto: totalAbonoInicial,
+                        concepto: 'Abono inicial',
+                        vendedor_id: user?.id,
+                        metodo_pago: orderMethod,
+                        caja_mov_id: cajaMov?.id || null,
+                    }]);
                 }
-                await supabase.from('caja_movimientos').insert([{
-                    turno_id: turnoId,
-                    tipo: 'INGRESO',
-                    categoria: 'Cobro Pedido',
-                    concepto: `ABONO INICIAL [${clienteNombre}] · ${cart.length} ítem(s)`,
-                    monto: totalAbonoInicial,
-                    vendedor_id: user?.id,
-                    metodo_pago: orderMethod,
-                    origen: 'Pedidos'
-                }]);
             }
 
             setShowAddModal(false);
             setCart([]);
+            setOrderPayAmt('');
+            setOrderMethod('Yasta (QR)');
+            setModoHistorico(false);
+            setHistSemana('');
             setAddForm({
                 celular: '', nombre: '', ci: '', ciudad: '', sucursal: '', direccion: '', notas_cliente: '',
                 semana_id: '', mode: 'individual',
@@ -777,6 +901,17 @@ export default function ClientOrdersView() {
                         estado: eq.estado
                     }).eq('id', eq.id);
                 }
+                // También crear cliente_pagos para que aparezca en el historial
+                const { error: pErr } = await supabase.from('cliente_pagos').insert([{
+                    cliente_id: clienteId,
+                    monto: amt,
+                    concepto: pagoConcepto || `Abono ${selectedPayItems.length} ítem(s)`,
+                    vendedor_id: user?.id,
+                    metodo_pago: payMethod,
+                    referencia: payReference || null,
+                    caja_mov_id: cajaMov?.id || null,
+                }]);
+                if (pErr) throw pErr;
             }
 
             setShowPayModal(null);
@@ -838,6 +973,71 @@ export default function ClientOrdersView() {
         } catch (e) {
             console.error(e);
             alert('Error al editar el abono: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUpdateItem = async () => {
+        if (!editItem) return;
+        try {
+            setLoading(true);
+            // Calcular estado final: si estado base es PEDIDO o CONFIRMADO, concatenar nombre de semana
+            let estadoFinal = editItem.estado;
+            const semNombre = semanas.find(s => s.id === editItem.semana_id)?.nombre || '';
+            if (editItem.estado === 'PEDIDO' && editItem.semana_id && semNombre) estadoFinal = `PEDIDO ${semNombre}`;
+            else if (editItem.estado === 'CONFIRMADO' && editItem.semana_id && semNombre) estadoFinal = `CONFIRMADO ${semNombre}`;
+
+            await supabase.from('cliente_items').update({
+                titulo: editItem.titulo,
+                precio_venta: Number(editItem.precio_venta) || 0,
+                estado: estadoFinal,
+                semana_id: editItem.semana_id || null,
+                nota: editItem.nota || null,
+            }).eq('id', editItem.id);
+            setEditItem(null);
+            await fetchData();
+        } catch (e) {
+            console.error(e);
+            alert('Error al editar el ítem: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDistribuirBalance = async () => {
+        const entries = Object.entries(distribuirMontos).filter(([, amt]) => Number(amt) > 0);
+        if (entries.length === 0) return;
+        try {
+            setLoading(true);
+            for (const [itemId, amt] of entries) {
+                const it = items.find(i => i.id === itemId);
+                if (!it) continue;
+                const nuevoMonto = Math.min(Number(it.precio_venta), Number(it.monto_pagado || 0) + Number(amt));
+                await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itemId);
+            }
+            setShowPayModal(null);
+            setDistribuirMontos({});
+            setPayMode('items');
+            await fetchData();
+        } catch (e) {
+            console.error(e);
+            alert('Error al distribuir balance: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleBulkEstado = async (itemIds) => {
+        if (!itemIds || itemIds.size === 0) return;
+        const estado = bulkEstadoTarget === 'CONFIRMADO' ? 'ADJUDICADO' : bulkEstadoTarget;
+        try {
+            setLoading(true);
+            await supabase.from('cliente_items').update({ estado }).in('id', [...itemIds]);
+            setSelectedItems(new Set());
+            await fetchData();
+        } catch (e) {
+            console.error(e);
         } finally {
             setLoading(false);
         }
@@ -1077,7 +1277,9 @@ export default function ClientOrdersView() {
                         const isExp = expandedCliente.has(group.client.id);
                         const cVentas = group.items.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
                         const cPagItems = group.items.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
-                        const cDeuda = Math.max(0, cVentas - (cPagItems + group.pagos));
+                        const totalPagado = group.pagos > 0 ? group.pagos : cPagItems;
+                        const balanceDisponible = Math.max(0, group.pagos - cPagItems);
+                        const cDeuda = Math.max(0, cVentas - totalPagado);
 
                         return (
                             <div key={group.client.id} className="bg-surface border border-border rounded-xl shadow-sm overflow-visible relative">
@@ -1103,8 +1305,14 @@ export default function ClientOrdersView() {
                                         </div>
                                         <div className="text-right">
                                             <div className="text-[10px] uppercase font-bold text-muted">Pagado</div>
-                                            <div className="font-mono text-sm font-bold text-success">BS {formatS(cPagItems + group.pagos)}</div>
+                                            <div className="font-mono text-sm font-bold text-success">BS {formatS(totalPagado)}</div>
                                         </div>
+                                        {balanceDisponible > 0 && (
+                                            <div className="text-right">
+                                                <div className="text-[10px] uppercase font-bold text-orange-500">Sin asignar</div>
+                                                <div className="font-mono text-sm font-bold text-orange-500">BS {formatS(balanceDisponible)}</div>
+                                            </div>
+                                        )}
                                         <div className="text-right bg-error/10 px-3 py-1 rounded w-24">
                                             <div className="text-[10px] uppercase font-bold text-error">Saldo</div>
                                             <div className="font-mono text-sm font-bold text-error">BS {formatS(cDeuda)}</div>
@@ -1139,9 +1347,44 @@ export default function ClientOrdersView() {
                                 {isExp && (
                                     <div className="border-t border-border bg-background p-4 animate-in slide-in-from-top-2">
                                         <div className="overflow-x-auto">
+                                            {/* BARRA DE ACCIÓN MASIVA */}
+                                            {[...selectedItems].some(id => group.items.find(it => it.id === id)) && (() => {
+                                                const groupSelected = new Set([...selectedItems].filter(id => group.items.find(it => it.id === id)));
+                                                return (
+                                                    <div className="flex items-center gap-3 mb-3 p-2.5 bg-primary/10 border border-primary/30 rounded-xl flex-wrap">
+                                                        <span className="text-xs font-black text-primary">{groupSelected.size} ítem{groupSelected.size !== 1 ? 's' : ''} seleccionado{groupSelected.size !== 1 ? 's' : ''}</span>
+                                                        <select value={bulkEstadoTarget} onChange={e => setBulkEstadoTarget(e.target.value)}
+                                                            className="bg-background border border-primary/30 px-2 py-1 rounded-lg text-xs font-bold text-text outline-none focus:border-primary">
+                                                            <option value="PEDIDO">PEDIDO</option>
+                                                            <option value="CONFIRMADO">CONFIRMADO</option>
+                                                            <option value="EN TIENDA">EN TIENDA</option>
+                                                            <option value="ENTREGADO">ENTREGADO</option>
+                                                        </select>
+                                                        <button onClick={() => handleBulkEstado(groupSelected)}
+                                                            className="px-3 py-1 bg-primary text-white text-xs font-black rounded-lg hover:brightness-105">
+                                                            Aplicar
+                                                        </button>
+                                                        <button onClick={() => setSelectedItems(prev => { const n = new Set(prev); groupSelected.forEach(id => n.delete(id)); return n; })}
+                                                            className="text-xs text-muted hover:text-error underline">
+                                                            Limpiar
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
                                             <table className="w-full text-sm">
                                                 <thead>
                                                     <tr className="text-left text-muted text-xs uppercase border-b border-border">
+                                                        <th className="pb-2 w-8">
+                                                            <input type="checkbox"
+                                                                className="w-3.5 h-3.5 accent-primary cursor-pointer"
+                                                                checked={group.items.length > 0 && group.items.every(it => selectedItems.has(it.id))}
+                                                                onChange={e => setSelectedItems(prev => {
+                                                                    const n = new Set(prev);
+                                                                    group.items.forEach(it => e.target.checked ? n.add(it.id) : n.delete(it.id));
+                                                                    return n;
+                                                                })}
+                                                            />
+                                                        </th>
                                                         <th className="pb-2 pl-2">Título / Producto</th>
                                                         <th className="pb-2">P. Venta</th>
                                                         <th className="pb-2">Pagado</th>
@@ -1158,7 +1401,13 @@ export default function ClientOrdersView() {
                                                         const isEd = editingState === it.id;
                                                         
                                                         return (
-                                                            <tr key={it.id} className="border-b border-border/50 hover:bg-surface/50">
+                                                            <tr key={it.id} className={`group border-b border-border/50 hover:bg-surface/50 ${selectedItems.has(it.id) ? 'bg-primary/5' : ''}`}>
+                                                                <td className="py-2 w-8">
+                                                                    <input type="checkbox" className="w-3.5 h-3.5 accent-primary cursor-pointer"
+                                                                        checked={selectedItems.has(it.id)}
+                                                                        onChange={e => setSelectedItems(prev => { const n = new Set(prev); e.target.checked ? n.add(it.id) : n.delete(it.id); return n; })}
+                                                                    />
+                                                                </td>
                                                                 <td className="py-2 pl-2 font-medium text-text flex items-center gap-2">
                                                                     <Box size={14} className="text-primary opacity-50" />
                                                                     {it.titulo}
@@ -1188,6 +1437,11 @@ export default function ClientOrdersView() {
                                                                 </td>
                                                                 <td className="py-2 text-[11px] text-muted max-w-[150px] truncate" title={it.nota}>{it.nota || '-'}</td>
                                                                 <td className="py-2 text-right">
+                                                                    <div className="flex items-center justify-end gap-1">
+                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '' })}
+                                                                        className="text-muted hover:text-primary p-1 transition-colors opacity-0 group-hover:opacity-100">
+                                                                        <Edit2 size={14}/>
+                                                                    </button>
                                                                     <button onClick={async()=>{
                                                                         if(!confirm('¿Eliminar este ítem del pedido?')) return;
                                                                         setLoading(true);
@@ -1217,6 +1471,7 @@ export default function ClientOrdersView() {
                                                                     }} className="text-muted hover:text-error p-1 transition-colors">
                                                                         <Trash2 size={14}/>
                                                                     </button>
+                                                                    </div>
                                                                 </td>
                                                             </tr>
                                                         );
@@ -1251,6 +1506,46 @@ export default function ClientOrdersView() {
                                                 </tbody>
                                             </table>
                                         </div>
+
+                                        {/* HISTORIAL DE PAGOS */}
+                                        {(() => {
+                                            const clientePagos = pagos.filter(p => p.cliente_id === group.client.id).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+                                            if (clientePagos.length === 0) return null;
+                                            const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
+                                            return (
+                                                <div className="mt-3 pt-3 border-t border-border/40">
+                                                    <div className="text-[9px] font-black uppercase text-muted tracking-widest mb-2 flex items-center gap-2">
+                                                        <span>Historial de Pagos</span>
+                                                        <span className="text-primary font-black">({clientePagos.length})</span>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {clientePagos.map(p => (
+                                                            <div key={p.id} className="flex items-center justify-between bg-background/60 rounded-lg px-3 py-1.5 border border-border/30 group hover:border-border/60 transition-colors">
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <span className="text-sm leading-none">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-[10px] font-bold text-text truncate">{p.concepto || 'Abono'}</div>
+                                                                        <div className="text-[9px] text-muted">{p.metodo_pago || 'Efectivo'} · {new Date(p.fecha || p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: '2-digit' })}</div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-1 ml-2 shrink-0">
+                                                                    <span className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</span>
+                                                                    <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })}
+                                                                        title="Editar pago"
+                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
+                                                                        <Edit2 size={11} />
+                                                                    </button>
+                                                                    <button onClick={() => handleDeletePago(p)} title="Eliminar pago"
+                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all">
+                                                                        <Trash2 size={11} />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 )}
                             </div>
@@ -1418,13 +1713,14 @@ export default function ClientOrdersView() {
                                         {renderStatus(it)}
                                     </td>
                                     <td className="p-4 text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                        <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '' })}
+                                            className="text-muted hover:text-primary p-1 transition-colors">
+                                            <Edit2 size={14}/>
+                                        </button>
                                         <button onClick={async()=>{
                                             if(confirm('¿Eliminar este ítem del pedido?')) {
-                                                // Restore stock if it was physically in store
-                                                // Restore stock if it was physically in store or already ordered to provider
                                                 let shouldRestore = false;
-                                                // Solo devolvemos a Stock Físico si el ítem ya estaba realmente en el edificio (EN TIENDA)
-                                                // Los ítems en tránsito (PEDIDO/ADJUDICADO) se liberan automáticamente en el stock flotante del catálogo
                                                 if (it.estado === 'EN TIENDA' && (it.catalog_id || it.product_id)) {
                                                     shouldRestore = true;
                                                 }
@@ -1445,6 +1741,7 @@ export default function ClientOrdersView() {
                                         }} className="text-muted hover:text-error p-1 rotate-0 hover:rotate-12 transition-transform">
                                             <Trash2 size={16}/>
                                         </button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -1454,6 +1751,61 @@ export default function ClientOrdersView() {
             )}
 
 
+            {/* MODAL: EDITAR ÍTEM */}
+            {editItem && (
+                <div className="fixed inset-0 z-[10020] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-sm p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-black text-text flex items-center gap-2">
+                                <Edit2 size={15} className="text-primary" /> Editar Ítem
+                            </h3>
+                            <button onClick={() => setEditItem(null)} className="text-muted hover:text-text"><X size={18}/></button>
+                        </div>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Título</label>
+                                <input type="text" value={editItem.titulo} onChange={e => setEditItem({...editItem, titulo: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary"/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Precio Venta BS</label>
+                                <input type="number" value={editItem.precio_venta} onChange={e => setEditItem({...editItem, precio_venta: e.target.value})} onFocus={e => e.target.select()}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm font-mono outline-none focus:border-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Estado</label>
+                                <select value={editItem.estado} onChange={e => setEditItem({...editItem, estado: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary">
+                                    <option value="PEDIDO">PEDIDO</option>
+                                    <option value="CONFIRMADO">CONFIRMADO</option>
+                                    <option value="EN TIENDA">EN TIENDA</option>
+                                    <option value="ENTREGADO">ENTREGADO</option>
+                                </select>
+                            </div>
+                            {(editItem.estado === 'PEDIDO' || editItem.estado === 'CONFIRMADO') && (
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase text-muted mb-1">Semana</label>
+                                    <select value={editItem.semana_id || ''} onChange={e => setEditItem({...editItem, semana_id: e.target.value})}
+                                        className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary">
+                                        <option value="">Sin semana asignada</option>
+                                        {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Nota</label>
+                                <input type="text" value={editItem.nota} onChange={e => setEditItem({...editItem, nota: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary" placeholder="Opcional..."/>
+                            </div>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                            <button onClick={() => setEditItem(null)} className="flex-1 py-2 rounded-xl text-sm font-bold text-muted bg-background border border-border hover:border-primary/40">Cancelar</button>
+                            <button onClick={handleUpdateItem} disabled={loading} className="flex-1 py-2 rounded-xl text-sm font-black text-white bg-primary hover:brightness-105 shadow disabled:opacity-50">Guardar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ADD MODAL */}
             {showAddModal && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-hidden text-[#222]">
@@ -1461,10 +1813,15 @@ export default function ClientOrdersView() {
                         <div className="p-5 border-b border-border flex justify-between items-center bg-background rounded-t-2xl shrink-0">
                             <h2 className="text-lg font-bold font-display text-text flex items-center gap-2">
                                 <Plus className="text-primary"/> Nueva Venta / Pedido
+                                {modoHistorico && <span className="bg-orange-400/20 text-orange-500 border border-orange-400/40 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest">MODO HISTÓRICO</span>}
                             </h2>
                             <div className="flex items-center gap-4">
+                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input type="checkbox" checked={modoHistorico} onChange={e => { setModoHistorico(e.target.checked); setHistSemana(''); }} className="w-3.5 h-3.5 accent-orange-400"/>
+                                    <span className="text-[9px] font-black uppercase text-muted tracking-widest">Histórico</span>
+                                </label>
                                 {cart.length > 0 && <span className="bg-primary/20 text-primary border border-primary/30 px-3 py-1 rounded-full text-[10px] font-black animate-pulse uppercase tracking-widest">{cart.length} ITEMS EN CESTA</span>}
-                                <button onClick={()=>{setShowAddModal(false); setCart([]);}} className="text-muted hover:text-text transition-colors p-2 hover:bg-muted/20 rounded-full"><X size={20}/></button>
+                                <button onClick={()=>{setShowAddModal(false); setCart([]); setModoHistorico(false); setHistSemana('');}} className="text-muted hover:text-text transition-colors p-2 hover:bg-muted/20 rounded-full"><X size={20}/></button>
                             </div>
                         </div>
                         
@@ -1552,12 +1909,12 @@ export default function ClientOrdersView() {
                                                 </div>
                                                 <div className="space-y-1">
                                                     <label className="block text-[10px] font-black uppercase text-center text-error/80">Desc. %</label>
-                                                    <input type="number" step="0.1" value={addForm.descuento} onChange={e=>{
+                                                    <input type="number" step="0.1" value={addForm.descuento} onFocus={e=>e.target.select()} onChange={e=>{
                                                         const pct = e.target.value;
                                                         const base = Number(addForm.precio_venta)||0;
                                                         const final = base - (base * (Number(pct)||0) / 100);
                                                         setAddForm({...addForm, descuento: pct, precio_final: final.toFixed(2)});
-                                                    }} className="w-full bg-background border border-border px-4 py-2.5 rounded-xl text-xs text-error font-bold outline-none focus:border-error font-mono text-center shadow-inner" placeholder="%"/>
+                                                    }} className="w-full bg-background border border-border px-4 py-2.5 rounded-xl text-xs text-error font-bold outline-none focus:border-error font-mono text-center shadow-inner [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" placeholder="%"/>
                                                 </div>
                                                 <div className="space-y-1">
                                                     <label className="block text-[10px] font-black uppercase text-center text-primary">Final BS</label>
@@ -1568,15 +1925,33 @@ export default function ClientOrdersView() {
                                                         setAddForm({...addForm, precio_final: final, descuento: pct});
                                                     }} className="w-full bg-primary/5 border border-primary/20 px-3 py-2.5 rounded-xl text-xs text-primary font-black outline-none focus:border-primary font-mono text-center shadow-inner"/>
                                                 </div>
-                                                <div className="space-y-1">
-                                                    <label className="block text-[10px] font-black uppercase text-center text-success">Abono BS</label>
-                                                    <input type="number" step="0.01" value={addForm.monto_pagado} onChange={e=>setAddForm({...addForm, monto_pagado:e.target.value})} className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs text-success font-black outline-none focus:border-success font-mono text-center shadow-inner" placeholder="0.00"/>
-                                                </div>
                                             </div>
 
+                                            {modoHistorico ? (
+                                                <div className="flex flex-col gap-3">
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[10px] font-black uppercase text-center text-orange-500/80">Semana</label>
+                                                        <select value={addForm.hist_semana_id || ''} onChange={e => setAddForm({...addForm, hist_semana_id: e.target.value})}
+                                                            className="w-full bg-background border border-orange-400/30 px-3 py-2.5 rounded-xl text-xs font-bold text-text outline-none focus:border-orange-400">
+                                                            <option value="">Sin semana asignada</option>
+                                                            {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[10px] font-black uppercase text-center text-orange-500/80">Estado</label>
+                                                        <select value={addForm.hist_estado || 'PEDIDO'} onChange={e => setAddForm({...addForm, hist_estado: e.target.value})}
+                                                            className="w-full bg-background border border-orange-400/30 px-3 py-2.5 rounded-xl text-xs font-bold text-text outline-none focus:border-orange-400">
+                                                            <option value="PEDIDO">PEDIDO</option>
+                                                            <option value="CONFIRMADO">CONFIRMADO</option>
+                                                            <option value="EN TIENDA">EN TIENDA</option>
+                                                            <option value="ENTREGADO">ENTREGADO</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            ) : (
                                             <div className="relative">
                                                 <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 text-center tracking-widest">Asignar de:</label>
-                                                <div 
+                                                <div
                                                     onClick={() => setDropdownOpen(!dropdownOpen)}
                                                     className={`w-full bg-background border-2 px-3 py-3 rounded-xl text-[10px] font-black uppercase cursor-pointer flex items-center justify-between transition-all select-none hover:shadow-md ${
                                                         selectedStockSource === 'fisico' ? 'border-success text-success bg-success/5' : 
@@ -1637,9 +2012,10 @@ export default function ClientOrdersView() {
                                                     </div>
                                                 )}
                                             </div>
+                                            )}
 
                                             <button onClick={()=>{
-                                                if(!selectedStockSource) return alert("Selecciona origen de stock");
+                                                if(!modoHistorico && !selectedStockSource) return alert("Selecciona origen de stock");
                                                 addToCart();
                                                 setDropdownOpen(false);
                                             }} disabled={!addForm.titulo || loading} className="w-full py-4 bg-primary text-background font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-primary/20 disabled:opacity-50">
@@ -1714,71 +2090,134 @@ export default function ClientOrdersView() {
                                                     </button>
                                                 </div>
 
-                                                <div className="flex items-center gap-2 ml-auto">
-                                                    <div className="relative">
-                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-success opacity-50">BS</span>
-                                                        <input 
-                                                            type="number" 
-                                                            value={batchAbono} 
-                                                            onChange={e => setBatchAbono(e.target.value)}
-                                                            className="w-20 bg-surface border border-success/20 pl-8 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-success outline-none focus:border-success"
-                                                            placeholder="0.00"
-                                                        />
-                                                    </div>
-                                                    <button 
-                                                        onClick={applyBatchAbono}
-                                                        className="bg-success/10 hover:bg-success text-success hover:text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all border border-success/20"
-                                                    >
-                                                        Abono Todos
-                                                    </button>
-                                                </div>
                                             </div>
+
+                                            {modoHistorico && (
+                                                <div className="flex items-center gap-3 flex-wrap bg-orange-400/5 border border-orange-400/20 rounded-xl p-3">
+                                                    <span className="text-[9px] font-black uppercase text-orange-500 tracking-widest">Asignar todos a semana:</span>
+                                                    <select value={histSemana} onChange={e => {
+                                                        setHistSemana(e.target.value);
+                                                        setCart(cart.map(c => ({...c, hist_semana_id: e.target.value || null})));
+                                                    }} className="bg-background border border-orange-400/30 px-3 py-1.5 rounded-lg text-xs font-bold text-text outline-none focus:border-orange-400">
+                                                        <option value="">Sin semana asignada</option>
+                                                        {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                                    </select>
+                                                    {histSemana && (
+                                                        <span className="text-[10px] text-orange-400/70 font-bold">← se aplica a todos los ítems</span>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* BARRA BULK CARRITO HISTÓRICO */}
+                                            {modoHistorico && cartSelected.size > 0 && (
+                                                <div className="flex items-center gap-3 mb-2 p-2.5 bg-orange-400/10 border border-orange-400/30 rounded-xl flex-wrap">
+                                                    <span className="text-xs font-black text-orange-500">{cartSelected.size} seleccionado{cartSelected.size !== 1 ? 's' : ''}</span>
+                                                    <select value={cartBulkSemana} onChange={e => setCartBulkSemana(e.target.value)}
+                                                        className="bg-background border border-orange-400/30 px-2 py-1 rounded-lg text-xs font-bold text-text outline-none focus:border-orange-400">
+                                                        <option value="">Sin semana</option>
+                                                        {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                                    </select>
+                                                    <select value={cartBulkEstado} onChange={e => setCartBulkEstado(e.target.value)}
+                                                        className="bg-background border border-orange-400/30 px-2 py-1 rounded-lg text-xs font-black uppercase text-orange-500 outline-none focus:border-orange-400">
+                                                        <option value="PEDIDO">PEDIDO</option>
+                                                        <option value="CONFIRMADO">CONFIRMADO</option>
+                                                        <option value="EN TIENDA">EN TIENDA</option>
+                                                        <option value="ENTREGADO">ENTREGADO</option>
+                                                    </select>
+                                                    <button onClick={() => {
+                                                        setCart(cart.map((c, i) => cartSelected.has(i)
+                                                            ? { ...c, hist_semana_id: cartBulkSemana || null, hist_estado: cartBulkEstado }
+                                                            : c
+                                                        ));
+                                                        setCartSelected(new Set());
+                                                    }} className="px-3 py-1 bg-orange-400 text-white text-xs font-black rounded-lg hover:brightness-105">
+                                                        Aplicar
+                                                    </button>
+                                                    <button onClick={() => setCartSelected(new Set())} className="text-xs text-muted hover:text-error underline">Limpiar</button>
+                                                </div>
+                                            )}
 
                                             <div className="overflow-x-auto border border-border/30 rounded-xl bg-background/20 shadow-inner">
                                                 <table className="w-full text-[11px] text-left">
                                                     <thead className="bg-background/80 text-[8px] font-black uppercase text-muted tracking-widest border-b border-border sticky top-0 z-10">
                                                         <tr>
+                                                            {modoHistorico && (
+                                                                <th className="px-2 py-3 w-8">
+                                                                    <input type="checkbox" className="w-3.5 h-3.5 accent-orange-400 cursor-pointer"
+                                                                        checked={cart.length > 0 && cartSelected.size === cart.length}
+                                                                        onChange={e => setCartSelected(e.target.checked ? new Set(cart.map((_, i) => i)) : new Set())}
+                                                                    />
+                                                                </th>
+                                                            )}
                                                             <th className="px-3 py-3">Título / Ítem</th>
                                                             <th className="px-3 py-3 text-center w-24">Precio</th>
                                                             <th className="px-3 py-3 text-center w-20">Desc%</th>
                                                             <th className="px-3 py-3 text-center w-24">Final BS</th>
-                                                            <th className="px-3 py-3 text-center w-24">Abono</th>
-                                                            <th className="px-3 py-3 text-center w-64">Asignación</th>
-                                                            <th className="px-3 py-3 text-center w-36">Llegada Aproximada</th>
+                                                            {modoHistorico ? (<>
+                                                                <th className="px-3 py-3 text-center w-40">Semana</th>
+                                                                <th className="px-3 py-3 text-center w-32">Estado</th>
+                                                            </>) : (<>
+                                                                <th className="px-3 py-3 text-center w-64">Asignación</th>
+                                                                <th className="px-3 py-3 text-center w-36">Llegada Aproximada</th>
+                                                            </>)}
                                                             <th className="px-3 py-3 w-10"></th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-border/20">
                                                         {cart.map((c, i) => (
-                                                            <tr key={i} className="hover:bg-primary/5 transition-colors border-b border-border/5">
-                                                                <td className="px-3 py-2.5 font-bold text-text truncate max-w-[280px]" title={c.titulo}>{c.titulo}</td>
+                                                            <tr key={i} className={`hover:bg-primary/5 transition-colors border-b border-border/5 ${cartSelected.has(i) ? 'bg-orange-400/5' : ''}`}>
+                                                                {modoHistorico && (
+                                                                    <td className="px-2 py-2.5 w-8">
+                                                                        <input type="checkbox" className="w-3.5 h-3.5 accent-orange-400 cursor-pointer"
+                                                                            checked={cartSelected.has(i)}
+                                                                            onChange={e => setCartSelected(prev => { const n = new Set(prev); e.target.checked ? n.add(i) : n.delete(i); return n; })}
+                                                                        />
+                                                                    </td>
+                                                                )}
+                                                                <td className="px-3 py-2.5 max-w-[280px] font-bold text-text truncate" title={c.titulo}>{c.titulo}</td>
                                                                 
                                                                 <td className="px-2 py-2.5 text-center">
                                                                     <input type="number" step="0.01" value={c.precio_original} onChange={(e)=>updateCartItem(i, 'precio_original', e.target.value)}
-                                                                        className="w-20 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono text-muted outline-none focus:border-primary shadow-sm"/>
+                                                                        className="w-20 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono text-muted outline-none focus:border-primary shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"/>
                                                                 </td>
 
                                                                 <td className="px-2 py-2.5 text-center">
-                                                                    <input type="number" step="0.1" value={c.descuento} onChange={(e)=>updateCartItem(i, 'descuento', e.target.value)}
-                                                                        className="w-16 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono text-error outline-none focus:border-error shadow-sm font-bold"/>
+                                                                    <input type="number" step="0.1" value={c.descuento} onFocus={e=>e.target.select()} onChange={(e)=>updateCartItem(i, 'descuento', e.target.value)}
+                                                                        className="w-16 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono text-error outline-none focus:border-error shadow-sm font-bold [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"/>
                                                                 </td>
 
                                                                 <td className="px-2 py-2.5 text-center">
                                                                     <input type="number" step="0.01" value={c.precio_venta} onChange={(e)=>updateCartItem(i, 'precio_venta', e.target.value)}
-                                                                        className="w-20 bg-primary/5 border border-primary/20 rounded px-2 py-1.5 text-center font-mono font-black text-primary outline-none focus:border-primary shadow-sm"/>
+                                                                        className="w-20 bg-primary/5 border border-primary/20 rounded px-2 py-1.5 text-center font-mono font-black text-primary outline-none focus:border-primary shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"/>
                                                                 </td>
 
+                                                                {modoHistorico ? (<>
+                                                                    <td className="px-2 py-2.5 text-center">
+                                                                        <select value={c.hist_semana_id || ''} onChange={e => {
+                                                                            const next = [...cart];
+                                                                            next[i] = {...c, hist_semana_id: e.target.value || null};
+                                                                            setCart(next);
+                                                                        }} className="bg-background border border-orange-400/30 px-2 py-1.5 rounded text-[9px] font-bold text-text outline-none focus:border-orange-400 max-w-[150px]">
+                                                                            <option value="">Sin semana</option>
+                                                                            {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                                                        </select>
+                                                                    </td>
+                                                                    <td className="px-2 py-2.5 text-center">
+                                                                        <select value={c.hist_estado || 'PEDIDO'} onChange={e => {
+                                                                            const next = [...cart];
+                                                                            next[i] = {...c, hist_estado: e.target.value};
+                                                                            setCart(next);
+                                                                        }} className="bg-background border border-orange-400/30 px-2 py-1.5 rounded text-[9px] font-black uppercase text-orange-500 outline-none focus:border-orange-400">
+                                                                            <option value="PEDIDO">PEDIDO</option>
+                                                                            <option value="CONFIRMADO">CONFIRMADO</option>
+                                                                            <option value="EN TIENDA">EN TIENDA</option>
+                                                                            <option value="ENTREGADO">ENTREGADO</option>
+                                                                        </select>
+                                                                    </td>
+                                                                </>) : (<>
                                                                 <td className="px-2 py-2.5 text-center">
-                                                                    <input type="number" step="0.01" value={c.monto_pagado} onChange={(e)=>{
-                                                                        const next = [...cart];
-                                                                        next[i] = {...c, monto_pagado: e.target.value};
-                                                                        setCart(next);
-                                                                    }} className="w-20 bg-background border border-border/40 rounded px-2 py-1.5 text-center font-mono font-bold text-success outline-none focus:border-success shadow-sm"/>
-                                                                </td>
-
-                                                                <td className="px-2 py-2.5 text-center">
-                                                                    <select 
-                                                                        value={c.source || 'pedido_PENDIENTE'} 
+                                                                    <select
+                                                                        value={c.source || 'pedido_PENDIENTE'}
                                                                         onChange={(e)=>{
                                                                             const next = [...cart];
                                                                             const source = e.target.value;
@@ -1856,6 +2295,7 @@ export default function ClientOrdersView() {
                                                                         })()}
                                                                     </div>
                                                                 </td>
+                                                                </>)}
 
                                                                 <td className="px-3 py-2.5 text-right">
                                                                     <button onClick={()=>removeFromCart(i)} className="p-2 text-muted/40 hover:text-error hover:bg-error/5 rounded-lg transition-all"><X size={16}/></button>
@@ -1869,7 +2309,6 @@ export default function ClientOrdersView() {
                                             <div className="mt-auto bg-background/40 p-5 rounded-2xl border border-border flex justify-between items-center shadow-lg">
                                                 <div className="flex flex-col">
                                                     <span className="text-[10px] font-black uppercase text-muted tracking-widest pb-1">Unidades: {cart.length}</span>
-                                                    <span className="text-[10px] font-black uppercase text-success tracking-widest">Abono: BS {formatS(cart.reduce((s,i)=>s+Number(i.monto_pagado), 0))}</span>
                                                 </div>
                                                 <div className="flex flex-col items-end">
                                                     <span className="text-[10px] font-black uppercase text-primary tracking-[0.2em] pb-1">Total Pedido</span>
@@ -1887,24 +2326,20 @@ export default function ClientOrdersView() {
                             </div>
                         </div>
 
-                        <div className="p-5 border-t border-border bg-background rounded-b-2xl shrink-0 space-y-4">
-                            {/* Método de pago global del pedido */}
-                            <div className="flex flex-col gap-2">
-                                <span className="text-[9px] font-black uppercase text-muted tracking-widest">Método de Pago del Abono</span>
+                        <div className="p-5 border-t border-border bg-background rounded-b-2xl shrink-0 space-y-3">
+                            {/* Pago inicial opcional */}
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <span className="text-[9px] font-black uppercase text-muted tracking-widest">Pago inicial (opcional)</span>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-success opacity-60">BS</span>
+                                    <input type="number" step="0.01" value={orderPayAmt} onChange={e => setOrderPayAmt(e.target.value)} onFocus={e=>e.target.select()}
+                                        className="w-28 bg-surface border border-success/30 pl-8 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-success outline-none focus:border-success"
+                                        placeholder="0.00"/>
+                                </div>
                                 <div className="flex gap-1.5 flex-wrap">
-                                    {[
-                                        { id: 'Efectivo', icon: '💵' },
-                                        { id: 'Yasta (QR)', icon: '📲' },
-                                        { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
-                                        { id: 'BNB', icon: '🏛️' },
-                                        { id: 'Otros', icon: '💳' },
-                                    ].map(m => (
-                                        <button
-                                            key={m.id}
-                                            type="button"
-                                            onClick={() => setOrderMethod(m.id)}
-                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${orderMethod === m.id ? 'bg-[var(--primary)] border-[var(--primary)] text-white shadow' : 'bg-surface border-border text-muted hover:border-primary/40'}`}
-                                        >
+                                    {[{id:'Efectivo',icon:'💵'},{id:'Yasta (QR)',icon:'📲'},{id:'Banco Unión (QR/Transf)',icon:'🏦'},{id:'BNB',icon:'🏛️'},{id:'Otros',icon:'💳'}].map(m => (
+                                        <button key={m.id} type="button" onClick={() => setOrderMethod(m.id)}
+                                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[9px] font-black border transition-all ${orderMethod === m.id ? 'bg-primary border-primary text-white shadow' : 'bg-surface border-border text-muted hover:border-primary/40'}`}>
                                             <span>{m.icon}</span>
                                             <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
                                         </button>
@@ -1945,11 +2380,23 @@ export default function ClientOrdersView() {
                             
                             <div className="p-5">
                                 <div className="mb-4 text-sm font-bold text-muted text-center uppercase">{cli?.nombre}</div>
-                                
-                                <div className="flex bg-background rounded p-1 mb-5 border border-border mx-auto max-w-xs">
-                                    <button onClick={()=>setPayMode('items')} className={`flex-1 py-1 text-xs font-bold rounded ${payMode==='items'?'bg-surface text-primary shadow':'text-muted'}`}>Pagar Ítems</button>
-                                    <button onClick={()=>setPayMode('general')} className={`flex-1 py-1 text-xs font-bold rounded ${payMode==='general'?'bg-surface text-primary shadow':'text-muted'}`}>Abono a Cuenta</button>
-                                </div>
+                                {(() => {
+                                    const pItemsCli = items.filter(i => i.cliente_id === showPayModal);
+                                    const cPagItemsCli = pItemsCli.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                                    const groupPagosCli = pagos.filter(p => p.cliente_id === showPayModal).reduce((s,p) => s + Number(p.monto), 0);
+                                    const balanceDisponibleCli = Math.max(0, groupPagosCli - cPagItemsCli);
+                                    return (
+                                        <div className="flex bg-background rounded p-1 mb-5 border border-border mx-auto">
+                                            <button onClick={()=>setPayMode('items')} className={`flex-1 py-1 text-xs font-bold rounded ${payMode==='items'?'bg-surface text-primary shadow':'text-muted'}`}>Pagar Ítems</button>
+                                            <button onClick={()=>setPayMode('general')} className={`flex-1 py-1 text-xs font-bold rounded ${payMode==='general'?'bg-surface text-primary shadow':'text-muted'}`}>Abono a Cuenta</button>
+                                            {balanceDisponibleCli > 0 && (
+                                                <button onClick={()=>setPayMode('distribuir')} className={`flex-1 py-1 text-xs font-bold rounded whitespace-nowrap ${payMode==='distribuir'?'bg-orange-500 text-white shadow':'text-orange-500'}`}>
+                                                    Distribuir BS {formatS(balanceDisponibleCli)}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
 
                                 {payMode === 'items' ? (
                                     <div className="mb-4 border border-border rounded-lg p-3 bg-background max-h-48 overflow-y-auto">
@@ -1979,6 +2426,80 @@ export default function ClientOrdersView() {
                                             <div className="text-xs text-center text-success py-4">No hay ítems con deuda pendiente.</div>
                                         )}
                                     </div>
+                                ) : payMode === 'distribuir' ? (
+                                    (() => {
+                                        const pItemsCli2 = items.filter(i => i.cliente_id === showPayModal);
+                                        const cPagItemsCli2 = pItemsCli2.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                                        const groupPagosCli2 = pagos.filter(p => p.cliente_id === showPayModal).reduce((s,p) => s + Number(p.monto), 0);
+                                        const balCli = Math.max(0, groupPagosCli2 - cPagItemsCli2);
+                                        return (
+                                            <div className="mb-4">
+                                                <div className="flex justify-between items-center mb-2 p-2 bg-orange-400/10 border border-orange-400/20 rounded-lg">
+                                                    <span className="text-[10px] font-black uppercase text-orange-500">Balance disponible</span>
+                                                    <span className="font-mono font-black text-orange-500">BS {formatS(balCli)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div className="text-[10px] text-muted font-bold uppercase">Asignar monto a cada ítem (máx. pendiente):</div>
+                                                    <button
+                                                        onClick={() => {
+                                                            const pendientes = pItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0);
+                                                            let restante = balCli;
+                                                            const nuevos = {};
+                                                            for (const it of pendientes) {
+                                                                if (restante <= 0) break;
+                                                                const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
+                                                                const asignar = Math.min(deuda, restante);
+                                                                nuevos[it.id] = asignar;
+                                                                restante -= asignar;
+                                                            }
+                                                            setDistribuirMontos(nuevos);
+                                                        }}
+                                                        className="text-[10px] font-black uppercase px-2 py-1 rounded bg-orange-500/10 text-orange-500 hover:bg-orange-500/20"
+                                                    >
+                                                        Auto-distribuir
+                                                    </button>
+                                                </div>
+                                                <div className="border border-border rounded-lg bg-background max-h-52 overflow-y-auto">
+                                                    {pItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0).map(it => {
+                                                        const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
+                                                        const montoAsignado = Number(distribuirMontos[it.id] || 0);
+                                                        return (
+                                                            <div key={it.id} className="flex items-center gap-3 p-2 border-b border-border/50 last:border-0">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="text-sm font-bold truncate text-text">{it.titulo}</div>
+                                                                    <div className="text-[10px] uppercase text-error">Pendiente: BS {formatS(deuda)}</div>
+                                                                </div>
+                                                                <input
+                                                                    type="number" min="0" max={deuda} step="0.01"
+                                                                    value={montoAsignado || ''}
+                                                                    placeholder="0"
+                                                                    onChange={e => {
+                                                                        const val = Math.min(Number(e.target.value), deuda);
+                                                                        setDistribuirMontos(prev => ({ ...prev, [it.id]: val < 0 ? 0 : val }));
+                                                                    }}
+                                                                    className="w-24 bg-background border border-border px-2 py-1 rounded-lg text-sm text-right font-mono outline-none focus:border-orange-500"
+                                                                />
+                                                            </div>
+                                                        );
+                                                    })}
+                                                    {pItems.filter(i => (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
+                                                        <div className="text-xs text-center text-success py-4">Todos los ítems están cubiertos.</div>
+                                                    )}
+                                                </div>
+                                                {(() => {
+                                                    const totalAsignado = Object.values(distribuirMontos).reduce((s,v) => s + Number(v||0), 0);
+                                                    if (totalAsignado === 0) return null;
+                                                    const excedeDist = totalAsignado > balCli;
+                                                    return (
+                                                        <div className={`mt-2 text-center text-xs font-black ${excedeDist ? 'text-error' : 'text-success'}`}>
+                                                            Asignado: BS {formatS(totalAsignado)} / BS {formatS(balCli)} disponible
+                                                            {excedeDist && ' — Supera el balance'}
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        );
+                                    })()
                                 ) : (
                                     <div className="mb-4">
                                         <label className="block text-xs mb-1 text-muted">Concepto (Opcional)</label>
@@ -1986,52 +2507,54 @@ export default function ClientOrdersView() {
                                     </div>
                                 )}
 
-                                <div className="mb-4">
-                                    <label className="text-[10px] font-black text-muted uppercase flex items-center gap-2 mb-3">
-                                        <Wallet size={14} className="text-secondary"/> Método de Pago
-                                    </label>
-                                    <div className="grid grid-cols-5 gap-1.5 p-1 bg-background border border-border rounded-xl">
-                                        {[
-                                            { id: 'Efectivo', icon: '💵' },
-                                            { id: 'Yasta (QR)', icon: '📲' },
-                                            { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
-                                            { id: 'BNB', icon: '🏛️' },
-                                            { id: 'Otros', icon: '💳' },
-                                        ].map(m => (
-                                            <button
-                                                key={m.id}
-                                                onClick={() => setPayMethod(m.id)}
-                                                className={`py-2 flex flex-col items-center gap-0.5 text-[8px] font-black uppercase rounded-lg transition-all leading-tight ${payMethod === m.id ? 'bg-[var(--primary)] text-white shadow-md' : 'text-muted hover:bg-surface'}`}
-                                            >
-                                                <span className="text-base leading-none">{m.icon}</span>
-                                                {m.id === 'Banco Unión (QR/Transf)' ? <span>B. Unión</span> : <span>{m.id}</span>}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {payMethod !== 'Efectivo' && (
+                                {payMode !== 'distribuir' && <>
                                     <div className="mb-4">
-                                        <label className="block text-[10px] font-black text-muted uppercase mb-1">No. Operación / Referencia</label>
-                                        <input
-                                            type="text"
-                                            value={payReference}
-                                            onChange={e => setPayReference(e.target.value)}
-                                            placeholder="Ej: TXN-1234567"
-                                            className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-[var(--primary)] font-mono"
-                                        />
+                                        <label className="text-[10px] font-black text-muted uppercase flex items-center gap-2 mb-3">
+                                            <Wallet size={14} className="text-secondary"/> Método de Pago
+                                        </label>
+                                        <div className="grid grid-cols-5 gap-1.5 p-1 bg-background border border-border rounded-xl">
+                                            {[
+                                                { id: 'Efectivo', icon: '💵' },
+                                                { id: 'Yasta (QR)', icon: '📲' },
+                                                { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
+                                                { id: 'BNB', icon: '🏛️' },
+                                                { id: 'Otros', icon: '💳' },
+                                            ].map(m => (
+                                                <button
+                                                    key={m.id}
+                                                    onClick={() => setPayMethod(m.id)}
+                                                    className={`py-2 flex flex-col items-center gap-0.5 text-[8px] font-black uppercase rounded-lg transition-all leading-tight ${payMethod === m.id ? 'bg-[var(--primary)] text-white shadow-md' : 'text-muted hover:bg-surface'}`}
+                                                >
+                                                    <span className="text-base leading-none">{m.icon}</span>
+                                                    {m.id === 'Banco Unión (QR/Transf)' ? <span>B. Unión</span> : <span>{m.id}</span>}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                )}
 
-                                <div className="mb-4">
-                                    <label className="block text-xs font-bold mb-1 text-success uppercase">Monto a Abonar (BS)</label>
-                                    <input type="number" value={payMonto} onChange={e=>setPayMonto(e.target.value)} autoFocus className="w-full bg-background border-2 border-border focus:border-success px-4 py-3 rounded-lg text-xl text-center text-success font-bold font-mono outline-none shadow-inner"/>
-                                    {payMode === 'items' && selectedPayItems.length > 0 && payMonto > 0 && (
-                                        <div className="text-[10px] text-center mt-2 text-muted uppercase">
-                                            Se distribuirán BS {formatS(payMonto / selectedPayItems.length)} por cada ({selectedPayItems.length}) ítem(s).
+                                    {payMethod !== 'Efectivo' && (
+                                        <div className="mb-4">
+                                            <label className="block text-[10px] font-black text-muted uppercase mb-1">No. Operación / Referencia</label>
+                                            <input
+                                                type="text"
+                                                value={payReference}
+                                                onChange={e => setPayReference(e.target.value)}
+                                                placeholder="Ej: TXN-1234567"
+                                                className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-[var(--primary)] font-mono"
+                                            />
                                         </div>
                                     )}
-                                </div>
+
+                                    <div className="mb-4">
+                                        <label className="block text-xs font-bold mb-1 text-success uppercase">Monto a Abonar (BS)</label>
+                                        <input type="number" value={payMonto} onChange={e=>setPayMonto(e.target.value)} autoFocus className="w-full bg-background border-2 border-border focus:border-success px-4 py-3 rounded-lg text-xl text-center text-success font-bold font-mono outline-none shadow-inner"/>
+                                        {payMode === 'items' && selectedPayItems.length > 0 && payMonto > 0 && (
+                                            <div className="text-[10px] text-center mt-2 text-muted uppercase">
+                                                Se distribuirán BS {formatS(payMonto / selectedPayItems.length)} por cada ({selectedPayItems.length}) ítem(s).
+                                            </div>
+                                        )}
+                                    </div>
+                                </>}
 
                                 {/* Historial de Abonos */}
                                 {(() => {
@@ -2078,7 +2601,23 @@ export default function ClientOrdersView() {
 
                             <div className="p-4 border-t border-border flex justify-end gap-3 bg-background rounded-b-2xl">
                                 <button onClick={()=>setShowPayModal(null)} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
-                                <button onClick={()=>handleSavePayment(cli.id)} className="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-success/90 shadow-lg">Confirmar Pago</button>
+                                {payMode === 'distribuir' ? (() => {
+                                    const pItemsCli3 = items.filter(i => i.cliente_id === showPayModal);
+                                    const cPagItemsCli3 = pItemsCli3.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                                    const groupPagosCli3 = pagos.filter(p => p.cliente_id === showPayModal).reduce((s,p) => s + Number(p.monto), 0);
+                                    const balCli3 = Math.max(0, groupPagosCli3 - cPagItemsCli3);
+                                    const totalAsignado3 = Object.values(distribuirMontos).reduce((s,v) => s + Number(v||0), 0);
+                                    const excede3 = totalAsignado3 > balCli3;
+                                    const sinMonto3 = totalAsignado3 === 0;
+                                    return (
+                                        <button onClick={()=>handleDistribuirBalance()} disabled={sinMonto3 || excede3 || loading}
+                                            className="bg-orange-500 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-orange-600 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                                            Aplicar distribución
+                                        </button>
+                                    );
+                                })() : (
+                                    <button onClick={()=>handleSavePayment(cli.id)} className="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-success/90 shadow-lg">Confirmar Pago</button>
+                                )}
                             </div>
                         </div>
                     </div>

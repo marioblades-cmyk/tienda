@@ -193,6 +193,22 @@ function MovimientosTab() {
 
     const showEditMsg = (msg, type = 'success') => { setEditToast({ msg, type }); setTimeout(() => setEditToast(null), 3000); };
 
+    const handleDeleteMov = async (mov) => {
+        const label = mov.concepto || mov.categoria || 'Movimiento';
+        if (!confirm(`¿Eliminar este movimiento?\n${label} — BS ${formatS(mov.monto)}${mov.categoria === 'Cobro Pedido' ? '\n\nTambién se eliminará el abono en Pedidos Clientes.' : ''}`)) return;
+        try {
+            // Si es Cobro Pedido, eliminar también en cliente_pagos (por caja_mov_id)
+            if (mov.categoria === 'Cobro Pedido') {
+                await supabase.from('cliente_pagos').delete().eq('caja_mov_id', mov.id);
+            }
+            await supabase.from('caja_movimientos').delete().eq('id', mov.id);
+            fetchMovimientos();
+            showEditMsg('Movimiento eliminado.');
+        } catch (e) {
+            showEditMsg('Error: ' + e.message, 'error');
+        }
+    };
+
     const handleUpdateMov = async () => {
         if (!editMov) return;
         const amt = parseFloat(editMov.monto);
@@ -475,10 +491,16 @@ function MovimientosTab() {
                                                 {m.tipo === 'INGRESO' ? '+' : '-'} BS {formatS(m.monto)}
                                             </td>
                                             <td className="px-3 py-3.5">
-                                                <button title="Editar" onClick={() => setEditMov({ id: m.id, concepto: m.concepto || '', monto: m.monto, metodo_pago: m.metodo_pago || 'Efectivo', categoria: m.categoria })}
-                                                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/10 text-muted hover:text-primary transition-all">
-                                                    <Pencil size={13} />
-                                                </button>
+                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                                                    <button title="Editar" onClick={() => setEditMov({ id: m.id, concepto: m.concepto || '', monto: m.monto, metodo_pago: m.metodo_pago || 'Efectivo', categoria: m.categoria })}
+                                                        className="p-1.5 rounded-lg hover:bg-primary/10 text-muted hover:text-primary transition-all">
+                                                        <Pencil size={13} />
+                                                    </button>
+                                                    <button title="Eliminar" onClick={() => handleDeleteMov(m)}
+                                                        className="p-1.5 rounded-lg hover:bg-error/10 text-muted hover:text-error transition-all">
+                                                        <Trash2 size={13} />
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );
