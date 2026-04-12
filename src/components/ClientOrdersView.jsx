@@ -79,6 +79,7 @@ export default function ClientOrdersView() {
     const [cartSelected, setCartSelected] = useState(new Set()); // índices seleccionados en el carrito histórico
     const [cartBulkSemana, setCartBulkSemana] = useState('');
     const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
+    const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -865,18 +866,22 @@ export default function ClientOrdersView() {
                 turnoId = activeTurno.id;
             }
 
-            const concetoLedger = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
-            const { data: cajaMov, error: moveErr } = await supabase.from('caja_movimientos').insert([{
-                turno_id: turnoId,
-                tipo: 'INGRESO',
-                categoria: 'Cobro Pedido',
-                concepto: concetoLedger,
-                monto: amt,
-                vendedor_id: user?.id,
-                metodo_pago: payMethod,
-                origen: 'Pedidos'
-            }]).select('id').single();
-            if (moveErr) throw moveErr;
+            let cajaMov = null;
+            if (!sinContabilidad) {
+                const concetoLedger = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
+                const { data: cajaMovData, error: moveErr } = await supabase.from('caja_movimientos').insert([{
+                    turno_id: turnoId,
+                    tipo: 'INGRESO',
+                    categoria: 'Cobro Pedido',
+                    concepto: concetoLedger,
+                    monto: amt,
+                    vendedor_id: user?.id,
+                    metodo_pago: payMethod,
+                    origen: 'Pedidos'
+                }]).select('id').single();
+                if (moveErr) throw moveErr;
+                cajaMov = cajaMovData;
+            }
 
             if (payMode === 'general') {
                 const { error: pErr } = await supabase.from('cliente_pagos').insert([{
@@ -891,15 +896,22 @@ export default function ClientOrdersView() {
                 if (pErr) throw pErr;
             } else {
                 if (selectedPayItems.length === 0) return alert("Seleccione al menos un ítem");
-                const splitAmt = amt / selectedPayItems.length;
 
                 const itemsToUpdate = items.filter(i => selectedPayItems.includes(i.id));
+                // Distribuir el monto cubriendo la deuda exacta de cada ítem en orden.
+                // Si el monto es exactamente la suma de deudas, cada ítem queda en 0.
+                // Si sobra/falta, se aplica en orden hasta agotar el monto.
+                let restante = amt;
                 for (let eq of itemsToUpdate) {
-                    const nuevoMonto = (Number(eq.monto_pagado) || 0) + splitAmt;
+                    if (restante <= 0) break;
+                    const deuda = Math.max(0, Number(eq.precio_venta) - Number(eq.monto_pagado || 0));
+                    const aplicar = Math.min(deuda, restante);
+                    const nuevoMonto = Number(eq.monto_pagado || 0) + aplicar;
                     await supabase.from('cliente_items').update({
                         monto_pagado: nuevoMonto,
                         estado: eq.estado
                     }).eq('id', eq.id);
+                    restante -= aplicar;
                 }
                 // También crear cliente_pagos para que aparezca en el historial
                 const { error: pErr } = await supabase.from('cliente_pagos').insert([{
@@ -920,9 +932,10 @@ export default function ClientOrdersView() {
             setPayReference('');
             setPayMethod('Yasta (QR)');
             setSelectedPayItems([]);
+            setSinContabilidad(false);
 
             await fetchData();
-            alert("✓ Pago registrado y contabilizado correctamente.");
+            alert(sinContabilidad ? "✓ Pago registrado (sin movimiento en Contabilidad)." : "✓ Pago registrado y contabilizado correctamente.");
         } catch (e) {
             console.error(e);
             alert(e.message || "Error al registrar pago");
@@ -940,6 +953,28 @@ export default function ClientOrdersView() {
                 await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
             }
             await supabase.from('cliente_pagos').delete().eq('id', pago.id);
+
+            // Recalcular: si el total pagado restante < sum(monto_pagado en ítems), hay que revertir el exceso
+            const clienteItems = items.filter(i => i.cliente_id === pago.cliente_id);
+            const pagoRestantes = pagos.filter(p => p.cliente_id === pago.cliente_id && p.id !== pago.id);
+            const newGroupPagos = pagoRestantes.reduce((s, p) => s + Number(p.monto), 0);
+            const cPagItemsTotal = clienteItems.reduce((s, i) => s + Number(i.monto_pagado || 0), 0);
+            let exceso = cPagItemsTotal - newGroupPagos;
+
+            if (exceso > 0) {
+                // Reducir monto_pagado de los ítems (de mayor a menor monto_pagado) hasta cubrir el exceso
+                const itemsOrdenados = [...clienteItems].sort((a, b) => Number(b.monto_pagado || 0) - Number(a.monto_pagado || 0));
+                for (const it of itemsOrdenados) {
+                    if (exceso <= 0) break;
+                    const mp = Number(it.monto_pagado || 0);
+                    if (mp <= 0) continue;
+                    const reducir = Math.min(mp, exceso);
+                    const nuevoMonto = mp - reducir;
+                    await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', it.id);
+                    exceso -= reducir;
+                }
+            }
+
             await fetchData();
         } catch (e) {
             console.error(e);
@@ -1371,10 +1406,10 @@ export default function ClientOrdersView() {
                                                     </div>
                                                 );
                                             })()}
-                                            <table className="w-full text-sm">
+                                            <table className="w-full text-sm border-collapse">
                                                 <thead>
-                                                    <tr className="text-left text-muted text-xs uppercase border-b border-border">
-                                                        <th className="pb-2 w-8">
+                                                    <tr className="text-left text-muted text-[10px] uppercase bg-surface/60 border-b border-border">
+                                                        <th className="py-2 px-3 w-8">
                                                             <input type="checkbox"
                                                                 className="w-3.5 h-3.5 accent-primary cursor-pointer"
                                                                 checked={group.items.length > 0 && group.items.every(it => selectedItems.has(it.id))}
@@ -1385,13 +1420,13 @@ export default function ClientOrdersView() {
                                                                 })}
                                                             />
                                                         </th>
-                                                        <th className="pb-2 pl-2">Título / Producto</th>
-                                                        <th className="pb-2">P. Venta</th>
-                                                        <th className="pb-2">Pagado</th>
-                                                        <th className="pb-2">Saldo</th>
-                                                        <th className="pb-2">Estado</th>
-                                                        <th className="pb-2 min-w-[120px]">Nota</th>
-                                                        <th className="pb-2"></th>
+                                                        <th className="py-2 px-3">Título / Producto</th>
+                                                        <th className="py-2 px-3 text-right whitespace-nowrap">P. Venta</th>
+                                                        <th className="py-2 px-3 text-right whitespace-nowrap">Pagado</th>
+                                                        <th className="py-2 px-3 text-right whitespace-nowrap">Saldo</th>
+                                                        <th className="py-2 px-3 w-44">Estado</th>
+                                                        <th className="py-2 px-3 min-w-[100px]">Nota</th>
+                                                        <th className="py-2 px-2 w-16"></th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1399,27 +1434,29 @@ export default function ClientOrdersView() {
                                                     {group.items.map(it => {
                                                         const iDeuda = Math.max(0, it.precio_venta - it.monto_pagado);
                                                         const isEd = editingState === it.id;
-                                                        
+
                                                         return (
-                                                            <tr key={it.id} className={`group border-b border-border/50 hover:bg-surface/50 ${selectedItems.has(it.id) ? 'bg-primary/5' : ''}`}>
-                                                                <td className="py-2 w-8">
-                                                                    <input type="checkbox" className="w-3.5 h-3.5 accent-primary cursor-pointer"
+                                                            <tr key={it.id} className={`group border-b border-border/40 hover:bg-surface/50 align-top ${selectedItems.has(it.id) ? 'bg-primary/5' : ''}`}>
+                                                                <td className="py-3 px-3 w-8">
+                                                                    <input type="checkbox" className="w-3.5 h-3.5 accent-primary cursor-pointer mt-0.5"
                                                                         checked={selectedItems.has(it.id)}
                                                                         onChange={e => setSelectedItems(prev => { const n = new Set(prev); e.target.checked ? n.add(it.id) : n.delete(it.id); return n; })}
                                                                     />
                                                                 </td>
-                                                                <td className="py-2 pl-2 font-medium text-text flex items-center gap-2">
-                                                                    <Box size={14} className="text-primary opacity-50" />
-                                                                    {it.titulo}
+                                                                <td className="py-3 px-3 font-medium text-text">
+                                                                    <div className="flex items-start gap-2">
+                                                                        <Box size={13} className="text-primary opacity-40 mt-0.5 shrink-0" />
+                                                                        <span className="leading-snug">{it.titulo}</span>
+                                                                    </div>
                                                                 </td>
-                                                                <td className="py-2 font-mono">BS {formatS(it.precio_venta)}</td>
-                                                                <td className="py-2 font-mono text-success">BS {formatS(it.monto_pagado)}</td>
-                                                                <td className="py-2 font-mono text-error font-bold">BS {formatS(iDeuda)}</td>
-                                                                <td className="py-2">
+                                                                <td className="py-3 px-3 font-mono text-right text-xs whitespace-nowrap text-text">BS {formatS(it.precio_venta)}</td>
+                                                                <td className="py-3 px-3 font-mono text-right text-xs whitespace-nowrap text-success font-bold">BS {formatS(it.monto_pagado)}</td>
+                                                                <td className="py-3 px-3 font-mono text-right text-xs whitespace-nowrap font-bold" style={{color: iDeuda > 0 ? 'var(--error)' : 'var(--success)'}}>BS {formatS(iDeuda)}</td>
+                                                                <td className="py-3 px-3 w-44">
                                                                     {isEd ? (
-                                                                        <input 
-                                                                            type="text" 
-                                                                            className="bg-transparent border border-primary text-xs px-2 py-1 rounded w-32 outline-none" 
+                                                                        <input
+                                                                            type="text"
+                                                                            className="bg-transparent border border-primary text-xs px-2 py-1 rounded w-32 outline-none"
                                                                             defaultValue={it.estado}
                                                                             onKeyDown={async(e)=>{
                                                                                 if(e.key === 'Enter') {
@@ -1435,7 +1472,7 @@ export default function ClientOrdersView() {
                                                                         renderStatus(it)
                                                                     )}
                                                                 </td>
-                                                                <td className="py-2 text-[11px] text-muted max-w-[150px] truncate" title={it.nota}>{it.nota || '-'}</td>
+                                                                <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>
                                                                 <td className="py-2 text-right">
                                                                     <div className="flex items-center justify-end gap-1">
                                                                     <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '' })}
@@ -1488,15 +1525,16 @@ export default function ClientOrdersView() {
                                                                 </td>
                                                             </tr>
                                                             {group.others.map(oit => (
-                                                                <tr key={oit.id} className="bg-muted/5 border-b border-border/20 opacity-70">
-                                                                    <td className="py-2 pl-2 text-xs font-medium italic">{oit.titulo}</td>
-                                                                    <td className="py-2 text-xs font-mono">BS {formatS(oit.precio_venta)}</td>
-                                                                    <td className="py-2 text-xs font-mono">BS {formatS(oit.monto_pagado)}</td>
-                                                                    <td className="py-2 text-xs font-mono">BS {formatS(oit.precio_venta - oit.monto_pagado)}</td>
-                                                                    <td className="py-2">
+                                                                <tr key={oit.id} className="bg-muted/5 border-b border-border/20 opacity-70 align-top">
+                                                                    <td className="py-3 px-3"></td>
+                                                                    <td className="py-3 px-3 text-xs font-medium italic">{oit.titulo}</td>
+                                                                    <td className="py-3 px-3 text-xs font-mono text-right whitespace-nowrap">BS {formatS(oit.precio_venta)}</td>
+                                                                    <td className="py-3 px-3 text-xs font-mono text-right whitespace-nowrap text-success">BS {formatS(oit.monto_pagado)}</td>
+                                                                    <td className="py-3 px-3 text-xs font-mono text-right whitespace-nowrap text-error">BS {formatS(oit.precio_venta - oit.monto_pagado)}</td>
+                                                                    <td className="py-3 px-3">
                                                                         {renderStatus(oit)}
                                                                     </td>
-                                                                    <td colSpan={2} className="py-2 text-[10px] text-muted italic">
+                                                                    <td colSpan={2} className="py-3 px-3 text-[10px] text-muted italic">
                                                                         Vendido por otro socio
                                                                     </td>
                                                                 </tr>
@@ -2399,32 +2437,50 @@ export default function ClientOrdersView() {
                                 })()}
 
                                 {payMode === 'items' ? (
-                                    <div className="mb-4 border border-border rounded-lg p-3 bg-background max-h-48 overflow-y-auto">
-                                        <div className="text-[10px] text-muted font-bold uppercase mb-2">Selecciona a qué ítems se destinará el pago:</div>
-                                        {pItems.map(it => {
-                                            const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
-                                            if(deuda <= 0) return null;
+                                    <div className="mb-4">
+                                        <div className="border border-border rounded-lg bg-background max-h-48 overflow-y-auto">
+                                            <div className="text-[10px] text-muted font-bold uppercase p-3 pb-1">Selecciona los ítems a pagar:</div>
+                                            {pItems.map(it => {
+                                                const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
+                                                if(deuda <= 0) return null;
+                                                const checked = selectedPayItems.includes(it.id);
+                                                return (
+                                                    <label key={it.id} className={`flex items-center gap-3 px-3 py-2 hover:bg-surface cursor-pointer border-b border-border/50 last:border-0 ${checked ? 'bg-primary/5' : ''}`}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={(e)=>{
+                                                                let next;
+                                                                if(e.target.checked) next = [...selectedPayItems, it.id];
+                                                                else next = selectedPayItems.filter(x=>x!==it.id);
+                                                                setSelectedPayItems(next);
+                                                                // Auto-llenar monto con la suma de deudas seleccionadas
+                                                                const total = pItems.filter(i => next.includes(i.id)).reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
+                                                                setPayMonto(total > 0 ? total : '');
+                                                            }}
+                                                            className="w-4 h-4 accent-primary shrink-0"
+                                                        />
+                                                        <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                                            <div className="text-sm font-bold truncate text-text">{it.titulo}</div>
+                                                            <div className={`text-xs font-black font-mono shrink-0 ${checked ? 'text-primary' : 'text-error'}`}>BS {formatS(deuda)}</div>
+                                                        </div>
+                                                    </label>
+                                                )
+                                            })}
+                                            {pItems.filter(i=> (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
+                                                <div className="text-xs text-center text-success py-4">No hay ítems con deuda pendiente.</div>
+                                            )}
+                                        </div>
+                                        {selectedPayItems.length > 0 && (() => {
+                                            const selItems = pItems.filter(i => selectedPayItems.includes(i.id));
+                                            const totalSel = selItems.reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
                                             return (
-                                                <label key={it.id} className="flex items-center gap-3 p-2 hover:bg-surface rounded cursor-pointer border-b border-border/50 last:border-0">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        checked={selectedPayItems.includes(it.id)}
-                                                        onChange={(e)=>{
-                                                            if(e.target.checked) setSelectedPayItems([...selectedPayItems, it.id]);
-                                                            else setSelectedPayItems(selectedPayItems.filter(x=>x!==it.id));
-                                                        }}
-                                                        className="w-4 h-4 accent-primary"
-                                                    />
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-bold truncate text-text">{it.titulo}</div>
-                                                        <div className="text-[10px] uppercase text-error">Deuda: BS {formatS(deuda)}</div>
-                                                    </div>
-                                                </label>
-                                            )
-                                        })}
-                                        {pItems.filter(i=> (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
-                                            <div className="text-xs text-center text-success py-4">No hay ítems con deuda pendiente.</div>
-                                        )}
+                                                <div className="mt-2 flex justify-between items-center px-2">
+                                                    <span className="text-[10px] font-black uppercase text-muted">{selItems.length} ítem(s) seleccionado(s)</span>
+                                                    <span className="text-sm font-black font-mono text-primary">BS {formatS(totalSel)}</span>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 ) : payMode === 'distribuir' ? (
                                     (() => {
@@ -2550,7 +2606,12 @@ export default function ClientOrdersView() {
                                         <input type="number" value={payMonto} onChange={e=>setPayMonto(e.target.value)} autoFocus className="w-full bg-background border-2 border-border focus:border-success px-4 py-3 rounded-lg text-xl text-center text-success font-bold font-mono outline-none shadow-inner"/>
                                         {payMode === 'items' && selectedPayItems.length > 0 && payMonto > 0 && (
                                             <div className="text-[10px] text-center mt-2 text-muted uppercase">
-                                                Se distribuirán BS {formatS(payMonto / selectedPayItems.length)} por cada ({selectedPayItems.length}) ítem(s).
+                                                {(() => {
+                                                    const totalDeuda = pItems.filter(i => selectedPayItems.includes(i.id)).reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
+                                                    if (Number(payMonto) === totalDeuda) return `Cubre la deuda exacta de ${selectedPayItems.length} ítem(s).`;
+                                                    if (Number(payMonto) < totalDeuda) return `Monto parcial — se aplicará en orden hasta agotar BS ${formatS(payMonto)}.`;
+                                                    return `Cubre todos los ítems y sobran BS ${formatS(Number(payMonto) - totalDeuda)}.`;
+                                                })()}
                                             </div>
                                         )}
                                     </div>
@@ -2599,8 +2660,17 @@ export default function ClientOrdersView() {
                                 })()}
                             </div>
 
-                            <div className="p-4 border-t border-border flex justify-end gap-3 bg-background rounded-b-2xl">
-                                <button onClick={()=>setShowPayModal(null)} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
+                            <div className="p-4 border-t border-border flex justify-between items-center gap-3 bg-background rounded-b-2xl">
+                                <div className="flex items-center gap-2">
+                                    {isAdmin && payMode !== 'distribuir' && (
+                                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="No crea movimiento en Contabilidad/Caja. Útil para corregir pagos históricos.">
+                                            <input type="checkbox" checked={sinContabilidad} onChange={e => setSinContabilidad(e.target.checked)} className="w-3.5 h-3.5 accent-orange-400"/>
+                                            <span className={`text-[10px] font-black uppercase ${sinContabilidad ? 'text-orange-500' : 'text-muted'}`}>Sin contabilidad</span>
+                                        </label>
+                                    )}
+                                </div>
+                                <div className="flex gap-3">
+                                <button onClick={()=>{ setShowPayModal(null); setSinContabilidad(false); }} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
                                 {payMode === 'distribuir' ? (() => {
                                     const pItemsCli3 = items.filter(i => i.cliente_id === showPayModal);
                                     const cPagItemsCli3 = pItemsCli3.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
@@ -2618,6 +2688,7 @@ export default function ClientOrdersView() {
                                 })() : (
                                     <button onClick={()=>handleSavePayment(cli.id)} className="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-success/90 shadow-lg">Confirmar Pago</button>
                                 )}
+                                </div>
                             </div>
                         </div>
                     </div>
