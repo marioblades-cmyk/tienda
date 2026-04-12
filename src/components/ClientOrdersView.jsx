@@ -22,6 +22,7 @@ export default function ClientOrdersView() {
     const [filterEstado, setFilterEstado] = useState('todos'); // 'todos' | 'PEDIDO' | 'CONFIRMADO' | 'EN TIENDA' | 'ENTREGADO'
     const [filterSemana, setFilterSemana] = useState('todos'); // 'todos' | semana_id
     const [expandedCliente, setExpandedCliente] = useState(new Set());
+    const [compactClients, setCompactClients] = useState(new Set()); // IDs en modo compacto
     const [selectedSemanaHoja, setSelectedSemanaHoja] = useState('');
     const [selectedItems, setSelectedItems] = useState(new Set()); // IDs de ítems seleccionados para acciones masivas
 
@@ -1310,6 +1311,12 @@ export default function ClientOrdersView() {
                     {groupedData.length === 0 && <div className="text-center py-10 text-muted">No se encontraron clientes o pedidos.</div>}
                     {groupedData.map(group => {
                         const isExp = expandedCliente.has(group.client.id);
+                        const isCompact = compactClients.has(group.client.id);
+                        const toggleCompact = () => setCompactClients(prev => { const n = new Set(prev); isCompact ? n.delete(group.client.id) : n.add(group.client.id); return n; });
+                        const estadoCount = group.items.reduce((acc, it) => {
+                            const key = it.estado === 'ADJUDICADO' ? 'CONFIRMADO' : it.estado === 'EN TIENDA' ? 'EN TIENDA' : it.estado === 'ENTREGADO' ? 'ENTREGADO' : 'PEDIDO';
+                            acc[key] = (acc[key] || 0) + 1; return acc;
+                        }, {});
                         const cVentas = group.items.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
                         const cPagItems = group.items.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
                         const totalPagado = group.pagos > 0 ? group.pagos : cPagItems;
@@ -1380,8 +1387,25 @@ export default function ClientOrdersView() {
 
                                 {/* Expanded Table */}
                                 {isExp && (
-                                    <div className="border-t border-border bg-background p-4 animate-in slide-in-from-top-2">
-                                        <div className="overflow-x-auto">
+                                    <div className="border-t border-border bg-background animate-in slide-in-from-top-2">
+                                        {/* BARRA SUPERIOR: resumen + toggle compacto */}
+                                        <div className="flex items-center justify-between gap-2 px-4 py-2 bg-surface/40 border-b border-border/40 flex-wrap">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                {Object.entries(estadoCount).map(([estado, cnt]) => (
+                                                    <span key={estado} className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                                        estado === 'EN TIENDA' ? 'bg-success/10 border-success/30 text-success' :
+                                                        estado === 'CONFIRMADO' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
+                                                        estado === 'ENTREGADO' ? 'bg-border/40 border-border text-muted' :
+                                                        'bg-primary/10 border-primary/30 text-primary'
+                                                    }`}>{estado}: {cnt}</span>
+                                                ))}
+                                                {cDeuda > 0 && <span className="text-[10px] font-black text-error font-mono">Saldo: BS {formatS(cDeuda)}</span>}
+                                            </div>
+                                            <button onClick={toggleCompact} className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-lg border transition-all ${isCompact ? 'bg-primary text-white border-primary' : 'bg-transparent border-border text-muted hover:border-primary hover:text-primary'}`}>
+                                                {isCompact ? '[ ] Normal' : '[=] Compacto'}
+                                            </button>
+                                        </div>
+                                        <div className={`overflow-x-auto ${isCompact ? 'px-2 pb-2' : 'p-4'}`}>
                                             {/* BARRA DE ACCIÓN MASIVA */}
                                             {[...selectedItems].some(id => group.items.find(it => it.id === id)) && (() => {
                                                 const groupSelected = new Set([...selectedItems].filter(id => group.items.find(it => it.id === id)));
@@ -1409,7 +1433,7 @@ export default function ClientOrdersView() {
                                             <table className="w-full text-sm border-collapse">
                                                 <thead>
                                                     <tr className="text-left text-muted text-[10px] uppercase bg-surface/60 border-b border-border">
-                                                        <th className="py-2 px-3 w-8">
+                                                        <th className={`${isCompact ? 'py-1 px-2' : 'py-2 px-3'} w-8`}>
                                                             <input type="checkbox"
                                                                 className="w-3.5 h-3.5 accent-primary cursor-pointer"
                                                                 checked={group.items.length > 0 && group.items.every(it => selectedItems.has(it.id))}
@@ -1420,13 +1444,13 @@ export default function ClientOrdersView() {
                                                                 })}
                                                             />
                                                         </th>
-                                                        <th className="py-2 px-3">Título / Producto</th>
-                                                        <th className="py-2 px-3 text-right whitespace-nowrap">P. Venta</th>
-                                                        <th className="py-2 px-3 text-right whitespace-nowrap">Pagado</th>
-                                                        <th className="py-2 px-3 text-right whitespace-nowrap">Saldo</th>
-                                                        <th className="py-2 px-3 w-44">Estado</th>
-                                                        <th className="py-2 px-3 min-w-[100px]">Nota</th>
-                                                        <th className="py-2 px-2 w-16"></th>
+                                                        <th className={`${isCompact ? 'py-1 px-2' : 'py-2 px-3'}`}>Título / Producto</th>
+                                                        <th className={`${isCompact ? 'py-1 px-2' : 'py-2 px-3'} text-right whitespace-nowrap`}>P. Venta</th>
+                                                        <th className={`${isCompact ? 'py-1 px-2' : 'py-2 px-3'} text-right whitespace-nowrap`}>Pagado</th>
+                                                        <th className={`${isCompact ? 'py-1 px-2' : 'py-2 px-3'} text-right whitespace-nowrap`}>Saldo</th>
+                                                        <th className={`${isCompact ? 'py-1 px-2 w-36' : 'py-2 px-3 w-44'}`}>Estado</th>
+                                                        {!isCompact && <th className="py-2 px-3 min-w-[100px]">Nota</th>}
+                                                        <th className={`${isCompact ? 'py-1 px-1 w-10' : 'py-2 px-2 w-16'}`}></th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1435,24 +1459,25 @@ export default function ClientOrdersView() {
                                                         const iDeuda = Math.max(0, it.precio_venta - it.monto_pagado);
                                                         const isEd = editingState === it.id;
 
+                                                        const rp = isCompact ? 'py-1 px-2' : 'py-3 px-3';
                                                         return (
-                                                            <tr key={it.id} className={`group border-b border-border/40 hover:bg-surface/50 align-top ${selectedItems.has(it.id) ? 'bg-primary/5' : ''}`}>
-                                                                <td className="py-3 px-3 w-8">
-                                                                    <input type="checkbox" className="w-3.5 h-3.5 accent-primary cursor-pointer mt-0.5"
+                                                            <tr key={it.id} className={`group border-b border-border/40 hover:bg-surface/50 align-middle ${selectedItems.has(it.id) ? 'bg-primary/5' : ''}`}>
+                                                                <td className={`${rp} w-8`}>
+                                                                    <input type="checkbox" className="w-3.5 h-3.5 accent-primary cursor-pointer"
                                                                         checked={selectedItems.has(it.id)}
                                                                         onChange={e => setSelectedItems(prev => { const n = new Set(prev); e.target.checked ? n.add(it.id) : n.delete(it.id); return n; })}
                                                                     />
                                                                 </td>
-                                                                <td className="py-3 px-3 font-medium text-text">
-                                                                    <div className="flex items-start gap-2">
-                                                                        <Box size={13} className="text-primary opacity-40 mt-0.5 shrink-0" />
-                                                                        <span className="leading-snug">{it.titulo}</span>
+                                                                <td className={`${rp} font-medium text-text`}>
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <Box size={isCompact ? 11 : 13} className="text-primary opacity-40 shrink-0" />
+                                                                        <span className={isCompact ? 'text-xs' : ''}>{it.titulo}</span>
                                                                     </div>
                                                                 </td>
-                                                                <td className="py-3 px-3 font-mono text-right text-xs whitespace-nowrap text-text">BS {formatS(it.precio_venta)}</td>
-                                                                <td className="py-3 px-3 font-mono text-right text-xs whitespace-nowrap text-success font-bold">BS {formatS(it.monto_pagado)}</td>
-                                                                <td className="py-3 px-3 font-mono text-right text-xs whitespace-nowrap font-bold" style={{color: iDeuda > 0 ? 'var(--error)' : 'var(--success)'}}>BS {formatS(iDeuda)}</td>
-                                                                <td className="py-3 px-3 w-44">
+                                                                <td className={`${rp} font-mono text-right whitespace-nowrap text-text ${isCompact ? 'text-[11px]' : 'text-xs'}`}>BS {formatS(it.precio_venta)}</td>
+                                                                <td className={`${rp} font-mono text-right whitespace-nowrap text-success font-bold ${isCompact ? 'text-[11px]' : 'text-xs'}`}>BS {formatS(it.monto_pagado)}</td>
+                                                                <td className={`${rp} font-mono text-right whitespace-nowrap font-bold ${isCompact ? 'text-[11px]' : 'text-xs'}`} style={{color: iDeuda > 0 ? 'var(--error)' : 'var(--success)'}}>BS {formatS(iDeuda)}</td>
+                                                                <td className={`${rp} ${isCompact ? 'w-36' : 'w-44'}`}>
                                                                     {isEd ? (
                                                                         <input
                                                                             type="text"
@@ -1472,12 +1497,12 @@ export default function ClientOrdersView() {
                                                                         renderStatus(it)
                                                                     )}
                                                                 </td>
-                                                                <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>
-                                                                <td className="py-2 text-right">
-                                                                    <div className="flex items-center justify-end gap-1">
+                                                                {!isCompact && <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>}
+                                                                <td className={`${isCompact ? 'py-1 px-1' : 'py-2 px-2'} text-right`}>
+                                                                    <div className="flex items-center justify-end gap-0.5">
                                                                     <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '' })}
                                                                         className="text-muted hover:text-primary p-1 transition-colors opacity-0 group-hover:opacity-100">
-                                                                        <Edit2 size={14}/>
+                                                                        <Edit2 size={isCompact ? 12 : 14}/>
                                                                     </button>
                                                                     <button onClick={async()=>{
                                                                         if(!confirm('¿Eliminar este ítem del pedido?')) return;
@@ -1506,7 +1531,7 @@ export default function ClientOrdersView() {
                                                                         } catch(e){ console.error(e); }
                                                                         finally { setLoading(false); }
                                                                     }} className="text-muted hover:text-error p-1 transition-colors">
-                                                                        <Trash2 size={14}/>
+                                                                        <Trash2 size={isCompact ? 12 : 14}/>
                                                                     </button>
                                                                     </div>
                                                                 </td>
@@ -2439,7 +2464,28 @@ export default function ClientOrdersView() {
                                 {payMode === 'items' ? (
                                     <div className="mb-4">
                                         <div className="border border-border rounded-lg bg-background max-h-48 overflow-y-auto">
-                                            <div className="text-[10px] text-muted font-bold uppercase p-3 pb-1">Selecciona los ítems a pagar:</div>
+                                            <div className="flex items-center justify-between px-3 pt-3 pb-1">
+                                                <span className="text-[10px] text-muted font-bold uppercase">Selecciona los ítems a pagar:</span>
+                                                {(() => {
+                                                    const pendientes = pItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0);
+                                                    const todosSeleccionados = pendientes.length > 0 && pendientes.every(i => selectedPayItems.includes(i.id));
+                                                    return (
+                                                        <button onClick={() => {
+                                                            if (todosSeleccionados) {
+                                                                setSelectedPayItems([]);
+                                                                setPayMonto('');
+                                                            } else {
+                                                                const ids = pendientes.map(i => i.id);
+                                                                setSelectedPayItems(ids);
+                                                                const total = pendientes.reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
+                                                                setPayMonto(total);
+                                                            }
+                                                        }} className="text-[10px] font-black uppercase text-primary hover:underline">
+                                                            {todosSeleccionados ? 'Deseleccionar' : 'Seleccionar todos'}
+                                                        </button>
+                                                    );
+                                                })()}
+                                            </div>
                                             {pItems.map(it => {
                                                 const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
                                                 if(deuda <= 0) return null;
