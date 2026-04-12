@@ -2472,7 +2472,15 @@ export default function ClientOrdersView() {
             {/* PAY MODAL */}
             {showPayModal && (() => {
                 const cli = clientes.find(c => c.id === showPayModal);
-                const pItems = items.filter(i => i.cliente_id === showPayModal);
+                const pItems = items.filter(i => i.cliente_id === showPayModal).sort((a, b) => {
+                    const getSerie = t => (t || '').replace(/\s\d+\s*$/, '').trim();
+                    const getVol = t => { const m = (t || '').match(/\s(\d+)\s*$/); return m ? parseInt(m[1], 10) : null; };
+                    const sA = getSerie(a.titulo), sB = getSerie(b.titulo);
+                    if (sA !== sB) return sA.localeCompare(sB, 'es');
+                    const nA = getVol(a.titulo), nB = getVol(b.titulo);
+                    if (nA !== null && nB !== null) return nA - nB;
+                    return (a.titulo || '').localeCompare(b.titulo || '', 'es');
+                });
                 
                 return (
                     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
