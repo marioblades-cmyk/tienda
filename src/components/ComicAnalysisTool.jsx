@@ -139,7 +139,10 @@ const ComicAnalysisTool = () => {
     };
 
     const calculateMissingItems = (data, currentCatalog) => {
+        const normalizeStr = s => (s || '').trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
         const allProcessedEans = new Set();
+        const allProcessedTitulos = new Set();
         Object.values(data).forEach(sheet => {
             if (sheet && Array.isArray(sheet.items)) {
                 sheet.items.forEach(item => {
@@ -147,30 +150,36 @@ const ComicAnalysisTool = () => {
                     if (item.ean_oficial) allProcessedEans.add(item.ean_oficial);
                     if (item.ean_interno) allProcessedEans.add(item.ean_interno);
                     if (item.product_id) allProcessedEans.add(item.product_id);
+                    if (item.titulo) allProcessedTitulos.add(normalizeStr(item.titulo));
                 });
             }
         });
 
         const newItemsAusentes = {};
         const activeEditoriales = new Set(Object.keys(data));
+        const activeEdNormalized = new Set([...activeEditoriales].map(normalizeStr));
 
         const catalogToUse = currentCatalog || dbCatalog;
 
         if (catalogToUse && Object.keys(catalogToUse).length > 0) {
             Object.values(catalogToUse).forEach(dbItem => {
                 if (!dbItem) return;
-                if (activeEditoriales.has(dbItem.editorial)) {
+                if (activeEdNormalized.has(normalizeStr(dbItem.editorial))) {
                     const itemIdentifiers = [dbItem.ean_oficial, dbItem.ean_interno, dbItem.product_id].filter(Boolean);
-                    const isPresent = itemIdentifiers.some(id => allProcessedEans.has(id));
+                    const isByEan = itemIdentifiers.some(id => allProcessedEans.has(id));
+                    const isByTitulo = dbItem.titulo ? allProcessedTitulos.has(normalizeStr(dbItem.titulo)) : false;
+                    const isPresent = isByEan || isByTitulo;
 
                     if (!isPresent) {
-                        if (!newItemsAusentes[dbItem.editorial]) newItemsAusentes[dbItem.editorial] = [];
-                        newItemsAusentes[dbItem.editorial].push(dbItem);
+                        const edKey = dbItem.editorial;
+                        if (!newItemsAusentes[edKey]) newItemsAusentes[edKey] = [];
+                        newItemsAusentes[edKey].push(dbItem);
                     }
                 }
             });
         }
         setItemsAusentes(newItemsAusentes);
+        return newItemsAusentes;
     };
 
     const checkForAutoReport = async (currentCatalog) => {
@@ -269,13 +278,16 @@ const ComicAnalysisTool = () => {
                     setSheetsData(reportData);
                     const tabs = Object.keys(reportData).filter(k => !k.startsWith('_'));
                     const firstAvailable = tabs.length > 0 ? tabs[0] : null;
-                    setActiveTab(firstAvailable || 'TODOS_RESUMEN');
                     setViewMode('results');
-                    setIsProcessing(false); 
+                    setIsProcessing(false);
 
                     // Si ya tenemos el catálogo disponible, calcular ausentes
                     if (currentCatalog) {
-                        calculateMissingItems(reportData, currentCatalog);
+                        const ausentesAR = calculateMissingItems(reportData, currentCatalog);
+                        const hasAlertasAR = Object.values(ausentesAR).some(arr => arr.length > 0);
+                        setActiveTab(hasAlertasAR ? 'TODOS_RESUMEN' : (firstAvailable || 'TODOS_RESUMEN'));
+                    } else {
+                        setActiveTab(firstAvailable || 'TODOS_RESUMEN');
                     }
                 } else {
                     console.log('⚠️ No hay reporte guardado en la nube para esta semana.');
@@ -400,9 +412,11 @@ const ComicAnalysisTool = () => {
                 setIsViewingHistory(true);
                 setHistoryReportName(semana.nombre);
                 const firstAvailable = Object.keys(reportData).filter(k => !k.startsWith('_'))[0];
-                setActiveTab(firstAvailable);
+                const firstAvailableH = firstAvailable;
                 setViewMode('results');
-                calculateMissingItems(reportData, dbCatalog);
+                const ausentesH = calculateMissingItems(reportData, dbCatalog);
+                const hasAlertasH = Object.values(ausentesH).some(arr => arr.length > 0);
+                setActiveTab(hasAlertasH ? 'TODOS_RESUMEN' : firstAvailableH);
             } else {
                 // Si no hay JSON, procesamos el Excel original
                 console.log('📄 No hay JSON, procesando Excel original...');
@@ -521,10 +535,10 @@ const ComicAnalysisTool = () => {
                         newSheetsData[sheetName] = result;
                     }
 
-                    calculateMissingItems(newSheetsData, currentCatalog);
+                    const ausentes = calculateMissingItems(newSheetsData, currentCatalog);
                     setSheetsData(newSheetsData);
                     setLastFileName(file.name);
-                    
+
                     localStorage.setItem('mcb_stored_report', JSON.stringify({
                         data: newSheetsData,
                         filename: file.name,
@@ -533,7 +547,8 @@ const ComicAnalysisTool = () => {
                     localStorage.setItem('mcb_last_filename', file.name);
 
                     const firstAvailable = Object.keys(newSheetsData)[0];
-                    setActiveTab(firstAvailable);
+                    const hasAlertas = Object.values(ausentes).some(arr => arr.length > 0);
+                    setActiveTab(hasAlertas ? 'TODOS_RESUMEN' : firstAvailable);
                     setPage(1);
                     setViewMode('results');
                     setIsProcessing(false);
@@ -1549,6 +1564,11 @@ const ComicAnalysisTool = () => {
                             }}
                         >
                             🌎 TODOS
+                            {Object.values(itemsAusentes).some(arr => arr.length > 0) && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-[9px] font-black rounded-full align-middle">
+                                    {Object.values(itemsAusentes).reduce((s, arr) => s + arr.length, 0)}
+                                </span>
+                            )}
                         </button>
                         {Object.keys(sheetsData).filter(sheetName => !sheetName.startsWith('_')).map(sheetName => (
                             <button

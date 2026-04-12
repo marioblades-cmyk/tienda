@@ -586,12 +586,14 @@ export default function FlujoCajaView({ user, profile }) {
                 >
                     <LayoutDashboard size={14} className={currentView === 'panel' ? 'text-primary' : ''} /> Operativa
                 </button>
-                <button 
-                    onClick={() => setCurrentView('historial')}
-                    className={`flex items-center gap-2.5 px-5 py-1.5 rounded-lg text-[10px] font-bold transition-all uppercase tracking-widest ${currentView === 'historial' ? 'bg-navy text-white shadow-sm' : 'text-navy/40 hover:bg-navy/5'}`}
-                >
-                    <History size={14} className={currentView === 'historial' ? 'text-primary' : ''} /> Auditoría
-                </button>
+                {isAdmin && (
+                    <button
+                        onClick={() => setCurrentView('historial')}
+                        className={`flex items-center gap-2.5 px-5 py-1.5 rounded-lg text-[10px] font-bold transition-all uppercase tracking-widest ${currentView === 'historial' ? 'bg-navy text-white shadow-sm' : 'text-navy/40 hover:bg-navy/5'}`}
+                    >
+                        <History size={14} className={currentView === 'historial' ? 'text-primary' : ''} /> Auditoría
+                    </button>
+                )}
             </div>
 
             {currentView === 'panel' ? (
@@ -625,12 +627,15 @@ export default function FlujoCajaView({ user, profile }) {
                         <div className="relative flex items-center gap-2">
                             {turnoActivo ? (
                                 <>
-                                    <button 
-                                        onClick={() => handleDeleteTurno(turnoActivo.id)} 
-                                        className="p-2.5 bg-background text-navy/30 rounded-lg hover:text-error hover:bg-error/5 transition-all border border-border/20"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    {isAdmin && (
+                                        <button
+                                            onClick={() => handleDeleteTurno(turnoActivo.id)}
+                                            className="p-2.5 bg-background text-navy/30 rounded-lg hover:text-error hover:bg-error/5 transition-all border border-border/20"
+                                            title="Eliminar turno (solo admin)"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
                                     <button 
                                         onClick={() => setShowCloseModal(true)} 
                                         className="bg-navy text-white px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-navy/10"
@@ -1399,12 +1404,16 @@ export default function FlujoCajaView({ user, profile }) {
                                                 <button onClick={() => setShowDetailModal(h)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-primary transition-all border border-border/20 shadow-sm" title="Detalle">
                                                     <Eye size={16} />
                                                 </button>
-                                                <button onClick={() => setShowEditModal(h)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-accent transition-all border border-border/20 shadow-sm" title="Editar">
-                                                    <Edit3 size={16} />
-                                                </button>
-                                                <button onClick={() => handleDeleteTurno(h.id)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-error transition-all border border-border/20 shadow-sm" title="Eliminar">
-                                                    <Trash2 size={16} />
-                                                </button>
+                                                {isAdmin && (
+                                                    <>
+                                                        <button onClick={() => setShowEditModal(h)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-accent transition-all border border-border/20 shadow-sm" title="Editar (solo admin)">
+                                                            <Edit3 size={16} />
+                                                        </button>
+                                                        <button onClick={() => handleDeleteTurno(h.id)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-error transition-all border border-border/20 shadow-sm" title="Eliminar (solo admin)">
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -1586,10 +1595,102 @@ export default function FlujoCajaView({ user, profile }) {
             {/* --- MODAL DETALLE TURNO HISTORIAL --- */}
             <AnimatePresence>
                 {showDetailModal && (
-                   <TurnoDetailModal 
-                        turno={showDetailModal} 
-                        onClose={() => setShowDetailModal(null)} 
+                   <TurnoDetailModal
+                        turno={showDetailModal}
+                        onClose={() => setShowDetailModal(null)}
                    />
+                )}
+            </AnimatePresence>
+
+            {/* ===== MODAL: GESTIÓN DE CATEGORÍAS (solo admin) ===== */}
+            <AnimatePresence>
+                {showCategoriasModal && isAdmin && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[9997] flex items-center justify-center bg-navy/60 backdrop-blur-sm px-4"
+                        onClick={(e) => e.target === e.currentTarget && setShowCategoriasModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-border/20"
+                        >
+                            <div className="p-6 border-b border-border/10 flex items-center justify-between shrink-0">
+                                <div>
+                                    <h3 className="text-lg font-black text-navy uppercase tracking-widest">Categorías de Caja</h3>
+                                    <p className="text-xs text-muted mt-0.5">Gestiona las categorías de ingresos y egresos</p>
+                                </div>
+                                <button onClick={() => setShowCategoriasModal(false)} className="w-9 h-9 rounded-xl bg-navy/5 hover:bg-navy/10 flex items-center justify-center transition-colors">
+                                    <XCircle size={18} className="text-navy/40" />
+                                </button>
+                            </div>
+                            <div className="p-6 border-b border-border/10 bg-navy/[0.02] shrink-0">
+                                <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-3">
+                                    {editingCategoria ? '✏️ Editando categoría' : '➕ Nueva categoría'}
+                                </p>
+                                <div className="flex gap-3">
+                                    <select
+                                        value={categoriaForm.tipo}
+                                        onChange={e => setCategoriaForm({...categoriaForm, tipo: e.target.value})}
+                                        className="bg-white border border-border/20 rounded-xl px-3 py-2.5 text-[11px] font-black uppercase outline-none focus:border-primary/40 transition-all cursor-pointer w-32 shrink-0"
+                                    >
+                                        <option value="INGRESO">Ingreso</option>
+                                        <option value="EGRESO">Egreso</option>
+                                        <option value="AMBOS">Ambos</option>
+                                    </select>
+                                    <input
+                                        type="text"
+                                        placeholder="Nombre de la categoría..."
+                                        value={categoriaForm.nombre}
+                                        onChange={e => setCategoriaForm({...categoriaForm, nombre: e.target.value})}
+                                        onKeyDown={e => e.key === 'Enter' && handleSaveCategoria()}
+                                        className="flex-1 bg-white border border-border/20 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:border-primary/40 transition-all"
+                                    />
+                                    <button
+                                        onClick={handleSaveCategoria}
+                                        className="bg-navy text-white px-4 rounded-xl text-xs font-bold hover:brightness-110 transition-all flex items-center gap-1.5 shrink-0"
+                                    >
+                                        {editingCategoria ? <><CheckCircle2 size={13} /> Guardar</> : <><Plus size={13} /> Crear</>}
+                                    </button>
+                                    {editingCategoria && (
+                                        <button
+                                            onClick={() => { setEditingCategoria(null); setCategoriaForm({ nombre: '', tipo: 'INGRESO' }); }}
+                                            className="px-3 rounded-xl border border-border text-navy/40 hover:bg-navy/5 transition-all text-xs font-bold"
+                                        >✕</button>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="overflow-y-auto flex-1 p-4">
+                                {['INGRESO', 'EGRESO', 'AMBOS'].map(tipo => {
+                                    const grupo = categorias.filter(c => c.tipo === tipo);
+                                    if (grupo.length === 0) return null;
+                                    return (
+                                        <div key={tipo} className="mb-4">
+                                            <p className={`text-[9px] font-black uppercase tracking-widest mb-2 px-2 ${tipo === 'INGRESO' ? 'text-emerald-600' : tipo === 'EGRESO' ? 'text-red-500' : 'text-navy/40'}`}>
+                                                {tipo === 'INGRESO' ? '▲ Ingresos' : tipo === 'EGRESO' ? '▼ Egresos' : '⇅ Ambos'}
+                                            </p>
+                                            {grupo.map(cat => (
+                                                <div key={cat.id} className="flex items-center justify-between px-4 py-3 rounded-xl hover:bg-navy/[0.03] group transition-colors">
+                                                    <span className="text-sm font-bold text-navy">{cat.nombre}</span>
+                                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button onClick={() => { setEditingCategoria(cat); setCategoriaForm({ nombre: cat.nombre, tipo: cat.tipo }); }} className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-colors"><Edit3 size={12} /></button>
+                                                        <button onClick={() => handleDeleteCategoria(cat.id, cat.nombre)} className="w-7 h-7 rounded-lg bg-error/10 text-error flex items-center justify-center hover:bg-error/20 transition-colors"><Trash2 size={12} /></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })}
+                                {categorias.length === 0 && (
+                                    <div className="py-10 text-center text-muted text-sm">No hay categorías. Crea la primera ↑</div>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </div>
@@ -1819,101 +1920,6 @@ function TurnoDetailModal({ turno, onClose }) {
                     <p className="text-[10px] font-mono text-navy/30 uppercase tracking-[0.4em]">Fin del Reporte Auditado</p>
                 </div>
             </motion.div>
-
-            {/* ===== MODAL: GESTIÓN DE CATEGORÍAS (solo admin) ===== */}
-            <AnimatePresence>
-                {showCategoriasModal && isAdmin && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[9997] flex items-center justify-center bg-navy/60 backdrop-blur-sm px-4"
-                        onClick={(e) => e.target === e.currentTarget && setShowCategoriasModal(false)}
-                    >
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-border/20"
-                        >
-                            {/* Header */}
-                            <div className="p-6 border-b border-border/10 flex items-center justify-between shrink-0">
-                                <div>
-                                    <h3 className="text-lg font-black text-navy uppercase tracking-widest">Categorías de Caja</h3>
-                                    <p className="text-xs text-muted mt-0.5">Gestiona las categorías de ingresos y egresos</p>
-                                </div>
-                                <button onClick={() => setShowCategoriasModal(false)} className="w-9 h-9 rounded-xl bg-navy/5 hover:bg-navy/10 flex items-center justify-center transition-colors">
-                                    <XCircle size={18} className="text-navy/40" />
-                                </button>
-                            </div>
-                            {/* Form: Crear / Editar */}
-                            <div className="p-6 border-b border-border/10 bg-navy/[0.02] shrink-0">
-                                <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-3">
-                                    {editingCategoria ? '✏️ Editando categoría' : '➕ Nueva categoría'}
-                                </p>
-                                <div className="flex gap-3">
-                                    <select
-                                        value={categoriaForm.tipo}
-                                        onChange={e => setCategoriaForm({...categoriaForm, tipo: e.target.value})}
-                                        className="bg-white border border-border/20 rounded-xl px-3 py-2.5 text-[11px] font-black uppercase outline-none focus:border-primary/40 transition-all cursor-pointer w-32 shrink-0"
-                                    >
-                                        <option value="INGRESO">Ingreso</option>
-                                        <option value="EGRESO">Egreso</option>
-                                        <option value="AMBOS">Ambos</option>
-                                    </select>
-                                    <input
-                                        type="text"
-                                        placeholder="Nombre de la categoría..."
-                                        value={categoriaForm.nombre}
-                                        onChange={e => setCategoriaForm({...categoriaForm, nombre: e.target.value})}
-                                        onKeyDown={e => e.key === 'Enter' && handleSaveCategoria()}
-                                        className="flex-1 bg-white border border-border/20 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:border-primary/40 transition-all"
-                                    />
-                                    <button
-                                        onClick={handleSaveCategoria}
-                                        className="bg-navy text-white px-4 rounded-xl text-xs font-bold hover:brightness-110 transition-all flex items-center gap-1.5 shrink-0"
-                                    >
-                                        {editingCategoria ? <><CheckCircle2 size={13} /> Guardar</> : <><Plus size={13} /> Crear</>}
-                                    </button>
-                                    {editingCategoria && (
-                                        <button
-                                            onClick={() => { setEditingCategoria(null); setCategoriaForm({ nombre: '', tipo: 'INGRESO' }); }}
-                                            className="px-3 rounded-xl border border-border text-navy/40 hover:bg-navy/5 transition-all text-xs font-bold"
-                                        >✕</button>
-                                    )}
-                                </div>
-                            </div>
-                            {/* Lista */}
-                            <div className="overflow-y-auto flex-1 p-4">
-                                {['INGRESO', 'EGRESO', 'AMBOS'].map(tipo => {
-                                    const grupo = categorias.filter(c => c.tipo === tipo);
-                                    if (grupo.length === 0) return null;
-                                    return (
-                                        <div key={tipo} className="mb-4">
-                                            <p className={`text-[9px] font-black uppercase tracking-widest mb-2 px-2 ${tipo === 'INGRESO' ? 'text-emerald-600' : tipo === 'EGRESO' ? 'text-red-500' : 'text-navy/40'}`}>
-                                                {tipo === 'INGRESO' ? '▲ Ingresos' : tipo === 'EGRESO' ? '▼ Egresos' : '⇅ Ambos'}
-                                            </p>
-                                            {grupo.map(cat => (
-                                                <div key={cat.id} className="flex items-center justify-between px-4 py-3 rounded-xl hover:bg-navy/[0.03] group transition-colors">
-                                                    <span className="text-sm font-bold text-navy">{cat.nombre}</span>
-                                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <button onClick={() => { setEditingCategoria(cat); setCategoriaForm({ nombre: cat.nombre, tipo: cat.tipo }); }} className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-colors"><Edit3 size={12} /></button>
-                                                        <button onClick={() => handleDeleteCategoria(cat.id, cat.nombre)} className="w-7 h-7 rounded-lg bg-error/10 text-error flex items-center justify-center hover:bg-error/20 transition-colors"><Trash2 size={12} /></button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    );
-                                })}
-                                {categorias.length === 0 && (
-                                    <div className="py-10 text-center text-muted text-sm">No hay categorías. Crea la primera ↑</div>
-                                )}
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
         </div>
     );
 }

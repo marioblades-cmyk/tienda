@@ -188,6 +188,11 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [compactMode, setCompactMode] = useState(false);
     const [toasts, setToasts] = useState([]); // [{id, msg, type}]
 
+    // Alquiler pago modal state
+    const [alqPagoModal, setAlqPagoModal] = useState(null); // null | { idx, mes, totalBS, tuParteBS }
+    const [alqMetodo, setAlqMetodo] = useState('Efectivo Personal');
+    const [alqSaving, setAlqSaving] = useState(false);
+
     // Flete registration modal state
     const [fleteModal, setFleteModal] = useState(null); // null | { rowId, fleteBS, nro, fecha }
     const [fleteMetodo, setFleteMetodo] = useState('Efectivo Personal');
@@ -1137,26 +1142,33 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             }
         }
     };
-    const pagarMiParteAlq = async (idx) => {
+    const pagarMiParteAlq = async (idx, metodo) => {
         const m = alq.meses[idx];
-        const monto = parseFloat(m.tuParteBS) || 0;
-        if (!monto) return showToast('El monto de tu parte es 0. Configura el alquiler primero.', 'error');
-        // Marcar mes como pagado por mí
-        const newAlq = { ...alq };
-        newAlq.meses[idx].pagadoPorMi = true;
-        setAlq(newAlq);
-        await saveAlq(newAlq);
-        // Registrar en contabilidad como EGRESO
-        await supabase.from('caja_movimientos').insert([{
-            turno_id: null,
-            tipo: 'EGRESO',
-            categoria: 'Alquiler',
-            concepto: `Alquiler ${formatMesAlq(m.ym)} — mi parte`,
-            monto,
-            metodo_pago: 'Efectivo Personal',
-            origen: 'Proveedores',
-        }]);
-        showToast(`Pago de alquiler ${formatMesAlq(m.ym)} registrado como egreso.`, 'success');
+        const monto = parseFloat(m.totalBS) || 0; // Pagás el total, el socio te devuelve su parte
+        if (!monto) return showToast('El monto total es 0. Configura el alquiler primero.', 'error');
+        setAlqSaving(true);
+        try {
+            const newAlq = { ...alq };
+            newAlq.meses = [...alq.meses];
+            newAlq.meses[idx] = { ...alq.meses[idx], pagadoPorMi: true };
+            setAlq(newAlq);
+            await saveAlq(newAlq);
+            await supabase.from('caja_movimientos').insert([{
+                turno_id: null,
+                tipo: 'EGRESO',
+                categoria: 'Alquiler',
+                concepto: `Alquiler ${formatMesAlq(m.ym)} — total pagado (socio debe devolver ${fBS(parseFloat(m.socioBS) || 0)})`,
+                monto,
+                metodo_pago: metodo || 'Efectivo Personal',
+                origen: 'Proveedores',
+            }]);
+            setAlqPagoModal(null);
+            showToast(`Alquiler ${formatMesAlq(m.ym)} registrado como egreso.`, 'success');
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        } finally {
+            setAlqSaving(false);
+        }
     };
 
     const cargarAlqToCta = async (idx) => {
@@ -2872,13 +2884,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                     ) : (
                                                         <button
                                                             onClick={() => {
-                                                                openConfirm('Registrar Pago', `¿Registrar tu pago de alquiler ${formatMesAlq(m.ym)}?\n\nMonto: ${fBS(m.tuParteBS || 0)} BS\nMétodo: Efectivo Personal\n\nEsto se anotará automáticamente en Contabilidad > Egresos.`, async () => {
-                                                                    await pagarMiParteAlq(idx);
-                                                                });
+                                                                setAlqMetodo('Efectivo Personal');
+                                                                setAlqPagoModal({ idx, mes: formatMesAlq(m.ym), totalBS: parseFloat(m.totalBS) || 0, socioBS: parseFloat(m.socioBS) || 0 });
                                                             }}
                                                             style={{ background: '#27ae60', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 6px rgba(39,174,96,0.3)' }}
                                                         >
-                                                            💵 Pagar mi parte
+                                                            💵 Pagar alquiler
                                                         </button>
                                                     )}
                                                 </td>
@@ -3004,6 +3015,40 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                     </div>
                 ))}
             </div>
+
+            {/* MODAL: PAGAR ALQUILER */}
+            {alqPagoModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                    <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '380px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                        <h3 style={{ margin: '0 0 4px 0', color: 'var(--navy)' }}>🏠 Pagar Alquiler</h3>
+                        <p style={{ margin: '0 0 16px 0', fontSize: '0.8rem', color: '#666' }}>{alqPagoModal.mes}</p>
+                        <div style={{ marginBottom: '12px', padding: '12px', background: '#f8f8f8', borderRadius: '6px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                <span style={{ fontSize: '0.78rem', color: '#666' }}>Total que pagás</span>
+                                <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--navy)' }}>{fBS(alqPagoModal.totalBS)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px dashed #ddd' }}>
+                                <span style={{ fontSize: '0.75rem', color: '#888' }}>El socio te devuelve</span>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#673ab7' }}>{fBS(alqPagoModal.socioBS)}</span>
+                            </div>
+                        </div>
+                        <div style={{ marginBottom: '20px' }}>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>¿De qué cuenta sale el dinero?</label>
+                            <select value={alqMetodo} onChange={e => setAlqMetodo(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', background: '#fff' }}>
+                                {['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo Personal', 'Otros'].map(m => (
+                                    <option key={m} value={m}>{m}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button onClick={() => setAlqPagoModal(null)} disabled={alqSaving} style={{ flex: 1, padding: '10px', background: '#f1f1f1', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>Cancelar</button>
+                            <button onClick={() => pagarMiParteAlq(alqPagoModal.idx, alqMetodo)} disabled={alqSaving} style={{ flex: 1, padding: '10px', background: alqSaving ? '#aaa' : 'var(--ok)', border: 'none', borderRadius: '4px', cursor: alqSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
+                                {alqSaving ? 'Registrando...' : 'Confirmar Pago'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* 7. CUSTOM CONFIRMATION MODAL */}
             {confirmModal.show && (
