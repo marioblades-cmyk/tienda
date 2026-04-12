@@ -1139,17 +1139,47 @@ export default function ClientOrdersView() {
             return hasMyItems || matchesSearch;
         });
 
+        // Extrae el número de volumen al final del título, ej: "KUROSHITSUJI 21" → 21
+        const extractVolNum = (titulo) => {
+            const m = (titulo || '').match(/\s(\d+)\s*$/);
+            return m ? parseInt(m[1], 10) : null;
+        };
+        // Extrae el prefijo sin número, ej: "KUROSHITSUJI 21" → "KUROSHITSUJI"
+        const extractSerie = (titulo) => (titulo || '').replace(/\s\d+\s*$/, '').trim();
+
+        const ESTADO_ORDER = { 'EN TIENDA': 0, 'ADJUDICADO': 1, 'CONFIRMADO': 1, 'PEDIDO': 2, 'ENTREGADO': 3 };
+        const estadoOrder = (it) => {
+            const e = it.estado || '';
+            if (e === 'EN TIENDA') return 0;
+            if (e === 'ADJUDICADO' || e.startsWith('CONFIRMADO')) return 1;
+            if (e.startsWith('PEDIDO')) return 2;
+            if (e === 'ENTREGADO') return 3;
+            return 4;
+        };
+
         visibleClients.forEach(c => {
             const myItems = items.filter(i => i.cliente_id === c.id);
             const others = otherSellersItems.filter(i => i.cliente_id === c.id);
-            
+
             // If I am not admin and I have no items of my own AND I'm not searching for them, skip
             if (!isAdmin && myItems.length === 0 && !search) return;
 
-            groups[c.id] = { 
-                client: c, 
-                items: myItems,
-                others: others, // For coordinated shipping alert
+            // Ordenar ítems: primero por estado (EN TIENDA > CONFIRMADO > PEDIDO > ENTREGADO),
+            // luego por serie alfabética, luego por número de volumen ascendente
+            const sortedItems = [...myItems].sort((a, b) => {
+                const eA = estadoOrder(a), eB = estadoOrder(b);
+                if (eA !== eB) return eA - eB;
+                const sA = extractSerie(a.titulo), sB = extractSerie(b.titulo);
+                if (sA !== sB) return sA.localeCompare(sB, 'es');
+                const nA = extractVolNum(a.titulo), nB = extractVolNum(b.titulo);
+                if (nA !== null && nB !== null) return nA - nB;
+                return (a.titulo || '').localeCompare(b.titulo || '', 'es');
+            });
+
+            groups[c.id] = {
+                client: c,
+                items: sortedItems,
+                others: others,
                 pagos: pagos.filter(p => p.cliente_id === c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
