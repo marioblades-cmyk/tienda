@@ -319,33 +319,46 @@ export default function ClientOrdersView() {
 
     const formatS = (num) => Number(num || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    const renderStatus = (it) => {
+    const renderStatus = (it, compact = false) => {
         const week = semanas.find(s => s.id === it.semana_id);
-        // ADJUDICADO = confirmado y reservado para este cliente, mostrar como CONFIRMADO + semana
         const isAdjudicado = it.estado === 'ADJUDICADO';
-        const displayEstado = isAdjudicado
-            ? `CONFIRMADO${week ? ' ' + week.nombre : ''}`
-            : it.estado;
         const isFloating = isAdjudicado || it.estado.startsWith('CONFIRMADO') || it.estado.startsWith('PEDIDO');
+
+        // Extraer número de semana del nombre, ej: "ENTELEQUIA DISTRIBUCIÓN 15 20-3" → "15"
+        const weekNum = week ? (week.nombre.match(/\b(\d+)\b/) || [])[1] : null;
+
+        let displayEstado;
+        if (compact) {
+            if (isAdjudicado || it.estado.startsWith('CONFIRMADO')) {
+                displayEstado = weekNum ? `CONF. sem.${weekNum}` : 'CONF.';
+            } else if (it.estado.startsWith('PEDIDO')) {
+                displayEstado = weekNum ? `PED. sem.${weekNum}` : 'PEDIDO';
+            } else {
+                displayEstado = it.estado;
+            }
+        } else {
+            displayEstado = isAdjudicado ? `CONFIRMADO${week ? ' ' + week.nombre : ''}` : it.estado;
+        }
+
         let dateStr = null;
-        if (isFloating && week) {
-            const d = week.fecha_estimada_llegada ? new Date(week.fecha_estimada_llegada) : new Date(new Date(week.created_at).getTime() + (22*24*60*60*1000));
-            dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
-        } else if (it.estado === 'PEDIDO (Siguiente)') {
-            const now = new Date();
-            const day = now.getDay();
-            const diff = (6 - day + 7) % 7 || 7;
-            const nextSat = new Date(now.getTime() + (diff * 24 * 60 * 60 * 1000));
-            const arrival = new Date(nextSat.getTime() + (22 * 24 * 60 * 60 * 1000));
-            dateStr = arrival.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+        if (!compact) {
+            if (isFloating && week) {
+                const d = week.fecha_estimada_llegada ? new Date(week.fecha_estimada_llegada) : new Date(new Date(week.created_at).getTime() + (22*24*60*60*1000));
+                dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
+            } else if (it.estado === 'PEDIDO (Siguiente)') {
+                const now = new Date();
+                const diff = (6 - now.getDay() + 7) % 7 || 7;
+                const arrival = new Date(now.getTime() + ((diff + 22) * 24 * 60 * 60 * 1000));
+                dateStr = arrival.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+            }
         }
 
         return (
-            <div className="flex flex-col items-center gap-0.5">
+            <div className={`flex flex-col ${compact ? 'items-start' : 'items-center'} gap-0.5`}>
                 <span
                     onClick={()=>setEditingState(it.id)}
-                    className={`px-2 py-1 rounded text-[10px] font-bold tracking-wider cursor-pointer border transition-colors ${
-                        it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 shadow-sm animate-pulse' :
+                    className={`px-2 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-bold tracking-wide cursor-pointer border transition-colors whitespace-nowrap ${
+                        it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse' :
                         it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
                         it.estado === 'EN TIENDA' ? 'bg-success/10 border-success/30 text-success shadow-sm shadow-success/20' :
                         (isAdjudicado || it.estado.startsWith('CONFIRMADO')) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
@@ -354,15 +367,15 @@ export default function ClientOrdersView() {
                 >
                     {displayEstado}
                 </span>
-                {it.estado === 'RECORTADO' && (
-                    <button 
+                {!compact && it.estado === 'RECORTADO' && (
+                    <button
                         onClick={(e) => { e.stopPropagation(); setReprogrammingItem(it); }}
                         className="mt-1 text-[9px] font-black bg-navy text-white px-2 py-0.5 rounded hover:bg-secondary transition-colors"
                     >
                         RE-PROGRAMAR
                     </button>
                 )}
-                {dateStr && it.estado !== 'RECORTADO' && <span className="text-[9px] text-muted font-bold italic tracking-tight whitespace-nowrap opacity-80">Est. ~{dateStr}</span>}
+                {!compact && dateStr && it.estado !== 'RECORTADO' && <span className="text-[9px] text-muted font-bold italic tracking-tight whitespace-nowrap opacity-80">Est. ~{dateStr}</span>}
             </div>
         );
     };
@@ -1524,7 +1537,7 @@ export default function ClientOrdersView() {
                                                                             onBlur={()=>setEditingState(null)}
                                                                         />
                                                                     ) : (
-                                                                        renderStatus(it)
+                                                                        renderStatus(it, isCompact)
                                                                     )}
                                                                 </td>
                                                                 {!isCompact && <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>}
