@@ -39,6 +39,9 @@ const CatalogUpdatedView = () => {
     const [editingStock, setEditingStock] = useState(null); // {productId, value}
     const [editingMinStock, setEditingMinStock] = useState(null); // {productId, value}
     const [isUpdatingStock, setIsUpdatingStock] = useState(false);
+    const [bulkStockValue, setBulkStockValue] = useState('');
+    const [bulkMinValue, setBulkMinValue] = useState('');
+    const [bulkStockSaving, setBulkStockSaving] = useState(false);
     const [activeWeeks, setActiveWeeks] = useState([]);
     const [showOnlyWithStock, setShowOnlyWithStock] = useState(false);
     const [weekFilter, setWeekFilter] = useState('TODAS');
@@ -296,6 +299,32 @@ const CatalogUpdatedView = () => {
             alert('❌ No se pudo actualizar el valor.');
         } finally {
             setIsUpdatingStock(false);
+        }
+    };
+
+    const handleBulkUpdateStock = async (field) => {
+        const val = field === 'stock_fisico' ? Number(bulkStockValue) : Number(bulkMinValue);
+        if (isNaN(val) || val < 0) return;
+        setBulkStockSaving(true);
+        try {
+            const ids = [...selectedForQuote];
+            for (const productId of ids) {
+                const item = catalogData.find(i => i.product_id === productId);
+                if (!item) continue;
+                if (field === 'stock_fisico') {
+                    await catalogService.updateProductStock(item.id, val);
+                } else {
+                    await supabase.from('catalogo_productos').update({ stock_minimo: val }).eq('id', item.id);
+                }
+            }
+            if (field === 'stock_fisico') setBulkStockValue('');
+            else setBulkMinValue('');
+            await loadCatalog();
+        } catch (err) {
+            console.error('Error en edición masiva:', err);
+            alert('❌ Error al actualizar: ' + err.message);
+        } finally {
+            setBulkStockSaving(false);
         }
     };
 
@@ -1169,14 +1198,46 @@ const CatalogUpdatedView = () => {
                     <ShoppingCart size={18} style={{ color: '#f07d2a' }} />
                     <span style={{ fontWeight: 700, fontSize: '14px' }}>{selectedForQuote.size} producto(s) seleccionado(s)</span>
                     
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {/* Stock Físico masivo */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                                type="number" min="0" placeholder="Stock"
+                                value={bulkStockValue}
+                                onChange={e => setBulkStockValue(e.target.value)}
+                                style={{ width: '64px', padding: '4px 8px', borderRadius: '8px', border: '1.5px solid #f07d2a', background: 'rgba(240,125,42,0.15)', color: 'white', fontWeight: 800, fontSize: '13px', textAlign: 'center', outline: 'none' }}
+                            />
+                            <button
+                                onClick={() => handleBulkUpdateStock('stock_fisico')}
+                                disabled={bulkStockValue === '' || bulkStockSaving}
+                                style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '5px 14px', fontWeight: 800, fontSize: '12px', border: 'none', cursor: bulkStockValue === '' ? 'not-allowed' : 'pointer', opacity: bulkStockValue === '' ? 0.5 : 1 }}
+                            >
+                                Stock
+                            </button>
+                        </div>
+                        {/* Stock Mínimo masivo */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                                type="number" min="0" placeholder="Mín"
+                                value={bulkMinValue}
+                                onChange={e => setBulkMinValue(e.target.value)}
+                                style={{ width: '54px', padding: '4px 8px', borderRadius: '8px', border: '1.5px solid #94a3b8', background: 'rgba(148,163,184,0.15)', color: 'white', fontWeight: 800, fontSize: '13px', textAlign: 'center', outline: 'none' }}
+                            />
+                            <button
+                                onClick={() => handleBulkUpdateStock('stock_minimo')}
+                                disabled={bulkMinValue === '' || bulkStockSaving}
+                                style={{ background: '#64748b', color: 'white', borderRadius: '999px', padding: '5px 14px', fontWeight: 800, fontSize: '12px', border: 'none', cursor: bulkMinValue === '' ? 'not-allowed' : 'pointer', opacity: bulkMinValue === '' ? 0.5 : 1 }}
+                            >
+                                Mín
+                            </button>
+                        </div>
                         <button
                             onClick={handleOpenBulkEdit}
                             style={{ background: 'rgba(245, 168, 0, 0.2)', color: '#f5a800', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: '1.5px solid #f5a800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
                         >
                             <ImageIcon size={14} /> Subir Imágenes
                         </button>
-                        
+
                         <button
                             onClick={() => handleAddToQuote(catalogData.filter(i => selectedForQuote.has(i.product_id)))}
                             style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: 'none', cursor: 'pointer' }}

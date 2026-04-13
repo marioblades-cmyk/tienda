@@ -622,6 +622,11 @@ export default function FlujoCajaView({ user, profile }) {
                                         ID: {turnoActivo.turno} • {new Date(turnoActivo.abierto_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                 )}
+                                {turnoActivo && turnoActivo.vendedor_id !== user?.id && !isAdmin && (
+                                    <span className="text-[9px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-2 py-0.5 rounded-full uppercase tracking-widest">
+                                        Solo lectura — abierto por {turnoActivo.responsable}
+                                    </span>
+                                )}
                             </div>
                         </div>
                         <div className="relative flex items-center gap-2">
@@ -1025,6 +1030,7 @@ export default function FlujoCajaView({ user, profile }) {
                                             </div>
                                         ) : (
                                             /* --- OTROS MOVIMIENTOS (MANUAL) --- */
+                                            (turnoActivo?.vendedor_id === user?.id || isAdmin) ? (
                                             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
                                                 <div className="space-y-3">
                                                     <label className="text-[9px] font-black text-muted uppercase tracking-[0.2em] block px-2">Naturaleza</label>
@@ -1111,6 +1117,11 @@ export default function FlujoCajaView({ user, profile }) {
                                                     </div>
                                                 </div>
                                             </div>
+                                            ) : (
+                                                <div className="text-center py-6 text-xs text-muted border border-border/30 rounded-xl bg-slate-50/50">
+                                                    Solo <strong>{turnoActivo?.responsable}</strong> puede agregar movimientos a este turno.
+                                                </div>
+                                            )
                                         )}
                                     </div>
                                 </div>
@@ -1183,6 +1194,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                         {m.tipo === 'INGRESO' ? '+' : '-'} {m.monto.toLocaleString()}
                                                     </td>
                                                     <td className="p-5 text-center">
+                                                        {(isAdmin || turnoActivo?.vendedor_id === user?.id) && (
                                                         <button
                                                             onClick={() => deleteMovement(m.id)}
                                                             className="p-3 text-muted hover:text-error transition-all opacity-0 group-hover:opacity-100 hover:bg-error/10 rounded-xl"
@@ -1190,6 +1202,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                         >
                                                             <Trash2 size={18} />
                                                         </button>
+                                                        )}
                                                     </td>
                                                 </motion.tr>
                                                 );
