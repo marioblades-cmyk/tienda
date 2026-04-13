@@ -1405,15 +1405,13 @@ export default function ClientOrdersView() {
                                         <div>
                                             <div className="flex items-center gap-2">
                                                 <h3 className="font-bold text-text mb-0.5">{group.client.nombre}</h3>
-                                                {isAdmin && (
-                                                    <button
-                                                        onClick={e => { e.stopPropagation(); setEditCliente({ id: group.client.id, nombre: group.client.nombre, celular: group.client.celular || '', ci: group.client.ci || '', ciudad: group.client.ciudad || '', sucursal: group.client.sucursal || '', direccion: group.client.direccion || '', notas_cliente: group.client.notas_cliente || '' }); }}
-                                                        className="text-muted hover:text-primary transition-colors p-0.5 rounded"
-                                                        title="Editar datos del cliente"
-                                                    >
-                                                        <Edit2 size={13}/>
-                                                    </button>
-                                                )}
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); setEditCliente({ id: group.client.id, nombre: group.client.nombre, celular: group.client.celular || '', ci: group.client.ci || '', ciudad: group.client.ciudad || '', sucursal: group.client.sucursal || '', direccion: group.client.direccion || '', notas_cliente: group.client.notas_cliente || '' }); }}
+                                                    className="text-muted hover:text-primary transition-colors p-0.5 rounded"
+                                                    title="Editar datos del cliente"
+                                                >
+                                                    <Edit2 size={13}/>
+                                                </button>
                                             </div>
                                             <div className="text-xs text-muted font-mono">{group.client.celular} • {group.items.length} ítems</div>
                                         </div>
