@@ -636,6 +636,15 @@ export default function FlujoCajaView({ user, profile }) {
                         <div className="relative flex items-center gap-2">
                             {turnoActivo ? (
                                 <>
+                                    {(isAdmin || turnoActivo?.vendedor_id === user?.id) && (
+                                        <button
+                                            onClick={() => setShowEditModal(turnoActivo)}
+                                            className="p-2.5 bg-background text-navy/30 rounded-lg hover:text-primary hover:bg-primary/5 transition-all border border-border/20"
+                                            title="Editar turno activo"
+                                        >
+                                            <Edit3 size={16} />
+                                        </button>
+                                    )}
                                     {isAdmin && (
                                         <button
                                             onClick={() => handleDeleteTurno(turnoActivo.id)}
@@ -1729,7 +1738,7 @@ function EditTurnoModal({ turno, vendedores, onSave, onClose }) {
                     <button onClick={onClose} className="absolute right-6 top-6 text-white/40 hover:text-white transition-colors">
                         <XCircle size={24} />
                     </button>
-                    <h3 className="text-2xl font-display uppercase tracking-tight">Editar Turno Cerrado</h3>
+                    <h3 className="text-2xl font-display uppercase tracking-tight">Editar Turno</h3>
                     <p className="text-white/40 text-[10px] font-mono uppercase tracking-[0.2em] mt-1">ID: {turno.id.slice(0,8)}</p>
                 </div>
                 
