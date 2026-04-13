@@ -809,10 +809,10 @@ export default function ClientOrdersView() {
                 } else {
                     let turnoId = null;
                     if (orderMethod === 'Efectivo') {
-                        const { data: activeTurno } = await supabase
-                            .from('turnos_caja').select('id').eq('estado', 'ABIERTO').maybeSingle();
-                        if (!activeTurno) throw new Error("⚠️ BLOQUEO: No hay TURNO DE CAJA abierto para registrar el abono en efectivo.");
-                        turnoId = activeTurno.id;
+                        const { data: activeTurnoArr } = await supabase
+                            .from('turnos_caja').select('id').eq('estado', 'ABIERTO')
+                            .order('abierto_at', { ascending: false }).limit(1);
+                        turnoId = activeTurnoArr?.[0]?.id || null;
                     }
                     const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
                         turno_id: turnoId,
@@ -869,16 +869,13 @@ export default function ClientOrdersView() {
             // --- LEDGER: Registrar en caja_movimientos PRIMERO para capturar el ID ---
             let turnoId = null;
             if (payMethod === 'Efectivo') {
-                const { data: activeTurno, error: tErr } = await supabase
+                const { data: activeTurnoArr } = await supabase
                     .from('turnos_caja')
                     .select('id')
                     .eq('estado', 'ABIERTO')
-                    .maybeSingle();
-                if (tErr) throw tErr;
-                if (!activeTurno) {
-                    throw new Error("⚠️ BLOQUEO: No hay TURNO DE CAJA abierto. Abre caja en 'OPERATIVA DIARIA' para recibir efectivo.");
-                }
-                turnoId = activeTurno.id;
+                    .order('abierto_at', { ascending: false })
+                    .limit(1);
+                turnoId = activeTurnoArr?.[0]?.id || null;
             }
 
             let cajaMov = null;
