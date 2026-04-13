@@ -472,7 +472,7 @@ export default function FlujoCajaView({ user, profile }) {
             .from('turnos_caja')
             .update({
                 estado: 'CERRADO',
-                monto_final: totals.saldoActual,
+                monto_final: totals.efectivoEnCaja,
                 cerrado_at: new Date().toISOString()
             })
             .eq('id', turnoActivo.id);
@@ -509,15 +509,22 @@ export default function FlujoCajaView({ user, profile }) {
     };
 
     const calculateTotals = () => {
-        const ingresos = movimientos.filter(m => m.tipo === 'INGRESO').reduce((acc, m) => acc + (parseFloat(m.monto) || 0), 0);
-        const egresos = movimientos.filter(m => m.tipo === 'EGRESO').reduce((acc, m) => acc + (parseFloat(m.monto) || 0), 0);
-        const saldoActual = (parseFloat(turnoActivo?.monto_inicial) || 0) + ingresos - egresos;
-        return { ingresos, egresos, saldoActual };
+        const esCash = m => (m.metodo_pago || 'Efectivo') === 'Efectivo';
+        const efectivoIngresos = movimientos.filter(m => m.tipo === 'INGRESO' &&  esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const efectivoEgresos  = movimientos.filter(m => m.tipo === 'EGRESO'  &&  esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const digitalIngresos  = movimientos.filter(m => m.tipo === 'INGRESO' && !esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const digitalEgresos   = movimientos.filter(m => m.tipo === 'EGRESO'  && !esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const totalIngresos    = efectivoIngresos + digitalIngresos;
+        const totalEgresos     = efectivoEgresos  + digitalEgresos;
+        const efectivoEnCaja   = (parseFloat(turnoActivo?.monto_inicial) || 0) + efectivoIngresos - efectivoEgresos;
+        return { efectivoIngresos, efectivoEgresos, digitalIngresos, digitalEgresos, totalIngresos, totalEgresos, efectivoEnCaja,
+                 // aliases para compatibilidad con código existente
+                 ingresos: totalIngresos, egresos: totalEgresos, saldoActual: efectivoEnCaja };
     };
 
     if (loading) return <div className="py-20 flex justify-center items-center"><div className="animate-spin text-primary w-10 h-10 border-4 border-current border-t-transparent rounded-full" /></div>;
 
-    const totals = turnoActivo ? calculateTotals() : { ingresos: 0, egresos: 0, saldoActual: 0 };
+    const totals = turnoActivo ? calculateTotals() : { ingresos: 0, egresos: 0, saldoActual: 0, efectivoIngresos: 0, efectivoEgresos: 0, digitalIngresos: 0, digitalEgresos: 0, totalIngresos: 0, totalEgresos: 0, efectivoEnCaja: 0 };
 
     return (
         <div className="space-y-6 max-w-[1440px] mx-auto animate-in fade-in duration-700 pb-20 px-4">
@@ -686,24 +693,32 @@ export default function FlujoCajaView({ user, profile }) {
                                     <p className="text-xs font-bold text-navy uppercase tracking-widest">Apertura</p>
                                     <p className="text-lg font-black font-mono text-navy tracking-tight">Bs {turnoActivo.monto_inicial.toLocaleString()}</p>
                                 </div>
-                                <div className="bg-success/5 p-3.5 rounded-lg border border-success/10 flex justify-between items-baseline">
+                                <div className="bg-success/5 p-3.5 rounded-lg border border-success/10 flex justify-between items-start">
                                    <p className="text-xs font-bold text-success uppercase tracking-widest flex items-center gap-1.5">
                                        <ArrowDownLeft size={10} /> Ingresos
                                    </p>
-                                   <p className="text-lg font-black font-mono text-success tracking-tight">+{totals.ingresos.toLocaleString()}</p>
+                                   <div className="text-right">
+                                       <p className="text-lg font-black font-mono text-success tracking-tight">+{totals.totalIngresos.toLocaleString()}</p>
+                                       {totals.digitalIngresos > 0 && (
+                                           <p className="text-[9px] font-bold text-success/60 font-mono">ef. {totals.efectivoIngresos.toLocaleString()} + dig. {totals.digitalIngresos.toLocaleString()}</p>
+                                       )}
+                                   </div>
                                 </div>
                                 <div className="bg-error/5 p-3.5 rounded-lg border border-error/10 flex justify-between items-baseline">
                                    <p className="text-xs font-bold text-error uppercase tracking-widest flex items-center gap-1.5">
                                        <ArrowUpRight size={10} /> Egresos
                                    </p>
-                                   <p className="text-lg font-black font-mono text-error tracking-tight">-{totals.egresos.toLocaleString()}</p>
+                                   <p className="text-lg font-black font-mono text-error tracking-tight">-{totals.totalEgresos.toLocaleString()}</p>
                                 </div>
                                 <div className="bg-slate-50/50 p-4 rounded-xl border border-border/40 shadow-sm flex flex-col justify-center">
-                                     <p className="text-xs font-bold text-navy uppercase tracking-widest mb-1 relative z-10">Efectivo en Caja</p>
+                                     <p className="text-xs font-bold text-navy uppercase tracking-widest mb-1 relative z-10">Efectivo Físico</p>
                                      <div className="flex items-baseline gap-1.5 text-navy relative z-10">
                                          <span className="text-xs font-bold opacity-30">Bs</span>
-                                         <span className="text-2xl font-black font-mono tracking-tighter">{totals.saldoActual.toLocaleString()}</span>
+                                         <span className="text-2xl font-black font-mono tracking-tighter">{totals.efectivoEnCaja.toLocaleString()}</span>
                                      </div>
+                                     {totals.digitalIngresos > 0 && (
+                                         <p className="text-[9px] font-bold text-primary/60 mt-1">+ Bs {totals.digitalIngresos.toLocaleString()} digital</p>
+                                     )}
                                 </div>
 
                                 {/* Desglose por método de pago */}
@@ -723,6 +738,7 @@ export default function FlujoCajaView({ user, profile }) {
                                     })).filter(m => m.total > 0);
 
                                     if (ingresosPorMetodo.length === 0) return null;
+                                    const digitalTotal = ingresosPorMetodo.filter(m => m.id !== 'Efectivo').reduce((s, m) => s + m.total, 0);
                                     return (
                                         <div className="bg-white p-3.5 rounded-xl border border-border/40 shadow-sm space-y-2">
                                             <p className="text-[9px] font-black text-navy/40 uppercase tracking-widest">Ingresos por Método</p>
@@ -735,6 +751,12 @@ export default function FlujoCajaView({ user, profile }) {
                                                     <span className={`text-xs font-black font-mono ${m.color}`}>Bs {m.total.toLocaleString()}</span>
                                                 </div>
                                             ))}
+                                            {digitalTotal > 0 && (
+                                                <div className="flex items-center justify-between border-t border-border/20 pt-2 mt-1">
+                                                    <span className="text-[9px] font-black text-primary uppercase tracking-widest">Total Digital</span>
+                                                    <span className="text-xs font-black font-mono text-primary">Bs {digitalTotal.toLocaleString()}</span>
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })()}
@@ -1579,21 +1601,44 @@ export default function FlujoCajaView({ user, profile }) {
 
                                 <div className="bg-background/50 rounded-3xl p-6 border border-border divide-y divide-border/40">
                                     <div className="flex justify-between py-2 items-center">
-                                        <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Inicio</span>
+                                        <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Apertura</span>
                                         <span className="font-mono font-black text-navy">Bs {turnoActivo.monto_inicial.toLocaleString()}</span>
                                     </div>
                                     <div className="flex justify-between py-2 items-center">
-                                        <span className="text-[10px] font-bold text-success uppercase tracking-widest">+ Ingresos</span>
-                                        <span className="font-mono font-black text-success">Bs {totals.ingresos.toLocaleString()}</span>
+                                        <span className="text-[10px] font-bold text-success uppercase tracking-widest">+ Ef. Ingresado</span>
+                                        <span className="font-mono font-black text-success">Bs {totals.efectivoIngresos.toLocaleString()}</span>
                                     </div>
                                     <div className="flex justify-between py-2 items-center">
-                                        <span className="text-[10px] font-bold text-error uppercase tracking-widest">- Egresos</span>
-                                        <span className="font-mono font-black text-error">Bs {totals.egresos.toLocaleString()}</span>
+                                        <span className="text-[10px] font-bold text-error uppercase tracking-widest">- Ef. Egresado</span>
+                                        <span className="font-mono font-black text-error">Bs {totals.efectivoEgresos.toLocaleString()}</span>
                                     </div>
-                                    <div className="flex justify-between py-4 items-center">
-                                        <span className="text-[11px] font-black text-navy uppercase tracking-[0.2em]">Cierre Estimado</span>
-                                        <span className="text-2xl font-black font-mono text-primary">Bs {totals.saldoActual.toLocaleString()}</span>
+                                    <div className="flex justify-between py-3 items-center">
+                                        <span className="text-[11px] font-black text-navy uppercase tracking-[0.2em]">💵 Efectivo Físico</span>
+                                        <span className="text-2xl font-black font-mono text-primary">Bs {totals.efectivoEnCaja.toLocaleString()}</span>
                                     </div>
+                                    {totals.digitalIngresos > 0 && (
+                                        <>
+                                            {[
+                                                { id: 'Yasta (QR)', icon: '📲' },
+                                                { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
+                                                { id: 'BNB', icon: '🏛️' },
+                                                { id: 'Otros', icon: '💳' },
+                                            ].map(m => {
+                                                const t = movimientos.filter(mov => mov.tipo === 'INGRESO' && (mov.metodo_pago || 'Efectivo') === m.id).reduce((s, mov) => s + (parseFloat(mov.monto) || 0), 0);
+                                                if (!t) return null;
+                                                return (
+                                                    <div key={m.id} className="flex justify-between py-1.5 items-center">
+                                                        <span className="text-[10px] font-bold text-muted uppercase tracking-widest">{m.icon} {m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
+                                                        <span className="font-mono font-bold text-navy text-sm">Bs {t.toLocaleString()}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                            <div className="flex justify-between py-2 items-center">
+                                                <span className="text-[10px] font-black text-navy uppercase tracking-widest">Total Ventas</span>
+                                                <span className="font-mono font-black text-navy">Bs {totals.totalIngresos.toLocaleString()}</span>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
 
                                 <div className="flex gap-4">
