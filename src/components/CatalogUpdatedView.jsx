@@ -308,18 +308,33 @@ const CatalogUpdatedView = () => {
         setBulkStockSaving(true);
         try {
             const ids = [...selectedForQuote];
+            const updatedIds = new Set();
             for (const productId of ids) {
                 const item = catalogData.find(i => i.product_id === productId);
                 if (!item) continue;
                 if (field === 'stock_fisico') {
                     await catalogService.updateProductStock(item.id, val);
                 } else {
-                    await supabase.from('catalogo_productos').update({ stock_minimo: val }).eq('id', item.id);
+                    const { error } = await supabase
+                        .from('catalogo_productos')
+                        .update({ stock_minimo: val })
+                        .eq('id', item.id);
+                    if (error) throw error;
                 }
+                updatedIds.add(item.product_id);
             }
+            // Actualizar estado local directamente (mismo patrón que handleUpdateStock)
+            setCatalogData(prev => prev.map(item => {
+                if (!updatedIds.has(item.product_id)) return item;
+                const nextItem = { ...item, [field]: val };
+                if (field === 'stock_fisico') {
+                    const totalFlotante = Object.values(nextItem.floatingByWeek || {}).reduce((s, d) => s + d.qty, 0);
+                    nextItem.stock_total = val + totalFlotante;
+                }
+                return nextItem;
+            }));
             if (field === 'stock_fisico') setBulkStockValue('');
             else setBulkMinValue('');
-            await loadCatalog();
         } catch (err) {
             console.error('Error en edición masiva:', err);
             alert('❌ Error al actualizar: ' + err.message);
