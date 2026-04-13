@@ -81,6 +81,7 @@ export default function ClientOrdersView() {
     const [cartBulkSemana, setCartBulkSemana] = useState('');
     const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
     const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
+    const [editCliente, setEditCliente] = useState(null); // { id, nombre, celular, ci, ciudad, sucursal, direccion, notas_cliente }
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -998,6 +999,30 @@ export default function ClientOrdersView() {
         }
     };
 
+    const handleUpdateCliente = async () => {
+        if (!editCliente) return;
+        if (!editCliente.nombre?.trim()) return alert('El nombre es requerido.');
+        try {
+            setLoading(true);
+            const { error } = await supabase.from('clientes').update({
+                nombre: editCliente.nombre.trim(),
+                celular: editCliente.celular?.trim() || '',
+                ci: editCliente.ci?.trim() || '',
+                ciudad: editCliente.ciudad?.trim() || '',
+                sucursal: editCliente.sucursal?.trim() || '',
+                direccion: editCliente.direccion?.trim() || '',
+                notas_cliente: editCliente.notas_cliente?.trim() || '',
+            }).eq('id', editCliente.id);
+            if (error) throw error;
+            setEditCliente(null);
+            await fetchData();
+        } catch (e) {
+            alert('Error al guardar: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleUpdatePago = async () => {
         if (!editPago) return;
         const amt = Number(editPago.monto);
@@ -1378,7 +1403,18 @@ export default function ClientOrdersView() {
                                             {group.client.nombre[0].toUpperCase()}
                                         </div>
                                         <div>
-                                            <h3 className="font-bold text-text mb-0.5">{group.client.nombre}</h3>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-bold text-text mb-0.5">{group.client.nombre}</h3>
+                                                {isAdmin && (
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); setEditCliente({ id: group.client.id, nombre: group.client.nombre, celular: group.client.celular || '', ci: group.client.ci || '', ciudad: group.client.ciudad || '', sucursal: group.client.sucursal || '', direccion: group.client.direccion || '', notas_cliente: group.client.notas_cliente || '' }); }}
+                                                        className="text-muted hover:text-primary transition-colors p-0.5 rounded"
+                                                        title="Editar datos del cliente"
+                                                    >
+                                                        <Edit2 size={13}/>
+                                                    </button>
+                                                )}
+                                            </div>
                                             <div className="text-xs text-muted font-mono">{group.client.celular} • {group.items.length} ítems</div>
                                         </div>
                                     </div>
@@ -1856,6 +1892,61 @@ export default function ClientOrdersView() {
                 </div>
             )}
 
+
+            {/* MODAL: EDITAR CLIENTE */}
+            {editCliente && (
+                <div className="fixed inset-0 z-[10030] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-base font-bold text-text flex items-center gap-2"><Edit2 size={16} className="text-primary"/> Editar Cliente</h3>
+                            <button onClick={() => setEditCliente(null)} className="text-muted hover:text-text p-1"><X size={18}/></button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="col-span-2">
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Nombre *</label>
+                                <input value={editCliente.nombre} onChange={e => setEditCliente({...editCliente, nombre: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary" autoFocus/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Celular</label>
+                                <input value={editCliente.celular} onChange={e => setEditCliente({...editCliente, celular: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary font-mono"/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">CI</label>
+                                <input value={editCliente.ci} onChange={e => setEditCliente({...editCliente, ci: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary font-mono"/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Ciudad</label>
+                                <input value={editCliente.ciudad} onChange={e => setEditCliente({...editCliente, ciudad: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Sucursal</label>
+                                <input value={editCliente.sucursal} onChange={e => setEditCliente({...editCliente, sucursal: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
+                            </div>
+                            <div className="col-span-2">
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Dirección</label>
+                                <input value={editCliente.direccion} onChange={e => setEditCliente({...editCliente, direccion: e.target.value})}
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
+                            </div>
+                            <div className="col-span-2">
+                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Notas</label>
+                                <textarea value={editCliente.notas_cliente} onChange={e => setEditCliente({...editCliente, notas_cliente: e.target.value})}
+                                    rows={2} className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary resize-none"/>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-1">
+                            <button onClick={() => setEditCliente(null)} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
+                            <button onClick={handleUpdateCliente} disabled={loading} className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:brightness-105 disabled:opacity-50">
+                                Guardar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: EDITAR ÍTEM */}
             {editItem && (
