@@ -541,18 +541,29 @@ function ConciliacionTab() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [movsRes, configRes, histRes] = await Promise.all([
+            const [movsRes, configRes, histRes, turnosRes] = await Promise.all([
                 supabase.from('caja_movimientos')
                     .select('tipo, monto, metodo_pago')
                     .gte('created_at', dateFrom + 'T00:00:00')
                     .lte('created_at', dateTo + 'T23:59:59'),
                 supabase.from('conciliacion_config').select('*'),
                 supabase.from('conciliacion_historial').select('*').order('created_at', { ascending: false }).limit(30),
+                supabase.from('turnos_caja')
+                    .select('monto_inicial, abierto_at')
+                    .gte('abierto_at', dateFrom + 'T00:00:00')
+                    .lte('abierto_at', dateTo + 'T23:59:59')
+                    .order('abierto_at', { ascending: false })
+                    .limit(1),
             ]);
             setMovimientos(movsRes.data || []);
             // Mapear config a { metodo: saldo_inicial }
             const cfg = {};
             (configRes.data || []).forEach(r => { cfg[r.metodo] = r.saldo_inicial; });
+            // Si no hay saldo inicial guardado para Efectivo, usar monto_inicial del turno del período
+            if (cfg['Efectivo'] == null || cfg['Efectivo'] === 0) {
+                const turno = turnosRes.data?.[0];
+                if (turno?.monto_inicial) cfg['Efectivo'] = turno.monto_inicial;
+            }
             setSaldosIniciales(cfg);
             setHistorial(histRes.data || []);
         } catch (e) { console.error(e); }
