@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
@@ -46,6 +46,9 @@ const CatalogUpdatedView = () => {
     const [showOnlyWithStock, setShowOnlyWithStock] = useState(false);
     const [weekFilter, setWeekFilter] = useState('TODAS');
     const [isResetting, setIsResetting] = useState(false);
+    const [newItemModal, setNewItemModal] = useState(false);
+    const [newItemForm, setNewItemForm] = useState({});
+    const [newItemSaving, setNewItemSaving] = useState(false);
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -617,6 +620,64 @@ const CatalogUpdatedView = () => {
         return () => clearTimeout(timer);
     }, [searchQuery]);
 
+    const openNewItem = (baseItem = null) => {
+        setNewItemForm(baseItem ? {
+            titulo: baseItem.titulo || '',
+            editorial: baseItem.editorial || '',
+            categoria: baseItem.categoria || '',
+            ean_oficial: '',
+            ean_interno: '',
+            precio_tapa: baseItem.precio_tapa || '',
+            precio_venta_bs: baseItem.precio_venta_bs || '',
+            precio_n2_bs: baseItem.precio_n2_bs || '',
+            precio_n3_bs: baseItem.precio_n3_bs || '',
+            precio_mayoreo_bs: baseItem.precio_mayoreo_bs || '',
+            stock_fisico: 0,
+            stock_minimo: baseItem.stock_minimo || 0,
+            es_reimpresion: false,
+            _isCopy: true,
+        } : {
+            titulo: '', editorial: '', categoria: '', ean_oficial: '', ean_interno: '',
+            precio_tapa: '', precio_venta_bs: '', precio_n2_bs: '', precio_n3_bs: '', precio_mayoreo_bs: '',
+            stock_fisico: 0, stock_minimo: 0, es_reimpresion: false, _isCopy: false,
+        });
+        setNewItemModal(true);
+    };
+
+    const handleCreateItem = async () => {
+        const f = newItemForm;
+        if (!f.titulo?.trim()) return alert('El título es obligatorio.');
+        setNewItemSaving(true);
+        try {
+            const product_id = 'manual-' + Date.now();
+            const payload = {
+                product_id,
+                titulo: f.titulo.trim(),
+                editorial: f.editorial || null,
+                categoria: f.categoria || null,
+                ean_oficial: f.ean_oficial || null,
+                ean_interno: f.ean_interno || null,
+                precio_tapa: f.precio_tapa ? parseFloat(f.precio_tapa) : null,
+                precio_venta_bs: f.precio_venta_bs ? parseFloat(f.precio_venta_bs) : null,
+                precio_n2_bs: f.precio_n2_bs ? parseFloat(f.precio_n2_bs) : null,
+                precio_n3_bs: f.precio_n3_bs ? parseFloat(f.precio_n3_bs) : null,
+                precio_mayoreo_bs: f.precio_mayoreo_bs ? parseFloat(f.precio_mayoreo_bs) : null,
+                stock_fisico: parseInt(f.stock_fisico) || 0,
+                stock_minimo: parseInt(f.stock_minimo) || 0,
+                es_reimpresion: f.es_reimpresion || false,
+            };
+            const { data, error } = await supabase.from('catalogo_productos').insert([payload]).select('*').single();
+            if (error) throw error;
+            catalogService.clearCache();
+            setCatalogData(prev => [...prev, { ...data, floatingByWeek: {}, stock_total: data.stock_fisico || 0 }]);
+            setNewItemModal(false);
+        } catch (err) {
+            alert('❌ Error: ' + err.message);
+        } finally {
+            setNewItemSaving(false);
+        }
+    };
+
     return (
         <div className="animate-in fade-in duration-700" style={{ padding: '1rem' }}>
             {/* Header y Filtros */}
@@ -723,7 +784,19 @@ const CatalogUpdatedView = () => {
                         )}
 
                         {isAdmin && (
-                            <button 
+                            <button
+                                onClick={() => openNewItem()}
+                                title="Crear nuevo ítem manualmente"
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem 1rem', borderRadius: '12px', border: '1px solid #bbf7d0', background: '#f0fdf4', cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem', transition: 'all 0.2s ease', color: '#16a34a' }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#dcfce7'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#f0fdf4'}
+                            >
+                                <Plus size={16} /> Nuevo ítem
+                            </button>
+                        )}
+
+                        {isAdmin && (
+                            <button
                                 onClick={handleClearReprints}
                                 disabled={isLoading}
                                 title="Borrar todas las marcas de reimpresión del catálogo"
@@ -1169,13 +1242,24 @@ const CatalogUpdatedView = () => {
                                     </td>
 
                                     <td style={{ padding: '1.25rem 0.75rem' }}>
-                                        <button
-                                            title="Agregar a Cotización"
-                                            onClick={() => handleAddToQuote([item])}
-                                            style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(22,163,74,0.1)', color: '#16a34a', fontWeight: 800, fontSize: '0.7rem', padding: '4px 8px', borderRadius: '6px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                        >
-                                            <ShoppingCart size={11} /> +Cot.
-                                        </button>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                            <button
+                                                title="Agregar a Cotización"
+                                                onClick={() => handleAddToQuote([item])}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(22,163,74,0.1)', color: '#16a34a', fontWeight: 800, fontSize: '0.7rem', padding: '4px 8px', borderRadius: '6px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                            >
+                                                <ShoppingCart size={11} /> +Cot.
+                                            </button>
+                                            {isAdmin && (
+                                                <button
+                                                    title="Crear copia de este ítem"
+                                                    onClick={() => openNewItem(item)}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(99,102,241,0.1)', color: '#6366f1', fontWeight: 800, fontSize: '0.7rem', padding: '4px 8px', borderRadius: '6px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                                >
+                                                    <Copy size={11} /> Copiar
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -1941,6 +2025,196 @@ const CatalogUpdatedView = () => {
                                     <RotateCcw size={18} /> Sincronizar Seleccionados
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Modal Nuevo / Copiar Ítem */}
+            {newItemModal && (
+                <div
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+                    onClick={() => !newItemSaving && setNewItemModal(false)}
+                >
+                    <div
+                        onClick={e => e.stopPropagation()}
+                        style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '560px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.3)' }}
+                    >
+                        {/* Header */}
+                        <div style={{ background: '#1b3a57', padding: '16px 20px', borderRadius: '20px 20px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#f5a800', fontWeight: 900, fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {newItemForm._isCopy ? <><Copy size={16} /> Copiar ítem</> : <><Plus size={16} /> Nuevo ítem</>}
+                            </span>
+                            <button onClick={() => setNewItemModal(false)} disabled={newItemSaving} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer' }}><X size={20} /></button>
+                        </div>
+
+                        {/* Body */}
+                        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {newItemForm._isCopy && (
+                                <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '10px', padding: '10px 14px', fontSize: '12px', color: '#4338ca', fontWeight: 600 }}>
+                                    Copia pre-rellenada. Modifica los campos necesarios (el EAN debe ser único o dejarlo vacío).
+                                </div>
+                            )}
+
+                            {/* Título */}
+                            <div>
+                                <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Título *</label>
+                                <input
+                                    type="text" autoFocus
+                                    value={newItemForm.titulo || ''}
+                                    onChange={e => setNewItemForm(p => ({ ...p, titulo: e.target.value }))}
+                                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '13px', outline: 'none', boxSizing: 'border-box' }}
+                                    onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                    onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                />
+                            </div>
+
+                            {/* Editorial + Categoría */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Editorial</label>
+                                    <input
+                                        type="text"
+                                        value={newItemForm.editorial || ''}
+                                        onChange={e => setNewItemForm(p => ({ ...p, editorial: e.target.value }))}
+                                        list="eds-list"
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 600, fontSize: '13px', outline: 'none', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                    <datalist id="eds-list">
+                                        {editorialesList.map(e => <option key={e} value={e} />)}
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Categoría</label>
+                                    <input
+                                        type="text"
+                                        value={newItemForm.categoria || ''}
+                                        onChange={e => setNewItemForm(p => ({ ...p, categoria: e.target.value }))}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 600, fontSize: '13px', outline: 'none', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* EANs */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>EAN Oficial</label>
+                                    <input
+                                        type="text"
+                                        value={newItemForm.ean_oficial || ''}
+                                        onChange={e => setNewItemForm(p => ({ ...p, ean_oficial: e.target.value }))}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 600, fontSize: '13px', outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>EAN Interno</label>
+                                    <input
+                                        type="text"
+                                        value={newItemForm.ean_interno || ''}
+                                        onChange={e => setNewItemForm(p => ({ ...p, ean_interno: e.target.value }))}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 600, fontSize: '13px', outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Precios */}
+                            <div>
+                                <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '6px' }}>Precios (BS)</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                                    {[
+                                        { key: 'precio_venta_bs', label: 'Venta' },
+                                        { key: 'precio_n2_bs', label: 'N2' },
+                                        { key: 'precio_n3_bs', label: 'N3' },
+                                        { key: 'precio_mayoreo_bs', label: 'Mayor.' },
+                                    ].map(({ key, label }) => (
+                                        <div key={key}>
+                                            <label style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '2px' }}>{label}</label>
+                                            <input
+                                                type="number" step="0.01" min="0"
+                                                value={newItemForm[key] || ''}
+                                                onChange={e => setNewItemForm(p => ({ ...p, [key]: e.target.value }))}
+                                                style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '12px', outline: 'none', textAlign: 'right', boxSizing: 'border-box' }}
+                                                onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                                onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Stock + Mín + Precio Tapa */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Stock Físico</label>
+                                    <input
+                                        type="number" min="0"
+                                        value={newItemForm.stock_fisico ?? 0}
+                                        onChange={e => setNewItemForm(p => ({ ...p, stock_fisico: e.target.value }))}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '13px', outline: 'none', textAlign: 'center', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Stock Mín</label>
+                                    <input
+                                        type="number" min="0"
+                                        value={newItemForm.stock_minimo ?? 0}
+                                        onChange={e => setNewItemForm(p => ({ ...p, stock_minimo: e.target.value }))}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '13px', outline: 'none', textAlign: 'center', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Precio Tapa</label>
+                                    <input
+                                        type="number" step="0.01" min="0"
+                                        value={newItemForm.precio_tapa || ''}
+                                        onChange={e => setNewItemForm(p => ({ ...p, precio_tapa: e.target.value }))}
+                                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '13px', outline: 'none', textAlign: 'right', boxSizing: 'border-box' }}
+                                        onFocus={e => e.target.style.borderColor = '#f07d2a'}
+                                        onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Reimpresión */}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#475569' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={newItemForm.es_reimpresion || false}
+                                    onChange={e => setNewItemForm(p => ({ ...p, es_reimpresion: e.target.checked }))}
+                                    style={{ width: '16px', height: '16px', accentColor: '#f07d2a' }}
+                                />
+                                Marcar como reimpresión
+                            </label>
+                        </div>
+
+                        {/* Footer */}
+                        <div style={{ padding: '16px 20px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                            <button
+                                onClick={() => setNewItemModal(false)}
+                                disabled={newItemSaving}
+                                style={{ padding: '9px 20px', borderRadius: '10px', border: '1px solid #e2e8f0', background: 'white', fontWeight: 700, fontSize: '13px', cursor: 'pointer', color: '#64748b' }}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleCreateItem}
+                                disabled={newItemSaving || !newItemForm.titulo?.trim()}
+                                style={{ padding: '9px 24px', borderRadius: '10px', border: 'none', background: newItemForm.titulo?.trim() ? '#1b3a57' : '#94a3b8', color: '#f5a800', fontWeight: 900, fontSize: '13px', cursor: newItemForm.titulo?.trim() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            >
+                                {newItemSaving ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                                {newItemSaving ? 'Guardando...' : 'Crear ítem'}
+                            </button>
                         </div>
                     </div>
                 </div>
