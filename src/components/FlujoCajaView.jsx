@@ -173,26 +173,30 @@ export default function FlujoCajaView({ user, profile }) {
     };
 
     const fetchTurnoStatus = async () => {
-        const { data: active } = await supabase
+        const { data: activeArr, error: turnoErr } = await supabase
             .from('turnos_caja')
             .select('*')
             .eq('estado', 'ABIERTO')
-            .maybeSingle();
-            
+            .order('abierto_at', { ascending: false })
+            .limit(1);
+
+        if (turnoErr) console.error('fetchTurnoStatus error:', turnoErr);
+
+        const active = activeArr?.[0] || null;
+
         if (active) {
             setTurnoActivo(active);
             await fetchMovimientos(active.id);
         } else {
             setTurnoActivo(null);
             // Si no hay turno abierto, buscamos el último cerrado para el balance inicial
-            const { data: last } = await supabase
+            const { data: lastArr } = await supabase
                 .from('turnos_caja')
                 .select('*')
                 .eq('estado', 'CERRADO')
                 .order('cerrado_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-            setUltimoTurno(last);
+                .limit(1);
+            setUltimoTurno(lastArr?.[0] || null);
         }
     };
 
