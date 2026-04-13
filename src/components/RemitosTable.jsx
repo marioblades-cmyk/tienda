@@ -2878,9 +2878,23 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 {/* MI PAGO */}
                                                 <td style={{ padding: '16px', textAlign: 'center' }}>
                                                     {m.pagadoPorMi ? (
-                                                        <span style={{ color: '#27ae60', fontWeight: 'bold', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                                                            ✓ Pagado
-                                                        </span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                                                            <span style={{ color: '#27ae60', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Pagado</span>
+                                                            <button
+                                                                onClick={() => {
+                                                                    openConfirm('Deshacer Pago', `¿Deshacer el pago de ${formatMesAlq(m.ym)}? (El egreso en contabilidad NO se borra automáticamente)`, async () => {
+                                                                        const newAlq = { ...alq };
+                                                                        newAlq.meses = [...alq.meses];
+                                                                        newAlq.meses[idx] = { ...alq.meses[idx], pagadoPorMi: false };
+                                                                        setAlq(newAlq);
+                                                                        await saveAlq(newAlq);
+                                                                    });
+                                                                }}
+                                                                style={{ background: '#fff', color: '#e74c3c', border: '1px solid rgba(231,76,60,0.4)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' }}
+                                                            >
+                                                                Deshacer
+                                                            </button>
+                                                        </div>
                                                     ) : (
                                                         <button
                                                             onClick={() => {
