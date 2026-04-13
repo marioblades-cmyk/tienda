@@ -1011,7 +1011,6 @@ export default function ClientOrdersView() {
                 ciudad: editCliente.ciudad?.trim() || '',
                 sucursal: editCliente.sucursal?.trim() || '',
                 direccion: editCliente.direccion?.trim() || '',
-                notas_cliente: editCliente.notas_cliente?.trim() || '',
             }).eq('id', editCliente.id);
             if (error) throw error;
             setEditCliente(null);
@@ -1929,11 +1928,6 @@ export default function ClientOrdersView() {
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Dirección</label>
                                 <input value={editCliente.direccion} onChange={e => setEditCliente({...editCliente, direccion: e.target.value})}
                                     className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
-                            </div>
-                            <div className="col-span-2">
-                                <label className="block text-[10px] font-black uppercase text-muted mb-1">Notas</label>
-                                <textarea value={editCliente.notas_cliente} onChange={e => setEditCliente({...editCliente, notas_cliente: e.target.value})}
-                                    rows={2} className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary resize-none"/>
                             </div>
                         </div>
                         <div className="flex justify-end gap-3 pt-1">
