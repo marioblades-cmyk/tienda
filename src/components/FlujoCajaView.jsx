@@ -1732,10 +1732,12 @@ export default function FlujoCajaView({ user, profile }) {
                                         <span style={{ width: '56px', fontSize: '13px', fontWeight: 900, color: '#1e293b', fontFamily: 'monospace', textAlign: 'right' }}>Bs {d}</span>
                                         <input
                                             type="number" min="0" step="1"
+                                            data-calc-input="1"
                                             value={calcQty[d] === 0 ? '' : calcQty[d]}
                                             placeholder="0"
                                             onChange={e => setCalcQty(p => ({ ...p, [d]: e.target.value === '' ? 0 : parseInt(e.target.value) || 0 }))}
                                             onClick={e => e.target.select()}
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const all = [...document.querySelectorAll('[data-calc-input]')]; const i = all.indexOf(e.target); all[i + 1]?.focus(); } }}
                                             style={{ flex: 1, padding: '7px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 800, fontSize: '14px', outline: 'none', textAlign: 'center' }}
                                             onFocus={e => { e.target.style.borderColor = '#f07d2a'; e.target.select(); }}
                                             onBlur={e => e.target.style.borderColor = '#e2e8f0'}
@@ -1753,10 +1755,12 @@ export default function FlujoCajaView({ user, profile }) {
                                         <span style={{ width: '56px', fontSize: '13px', fontWeight: 900, color: '#1e293b', fontFamily: 'monospace', textAlign: 'right' }}>Bs {d}</span>
                                         <input
                                             type="number" min="0" step="1"
+                                            data-calc-input="1"
                                             value={calcQty[d] === 0 ? '' : calcQty[d]}
                                             placeholder="0"
                                             onChange={e => setCalcQty(p => ({ ...p, [d]: e.target.value === '' ? 0 : parseInt(e.target.value) || 0 }))}
                                             onClick={e => e.target.select()}
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const all = [...document.querySelectorAll('[data-calc-input]')]; const i = all.indexOf(e.target); all[i + 1]?.focus(); } }}
                                             style={{ flex: 1, padding: '7px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 800, fontSize: '14px', outline: 'none', textAlign: 'center' }}
                                             onFocus={e => { e.target.style.borderColor = '#94a3b8'; e.target.select(); }}
                                             onBlur={e => e.target.style.borderColor = '#e2e8f0'}
