@@ -22,6 +22,11 @@ export default function FlujoCajaView({ user, profile }) {
     // UI state
     const [showOpenModal, setShowOpenModal] = useState(false);
     const [showCloseModal, setShowCloseModal] = useState(false);
+    const [showCalcModal, setShowCalcModal] = useState(false);
+    const BILLETES = [200, 100, 50, 20, 10];
+    const MONEDAS  = [5, 2, 1, 0.5, 0.2, 0.1];
+    const initCalc = () => [...BILLETES, ...MONEDAS].reduce((a, d) => ({ ...a, [d]: 0 }), {});
+    const [calcQty, setCalcQty] = useState(initCalc);
     const [showDetailModal, setShowDetailModal] = useState(null);
     const [showEditModal, setShowEditModal] = useState(null); // { id, responsable, turno, monto_inicial, monto_final }
     const [ultimoTurno, setUltimoTurno] = useState(null);
@@ -640,7 +645,7 @@ export default function FlujoCajaView({ user, profile }) {
                                 </div>
                                 {turnoActivo && (
                                     <span className="text-xs font-mono text-navy font-bold uppercase tracking-tighter">
-                                        ID: {turnoActivo.turno} • {new Date(turnoActivo.abierto_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        ID: {turnoActivo.turno} • {new Date(turnoActivo.abierto_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: 'numeric' })} {new Date(turnoActivo.abierto_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                 )}
                                 {turnoActivo && turnoActivo.vendedor_id !== user?.id && !isAdmin && (
@@ -671,20 +676,36 @@ export default function FlujoCajaView({ user, profile }) {
                                             <Trash2 size={16} />
                                         </button>
                                     )}
-                                    <button 
-                                        onClick={() => setShowCloseModal(true)} 
+                                    <button
+                                        onClick={() => { setCalcQty(initCalc()); setShowCalcModal(true); }}
+                                        className="p-2.5 bg-background text-navy/40 rounded-lg hover:text-primary hover:bg-primary/5 transition-all border border-border/20"
+                                        title="Calculadora de billetes"
+                                    >
+                                        🧮
+                                    </button>
+                                    <button
+                                        onClick={() => setShowCloseModal(true)}
                                         className="bg-navy text-white px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-navy/10"
                                     >
                                         Cierre de Turno
                                     </button>
                                 </>
                             ) : (
-                                <button 
-                                    onClick={() => setShowOpenModal(true)} 
-                                    className="bg-primary text-navy px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:brightness-105 active:scale-95 transition-all shadow-md shadow-primary/20"
-                                >
-                                    Iniciar Jornada
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => { setCalcQty(initCalc()); setShowCalcModal(true); }}
+                                        className="p-2.5 bg-background text-navy/40 rounded-lg hover:text-primary hover:bg-primary/5 transition-all border border-border/20"
+                                        title="Calculadora de billetes"
+                                    >
+                                        🧮
+                                    </button>
+                                    <button
+                                        onClick={() => setShowOpenModal(true)}
+                                        className="bg-primary text-navy px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:brightness-105 active:scale-95 transition-all shadow-md shadow-primary/20"
+                                    >
+                                        Iniciar Jornada
+                                    </button>
+                                </>
                             )}
                         </div>
                     </motion.div>
@@ -1682,6 +1703,88 @@ export default function FlujoCajaView({ user, profile }) {
                    />
                 )}
             </AnimatePresence>
+
+            {/* ===== MODAL: CALCULADORA DE BILLETES ===== */}
+            {showCalcModal && (() => {
+                const denom = [...BILLETES, ...MONEDAS];
+                const total = denom.reduce((s, d) => s + d * (parseFloat(calcQty[d]) || 0), 0);
+                return (
+                    <div
+                        style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+                        onClick={() => setShowCalcModal(false)}
+                    >
+                        <div
+                            onClick={e => e.stopPropagation()}
+                            style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '420px', boxShadow: '0 25px 50px rgba(0,0,0,0.3)', overflow: 'hidden' }}
+                        >
+                            {/* Header */}
+                            <div style={{ background: '#1b3a57', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ color: '#f5a800', fontWeight: 900, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>🧮 Conteo de Caja</span>
+                                <button onClick={() => setShowCalcModal(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: '18px' }}>✕</button>
+                            </div>
+
+                            {/* Body */}
+                            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '70vh', overflowY: 'auto' }}>
+                                {/* Billetes */}
+                                <p style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.1em', margin: 0 }}>Billetes</p>
+                                {BILLETES.map(d => (
+                                    <div key={d} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <span style={{ width: '56px', fontSize: '13px', fontWeight: 900, color: '#1e293b', fontFamily: 'monospace', textAlign: 'right' }}>Bs {d}</span>
+                                        <input
+                                            type="number" min="0" step="1"
+                                            value={calcQty[d] === 0 ? '' : calcQty[d]}
+                                            placeholder="0"
+                                            onChange={e => setCalcQty(p => ({ ...p, [d]: e.target.value === '' ? 0 : parseInt(e.target.value) || 0 }))}
+                                            onClick={e => e.target.select()}
+                                            style={{ flex: 1, padding: '7px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 800, fontSize: '14px', outline: 'none', textAlign: 'center' }}
+                                            onFocus={e => { e.target.style.borderColor = '#f07d2a'; e.target.select(); }}
+                                            onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                        />
+                                        <span style={{ width: '80px', fontSize: '13px', fontWeight: 800, color: '#475569', fontFamily: 'monospace', textAlign: 'right' }}>
+                                            = Bs {(d * (parseFloat(calcQty[d]) || 0)).toFixed(2)}
+                                        </span>
+                                    </div>
+                                ))}
+
+                                {/* Monedas */}
+                                <p style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.1em', margin: '6px 0 0 0' }}>Monedas</p>
+                                {MONEDAS.map(d => (
+                                    <div key={d} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <span style={{ width: '56px', fontSize: '13px', fontWeight: 900, color: '#1e293b', fontFamily: 'monospace', textAlign: 'right' }}>Bs {d}</span>
+                                        <input
+                                            type="number" min="0" step="1"
+                                            value={calcQty[d] === 0 ? '' : calcQty[d]}
+                                            placeholder="0"
+                                            onChange={e => setCalcQty(p => ({ ...p, [d]: e.target.value === '' ? 0 : parseInt(e.target.value) || 0 }))}
+                                            onClick={e => e.target.select()}
+                                            style={{ flex: 1, padding: '7px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 800, fontSize: '14px', outline: 'none', textAlign: 'center' }}
+                                            onFocus={e => { e.target.style.borderColor = '#94a3b8'; e.target.select(); }}
+                                            onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                        />
+                                        <span style={{ width: '80px', fontSize: '13px', fontWeight: 800, color: '#475569', fontFamily: 'monospace', textAlign: 'right' }}>
+                                            = Bs {(d * (parseFloat(calcQty[d]) || 0)).toFixed(2)}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Total + acciones */}
+                            <div style={{ borderTop: '2px solid #f1f5f9', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                                <button
+                                    onClick={() => setCalcQty(initCalc())}
+                                    style={{ padding: '8px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', background: 'white', fontWeight: 700, fontSize: '12px', cursor: 'pointer', color: '#94a3b8' }}
+                                >
+                                    Limpiar
+                                </button>
+                                <div style={{ textAlign: 'right' }}>
+                                    <p style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', margin: 0 }}>Total en Caja</p>
+                                    <p style={{ fontSize: '26px', fontWeight: 900, color: '#1b3a57', fontFamily: 'monospace', margin: 0, lineHeight: 1.1 }}>Bs {total.toFixed(2)}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* ===== MODAL: GESTIÓN DE CATEGORÍAS (solo admin) ===== */}
             <AnimatePresence>
