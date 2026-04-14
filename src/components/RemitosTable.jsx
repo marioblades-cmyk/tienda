@@ -254,6 +254,37 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 let loadedAlq = resAlq.data?.data || { meses: [], config: { totalBS: 1850, socioBS: 600, mesInicio: '' } };
                 if (!loadedAlq.config) loadedAlq.config = { totalBS: 1850, socioBS: 600, mesInicio: '' };
 
+                // Backfill flete_monto_pagado / costo_monto_pagado para filas antiguas
+                const rowsNeedingBackfill = loadedRows.filter(r =>
+                    (r.flete_caja_id && r.flete_monto_pagado == null) ||
+                    (r.costo_caja_id && r.costo_monto_pagado == null)
+                );
+                if (rowsNeedingBackfill.length > 0) {
+                    const allIds = [
+                        ...rowsNeedingBackfill.filter(r => r.flete_caja_id && r.flete_monto_pagado == null).map(r => r.flete_caja_id),
+                        ...rowsNeedingBackfill.filter(r => r.costo_caja_id && r.costo_monto_pagado == null).map(r => r.costo_caja_id),
+                    ].filter(Boolean);
+                    const { data: cajaMovs } = await supabase.from('caja_movimientos').select('id, monto').in('id', allIds);
+                    const montoMap = {};
+                    (cajaMovs || []).forEach(m => { montoMap[m.id] = parseFloat(m.monto) || 0; });
+                    let didBackfill = false;
+                    loadedRows = loadedRows.map(r => {
+                        let updated = { ...r };
+                        if (r.flete_caja_id && r.flete_monto_pagado == null && montoMap[r.flete_caja_id] != null) {
+                            updated.flete_monto_pagado = montoMap[r.flete_caja_id];
+                            didBackfill = true;
+                        }
+                        if (r.costo_caja_id && r.costo_monto_pagado == null && montoMap[r.costo_caja_id] != null) {
+                            updated.costo_monto_pagado = montoMap[r.costo_caja_id];
+                            didBackfill = true;
+                        }
+                        return updated;
+                    });
+                    if (didBackfill) {
+                        await supabase.from('app_state').upsert({ id: 'remitos', data: loadedRows });
+                    }
+                }
+
                 // Si no hay filas, inyectamos historial real
                 if (loadedRows.length === 0) {
                     loadedRows = [
