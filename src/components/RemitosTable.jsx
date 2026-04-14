@@ -483,7 +483,9 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             }]).select('id').single();
             if (error) throw error;
             const flete_caja_id = cajaMov?.id || null;
-            const newRows = rows.map(r => r.id === rowId ? { ...r, flete_caja_id } : r);
+            const newRows = rows.map(r => r.id === rowId
+                ? { ...r, flete_caja_id, flete_monto_pagado: fleteBS }
+                : r);
             setRows(newRows);
             await saveRemitos(newRows);
             setFleteModal(null);
@@ -516,13 +518,78 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             }]).select('id').single();
             if (error) throw error;
             const costo_caja_id = cajaMov?.id || null;
-            const newRows = rows.map(r => r.id === rowId ? { ...r, costo_caja_id } : r);
+            const newRows = rows.map(r => r.id === rowId
+                ? { ...r, costo_caja_id, costo_monto_pagado: costoBS }
+                : r);
             setRows(newRows);
             await saveRemitos(newRows);
             setCostoModal(null);
             showToast('Envío AR registrado como egreso correctamente.', 'success');
         } catch (e) {
             showToast('Error al registrar el costo: ' + e.message, 'error');
+        } finally {
+            setCostoSaving(false);
+        }
+    };
+
+    const handleRegistrarFleteRestante = async () => {
+        if (!fleteModal) return;
+        const { rowId, fleteBS, nro, fecha } = fleteModal;
+        if (!fleteBS || fleteBS <= 0) return;
+        setFleteSaving(true);
+        try {
+            const row = rows.find(r => r.id === rowId);
+            const cg = num(row?.cg), cm = num(row?.cm), cp = num(row?.cp);
+            const partes = [];
+            if (cg > 0) partes.push(`${cg}G`);
+            if (cm > 0) partes.push(`${cm}M`);
+            if (cp > 0) partes.push(`${cp}P`);
+            const detalleCajas = partes.length > 0 ? ' · ' + partes.join(' ') : '';
+            const nroLabel = nro ? `Remito ${nro}` : 'Remito s/n';
+            const fechaLabel = fecha ? ` (${fecha})` : '';
+            const concepto = `Flete (restante) — ${nroLabel}${detalleCajas}${fechaLabel}`;
+            const { data: cajaMov, error } = await supabase.from('caja_movimientos').insert([{
+                turno_id: null, tipo: 'EGRESO', categoria: 'Flete / Envío',
+                concepto, monto: fleteBS, metodo_pago: fleteMetodo, origen: 'Envios',
+            }]).select('id').single();
+            if (error) throw error;
+            const nuevoPagado = (num(row?.flete_monto_pagado) + fleteBS);
+            const newRows = rows.map(r => r.id === rowId ? { ...r, flete_monto_pagado: nuevoPagado } : r);
+            setRows(newRows);
+            await saveRemitos(newRows);
+            setFleteModal(null);
+            showToast(`Restante de flete (Bs ${fleteBS.toFixed(2)}) registrado.`, 'success');
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        } finally {
+            setFleteSaving(false);
+        }
+    };
+
+    const handleRegistrarCostoRestante = async () => {
+        if (!costoModal) return;
+        const { rowId, costoBS, nro, fecha, compre, cambio } = costoModal;
+        if (!costoBS || costoBS <= 0) return;
+        setCostoSaving(true);
+        try {
+            const row = rows.find(r => r.id === rowId);
+            const nroLabel = nro ? `Remito ${nro}` : 'Remito s/n';
+            const fechaLabel = fecha ? ` (${fecha})` : '';
+            const detalle = compre && cambio ? ` · ARS ${Number(compre).toLocaleString()} × ${cambio}` : '';
+            const concepto = `Envío AR (restante) — ${nroLabel}${detalle}${fechaLabel}`;
+            const { data: cajaMov, error } = await supabase.from('caja_movimientos').insert([{
+                turno_id: null, tipo: 'EGRESO', categoria: 'Envío Argentina',
+                concepto, monto: costoBS, metodo_pago: costoMetodo, origen: 'Proveedores',
+            }]).select('id').single();
+            if (error) throw error;
+            const nuevoPagado = (num(row?.costo_monto_pagado) + costoBS);
+            const newRows = rows.map(r => r.id === rowId ? { ...r, costo_monto_pagado: nuevoPagado } : r);
+            setRows(newRows);
+            await saveRemitos(newRows);
+            setCostoModal(null);
+            showToast(`Restante de envío AR (Bs ${costoBS.toFixed(2)}) registrado.`, 'success');
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
         } finally {
             setCostoSaving(false);
         }
@@ -1738,8 +1805,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                     </div>
                                     <div style={{ display: 'flex', gap: '10px' }}>
                                         <button onClick={() => setFleteModal(null)} disabled={fleteSaving} style={{ flex: 1, padding: '10px', background: '#f1f1f1', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>Cancelar</button>
-                                        <button onClick={handleRegistrarFlete} disabled={fleteSaving} style={{ flex: 1, padding: '10px', background: fleteSaving ? '#aaa' : 'var(--ok)', border: 'none', borderRadius: '4px', cursor: fleteSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
-                                            {fleteSaving ? 'Registrando...' : 'Confirmar Egreso'}
+                                        <button onClick={fleteModal?.isRestante ? handleRegistrarFleteRestante : handleRegistrarFlete} disabled={fleteSaving} style={{ flex: 1, padding: '10px', background: fleteSaving ? '#aaa' : (fleteModal?.isRestante ? '#e67e22' : 'var(--ok)'), border: 'none', borderRadius: '4px', cursor: fleteSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
+                                            {fleteSaving ? 'Registrando...' : (fleteModal?.isRestante ? 'Confirmar Restante' : 'Confirmar Egreso')}
                                         </button>
                                     </div>
                                 </div>
@@ -1776,8 +1843,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                     </div>
                                     <div style={{ display: 'flex', gap: '10px' }}>
                                         <button onClick={() => setCostoModal(null)} disabled={costoSaving} style={{ flex: 1, padding: '10px', background: '#f1f1f1', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>Cancelar</button>
-                                        <button onClick={handleRegistrarCosto} disabled={costoSaving} style={{ flex: 1, padding: '10px', background: costoSaving ? '#aaa' : 'var(--ok)', border: 'none', borderRadius: '4px', cursor: costoSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
-                                            {costoSaving ? 'Registrando...' : 'Confirmar Egreso'}
+                                        <button onClick={costoModal?.isRestante ? handleRegistrarCostoRestante : handleRegistrarCosto} disabled={costoSaving} style={{ flex: 1, padding: '10px', background: costoSaving ? '#aaa' : (costoModal?.isRestante ? '#e67e22' : 'var(--ok)'), border: 'none', borderRadius: '4px', cursor: costoSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', color: '#fff' }}>
+                                            {costoSaving ? 'Registrando...' : (costoModal?.isRestante ? 'Confirmar Restante' : 'Confirmar Egreso')}
                                         </button>
                                     </div>
                                 </div>
@@ -1958,21 +2025,35 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 )}
                                                 {!isSocio && (
                                                     <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '2px 4px' }}>
-                                                        {r.costo_caja_id ? (
-                                                            <span title="Eliminá el egreso desde Contabilidad para re-registrar" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(39,174,96,0.12)', color: 'var(--ok)', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(39,174,96,0.3)', whiteSpace: 'nowrap' }}>
-                                                                ✓ Registrado
-                                                            </span>
-                                                        ) : calcs.costoBS > 0 ? (
-                                                            <button
-                                                                onClick={() => { setCostoModal({ rowId: r.id, costoBS: calcs.costoBS, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio }); setCostoMetodo('Efectivo Personal'); }}
-                                                                style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
-                                                                title={`Registrar BS ${calcs.costoBS.toFixed(2)} como egreso "Envío Argentina"`}
-                                                            >
-                                                                🚚 Reg. Envío AR
-                                                            </button>
-                                                        ) : (
-                                                            <span style={{ color: '#ccc', fontSize: '0.7rem' }}>—</span>
-                                                        )}
+                                                        {(() => {
+                                                            const restanteCosto = calcs.costoBS - num(r.costo_monto_pagado);
+                                                            if (r.costo_caja_id && restanteCosto > 0.01) {
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => { setCostoModal({ rowId: r.id, costoBS: restanteCosto, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio, isRestante: true }); setCostoMetodo('Efectivo Personal'); }}
+                                                                        style={{ padding: '3px 8px', background: '#e67e22', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                                                        title={`Falta pagar BS ${restanteCosto.toFixed(2)}`}
+                                                                    >
+                                                                        🚚 Restante Bs {restanteCosto.toFixed(2)}
+                                                                    </button>
+                                                                );
+                                                            }
+                                                            if (r.costo_caja_id) {
+                                                                return <span title="Pago completo" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(39,174,96,0.12)', color: 'var(--ok)', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(39,174,96,0.3)', whiteSpace: 'nowrap' }}>✓ Registrado</span>;
+                                                            }
+                                                            if (calcs.costoBS > 0) {
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => { setCostoModal({ rowId: r.id, costoBS: calcs.costoBS, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio }); setCostoMetodo('Efectivo Personal'); }}
+                                                                        style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                                                        title={`Registrar BS ${calcs.costoBS.toFixed(2)} como egreso "Envío Argentina"`}
+                                                                    >
+                                                                        🚚 Reg. Envío AR
+                                                                    </button>
+                                                                );
+                                                            }
+                                                            return <span style={{ color: '#ccc', fontSize: '0.7rem' }}>—</span>;
+                                                        })()}
                                                     </td>
                                                 )}
                                                 <td>
@@ -2013,21 +2094,35 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 </td>
                                                 {!isSocio && (
                                                     <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '2px 4px' }}>
-                                                        {r.flete_caja_id ? (
-                                                            <span title="Eliminá el egreso desde Contabilidad para re-registrar" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(39,174,96,0.12)', color: 'var(--ok)', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(39,174,96,0.3)', whiteSpace: 'nowrap' }}>
-                                                                ✓ Registrado
-                                                            </span>
-                                                        ) : calcs.fleteBS > 0 ? (
-                                                            <button
-                                                                onClick={() => { setFleteModal({ rowId: r.id, fleteBS: calcs.fleteBS, nro: r.nro || '', fecha: r.fecha || '' }); setFleteMetodo('Efectivo Personal'); }}
-                                                                style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
-                                                                title={`Registrar flete BS ${calcs.fleteBS.toFixed(2)} como egreso en caja`}
-                                                            >
-                                                                📤 Reg. Flete
-                                                            </button>
-                                                        ) : (
-                                                            <span style={{ color: '#ccc', fontSize: '0.7rem' }}>—</span>
-                                                        )}
+                                                        {(() => {
+                                                            const restanteFlete = calcs.fleteBS - num(r.flete_monto_pagado);
+                                                            if (r.flete_caja_id && restanteFlete > 0.01) {
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => { setFleteModal({ rowId: r.id, fleteBS: restanteFlete, nro: r.nro || '', fecha: r.fecha || '', isRestante: true }); setFleteMetodo('Efectivo Personal'); }}
+                                                                        style={{ padding: '3px 8px', background: '#e67e22', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                                                        title={`Falta pagar BS ${restanteFlete.toFixed(2)}`}
+                                                                    >
+                                                                        📤 Restante Bs {restanteFlete.toFixed(2)}
+                                                                    </button>
+                                                                );
+                                                            }
+                                                            if (r.flete_caja_id) {
+                                                                return <span title="Pago completo" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(39,174,96,0.12)', color: 'var(--ok)', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(39,174,96,0.3)', whiteSpace: 'nowrap' }}>✓ Registrado</span>;
+                                                            }
+                                                            if (calcs.fleteBS > 0) {
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => { setFleteModal({ rowId: r.id, fleteBS: calcs.fleteBS, nro: r.nro || '', fecha: r.fecha || '' }); setFleteMetodo('Efectivo Personal'); }}
+                                                                        style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                                                        title={`Registrar flete BS ${calcs.fleteBS.toFixed(2)} como egreso en caja`}
+                                                                    >
+                                                                        📤 Reg. Flete
+                                                                    </button>
+                                                                );
+                                                            }
+                                                            return <span style={{ color: '#ccc', fontSize: '0.7rem' }}>—</span>;
+                                                        })()}
                                                     </td>
                                                 )}
                                                 {!compactMode && (
