@@ -189,6 +189,7 @@ export default function FlujoCajaView({ user, profile }) {
             await fetchMovimientos(active.id);
         } else {
             setTurnoActivo(null);
+            setMovimientos([]);
             // Si no hay turno abierto, buscamos el último cerrado para el balance inicial
             const { data: lastArr } = await supabase
                 .from('turnos_caja')
@@ -468,18 +469,27 @@ export default function FlujoCajaView({ user, profile }) {
 
     const handleCloseCaja = async () => {
         const totals = calculateTotals();
+        const cerradoAt = new Date().toISOString();
+        const turnoResumen = {
+            ...turnoActivo,
+            estado: 'CERRADO',
+            monto_final: totals.efectivoEnCaja,
+            cerrado_at: cerradoAt,
+        };
         const { error } = await supabase
             .from('turnos_caja')
             .update({
                 estado: 'CERRADO',
                 monto_final: totals.efectivoEnCaja,
-                cerrado_at: new Date().toISOString()
+                cerrado_at: cerradoAt,
             })
             .eq('id', turnoActivo.id);
-            
+
         if (error) return alert('Error al cerrar caja');
         setShowCloseModal(false);
-        init();
+        await init();
+        // Mostrar resumen del turno recién cerrado para que el vendedor confirme los datos
+        setShowDetailModal(turnoResumen);
     };
 
     const handleDeleteTurno = async (id) => {
