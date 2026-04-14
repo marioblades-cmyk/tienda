@@ -1164,13 +1164,19 @@ export default function ClientOrdersView() {
         const groups = {};
         
         // 1. Determine which clients should be visible
+        const searchLower = search ? search.toLowerCase().trim() : '';
         const visibleClients = clientes.filter(c => {
-            if (isAdmin) return true;
-            
-            const hasMyItems = items.some(i => i.cliente_id === c.id);
-            const matchesSearch = search && (c.nombre.toLowerCase().includes(search.toLowerCase()) || c.celular.includes(search));
-            
-            return hasMyItems || matchesSearch;
+            // Non-admin: must have at least one item from this vendor
+            if (!isAdmin && !items.some(i => i.cliente_id === c.id)) return false;
+
+            // Search filter: match client name/celular OR any item title
+            if (searchLower) {
+                const matchCliente = c.nombre.toLowerCase().includes(searchLower) || c.celular.includes(searchLower);
+                const matchTitulo = items.some(i => i.cliente_id === c.id && (i.titulo || '').toLowerCase().includes(searchLower));
+                if (!matchCliente && !matchTitulo) return false;
+            }
+
+            return true;
         });
 
         // Extrae el número de volumen al final del título, ej: "KUROSHITSUJI 21" → 21
@@ -1192,10 +1198,18 @@ export default function ClientOrdersView() {
         };
 
         visibleClients.forEach(c => {
-            const myItems = items.filter(i => i.cliente_id === c.id);
+            const allMyItems = items.filter(i => i.cliente_id === c.id);
             const others = otherSellersItems.filter(i => i.cliente_id === c.id);
 
-            // If I am not admin and I have no items of my own AND I'm not searching for them, skip
+            // When searching by title, show only matching items
+            // (but if client name/celular matched, show all their items)
+            const clientMatchesSearch = searchLower && (
+                c.nombre.toLowerCase().includes(searchLower) || c.celular.includes(searchLower)
+            );
+            const myItems = (searchLower && !clientMatchesSearch)
+                ? allMyItems.filter(i => (i.titulo || '').toLowerCase().includes(searchLower))
+                : allMyItems;
+
             if (!isAdmin && myItems.length === 0 && !search) return;
 
             // Ordenar ítems: primero por estado (EN TIENDA > CONFIRMADO > PEDIDO > ENTREGADO),
