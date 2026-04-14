@@ -1894,6 +1894,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.cajas || ''}
                                                         onChange={e => handleChange(r.id, 'cajas', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1905,6 +1907,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.kg || ''}
                                                         onChange={e => handleChange(r.id, 'kg', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1916,6 +1920,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.precio_remito || ''}
                                                         onChange={e => handleChange(r.id, 'precio_remito', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1927,6 +1933,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.compre || ''}
                                                         onChange={e => handleChange(r.id, 'compre', e.target.value)}
                                                         style={{ ...numInputStyle, fontWeight: 'bold', color: 'var(--accent)' }}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1938,6 +1946,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.cambio || ''}
                                                         onChange={e => handleChange(r.id, 'cambio', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1972,6 +1982,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.cg || ''}
                                                         onChange={e => handleChange(r.id, 'cg', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1982,6 +1994,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.cm || ''}
                                                         onChange={e => handleChange(r.id, 'cm', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -1992,6 +2006,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.cp || ''}
                                                         onChange={e => handleChange(r.id, 'cp', e.target.value)}
                                                         style={numInputStyle}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                         disabled={isSocio}
                                                     />
                                                 </td>
@@ -2075,6 +2091,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.skg || ''}
                                                         onChange={e => handleChange(r.id, 'skg', e.target.value)}
                                                         style={{ ...numInputStyle, color: '#9c27b0' }}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                     />
                                                 </td>
                                                 <td style={{ backgroundColor: 'rgba(156, 39, 176, 0.05)' }}>
@@ -2083,6 +2101,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.scaj || ''}
                                                         onChange={e => handleChange(r.id, 'scaj', e.target.value)}
                                                         style={{ ...numInputStyle, color: '#9c27b0' }}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                     />
                                                 </td>
                                                 <td style={{ backgroundColor: 'rgba(156, 39, 176, 0.05)' }}>
@@ -2092,6 +2112,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         value={r.smonto || ''}
                                                         onChange={e => handleChange(r.id, 'smonto', e.target.value)}
                                                         style={{ ...numInputStyle, color: '#9c27b0' }}
+                                                        onFocus={e => e.target.select()}
+                                                        onWheel={e => e.target.blur()}
                                                     />
                                                 </td>
                                                 {!compactMode && (
