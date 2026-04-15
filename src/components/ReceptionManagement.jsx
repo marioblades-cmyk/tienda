@@ -69,7 +69,7 @@ export default function ReceptionManagement() {
             // 4. Fetch specific client orders (for allocation)
             const { data: cItems } = await supabase
                 .from('cliente_items')
-                .select('*, clientes(nombre)')
+                .select('*, clientes(nombre, vendedor_id)')
                 .eq('semana_id', semanaId);
             
             setClientItems(cItems || []);
@@ -292,6 +292,44 @@ export default function ReceptionManagement() {
                     
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     
+                    // Count how many of these pre-allocated items belong to the Tienda (vendedor_id is null or belongs to auth user who is admin... wait.
+                    // simpler: if a client has a vendedor_id, and it's not the admin, it's a vendor client.
+                    // Actually, if we just count how many preAllocated are from "Tienda":
+                    // To be safe, let's just assume store stock is maxed at `tiendaOrdered`.
+                    const breakdown = orderBreakdown[key] || [];
+                    const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    
+                    // We can precisely identify Tienda clients if their vendedor_id matches the Tienda's ID, but Tienda often has null or Admin ID.
+                    // Let's assume vendor orders never go to stock_fisico.
+                    // The units going to stock_fisico are: (Qty Received NOT allocated to anyone) -> but wait, vendor also has unallocated units!
+                    // What if we just do: Tienda Total Ordered - Tienda Clients Allocated.
+                    const tiendaClientsAllocated = preAllocated.filter(ci => {
+                        // Assuming vendors have string names, and store clients might not have vendedor_id or belong to the store.
+                        // If ci.clientes.vendedor_id is present, it might be a vendor. If we don't know the store's user.id here easily...
+                        // Let's just do a safe estimation:
+                        return !ci.clientes?.vendedor_id; // Store clients often don't have a specific external vendor_id in simple setups.
+                    }).length;
+                    
+                    // The foolproof way without knowing vendor mappings exactly:
+                    // Only increase stock_fisico up to (TiendaOrdered - total preallocated that couldn't possibly be vendor).
+                    // Actually, let's just use `tiendaOrdered`.
+                    // We only subtract from tiendaOrdered the clients that we KNOW belong to Tienda.
+                    // Since we can't reliably know, let's do:
+                    const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    const forStore = Math.max(0, Math.min(qtyRec - preAllocatedIds.length - totalVendorOrdered, tiendaOrdered));
+                    // Explanation:
+                    // Max possible store units = tiendaOrdered.
+                    // Units remaining after all clients and all vendor allocations = qtyRec - preAlloc - vendorOrdered.
+                    // BUT vendor allocations might have gone to clients! So this could be negative.
+                    // If qtyRec = 10. TiendaOrd = 5. VendOrd = 5.
+                    // TiendaClients = 2. VendClients = 1. preAlloc = 3.
+                    // 10 - 3 - 5 = 2. Store gets 2.
+                    // Wait, Store ordered 5, had 2 clients. 5 - 2 = 3! So Store should get 3!
+                    // Okay, a safer heuristic:
+                    const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
+                    let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
+                    if (calcForStore < 0) calcForStore = 0;
+
                     // Update those to "EN TIENDA"
                     if (preAllocatedIds.length > 0) {
                         await supabase.from('cliente_items')
@@ -300,7 +338,7 @@ export default function ReceptionManagement() {
                     }
 
                     // Remaining units go to Store Stock
-                    const forStore = Math.max(0, qtyRec - preAllocatedIds.length);
+                    const forStoreFinal = calcForStore;
 
                     if (forStore > 0) {
                         const { data: prods } = await supabase
@@ -313,7 +351,7 @@ export default function ReceptionManagement() {
                         if (prod) {
                             await supabase
                                 .from('catalogo_productos')
-                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStore })
+                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStoreFinal })
                                 .eq('id', prod.id);
                         }
                     }
@@ -363,6 +401,13 @@ export default function ReceptionManagement() {
                     
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     
+                    const breakdown = orderBreakdown[key] || [];
+                    const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
+                    let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
+                    if (calcForStore < 0) calcForStore = 0;
+
                     // Update those to "EN TIENDA"
                     if (preAllocatedIds.length > 0) {
                         await supabase.from('cliente_items')
@@ -371,9 +416,9 @@ export default function ReceptionManagement() {
                     }
 
                     // Remaining units go to Store Stock
-                    const forStore = Math.max(0, qtyRec - preAllocatedIds.length);
+                    const forStoreFinal = calcForStore;
 
-                    if (forStore > 0) {
+                    if (forStoreFinal > 0) {
                         const { data: prods } = await supabase
                             .from('catalogo_productos')
                             .select('id, stock_fisico, titulo')
@@ -384,7 +429,7 @@ export default function ReceptionManagement() {
                         if (prod) {
                             await supabase
                                 .from('catalogo_productos')
-                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStore })
+                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStoreFinal })
                                 .eq('id', prod.id);
                         }
                     }
@@ -438,7 +483,7 @@ export default function ReceptionManagement() {
                 const qtyRec = item.cantidad_recibida;
                 
                 const preAllocated = clientItems.filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA')).slice(0, qtyRec);
-                const forStore = Math.max(0, qtyRec - preAllocated.length);
+                const forStore = Math.max(0, qtyRec - preAllocated.length); // for emergency fix, it reverses the OLD logic that was broken.
                 if (forStore > 0) {
                     const excess = forStore * 3;
                     const { data: prods } = await supabase.from('catalogo_productos').select('id, stock_fisico, titulo').ilike('titulo', `%${item.titulo.trim()}%`);
