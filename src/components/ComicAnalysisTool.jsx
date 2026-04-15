@@ -734,17 +734,25 @@ const ComicAnalysisTool = () => {
 
         setIsSyncing(true);
         try {
-            // Borramos todas las filas. Usamos un filtro que siempre sea verdadero (e.g., id no nulo o product_id no vacío)
+            // Contar ítems manuales antes de borrar
+            const { count: manualCount } = await supabase
+                .from('catalogo_productos')
+                .select('*', { count: 'exact', head: true })
+                .like('product_id', 'manual-%');
+
+            // Borrar todo EXCEPTO los ítems creados manualmente (product_id = 'manual-...')
             const { error } = await supabase
                 .from('catalogo_productos')
                 .delete()
-                .neq('product_id', '_empty_registry_'); // Borra todo excepto (teóricamente) un id inexistente
+                .neq('product_id', '_empty_registry_')
+                .not('product_id', 'like', 'manual-%');
 
             if (error) throw error;
 
             setDbCatalog({});
             setDbEanIndex({});
-            alert("El catálogo ha sido vaciado completamente.");
+            const manualesMsg = manualCount > 0 ? ` Se conservaron ${manualCount} ítem(s) creados manualmente.` : '';
+            alert(`El catálogo ha sido vaciado completamente.${manualesMsg}`);
             
             if (Object.keys(sheetsData).length > 0) {
                 // Si hay datos cargados, podríamos querer re-comparar, pero lo más limpio es volver al inicio
