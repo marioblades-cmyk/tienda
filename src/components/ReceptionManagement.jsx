@@ -548,38 +548,41 @@ export default function ReceptionManagement() {
                             <button
                                 onClick={handleFullReception}
                                 disabled={saving || !selectedSemana}
-                                className="p-2.5 px-4 bg-navy text-white rounded-xl text-xs font-bold hover:bg-navy/90 transition-all flex items-center gap-2"
+                                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${saving ? 'bg-navy/50 text-white/50 cursor-not-allowed' : 'bg-navy text-white hover:bg-navy/90'}`}
                                 title="Marcar todo como recibido"
                             >
-                                <CheckCircle2 size={16} /> Todo Recibido
+                                {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                                {saving ? 'Procesando...' : 'Todo Recibido'}
                             </button>
 
                             <button
                                 onClick={handleFinalizeCuts}
                                 disabled={saving || !selectedSemana}
-                                className="p-2.5 px-4 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition-all flex items-center gap-2"
+                                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${saving ? 'bg-red-600/50 text-white/50 cursor-not-allowed' : 'bg-red-600 text-white hover:bg-red-700'}`}
                                 title="Finalizar despacho y procesar recortes"
                             >
-                                <AlertCircle size={16} /> Finalizar Despacho
+                                {saving ? <Loader2 size={16} className="animate-spin" /> : <AlertCircle size={16} />}
+                                {saving ? 'Procesando...' : 'Finalizar Despacho'}
                             </button>
 
                             <button
                                 onClick={handleCancelReception}
                                 disabled={saving || !selectedSemana || loading}
-                                className="p-2.5 px-4 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all flex items-center gap-2 border border-slate-700 shadow-lg"
+                                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border shadow-lg ${saving ? 'bg-slate-900/50 border-slate-700/50 text-white/50 cursor-not-allowed' : 'bg-slate-900 border-slate-700 text-white hover:bg-slate-800'}`}
                                 title="REINICIAR TODA LA RECEPCIÓN (Borrar registros de esta semana)"
                             >
-                                <Trash2 size={16} /> 
-                                Cancelar Recepción
+                                {saving ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                                {saving ? 'Cancelando...' : 'Cancelar Recepción'}
                             </button>
 
                             <button
                                 onClick={handleEmergencyFixOverstock}
                                 disabled={saving || !selectedSemana}
-                                className="p-2.5 px-3 bg-orange-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-orange-600 transition-all flex items-center gap-1 shadow-lg"
-                                title="REDUCIR -3X SOBRE-STOCK (Usar solo si tocaste Todo Recibido 4 veces)"
+                                className={`p-2.5 px-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1 shadow-lg ${saving ? 'bg-orange-500/50 text-white/50 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600'}`}
+                                title="REDUCIR -4X SOBRE-STOCK (Usar solo si tocaste Todo Recibido 4 veces)"
                             >
-                                <AlertCircle size={14} /> FIX SOBRESTOCK
+                                {saving ? <Loader2 size={14} className="animate-spin" /> : <AlertCircle size={14} />} 
+                                {saving ? 'Corrigiendo...' : 'FIX SOBRESTOCK'}
                             </button>
                         </>
                     )}
@@ -587,11 +590,11 @@ export default function ReceptionManagement() {
                     <button 
                         onClick={handleSaveReception}
                         disabled={saving || !selectedSemana || Object.keys(receivedCounts).length === 0}
-                        className="btn-primary flex items-center gap-2 bg-secondary text-white hover:bg-secondary/90 disabled:opacity-50"
+                        className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all shadow-md ${saving ? 'bg-secondary/50 text-white/50 cursor-not-allowed' : 'bg-secondary text-white hover:bg-secondary/90'}`}
                         title="Guardar recepción actual"
                     >
                         {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        Guardar{Object.keys(receivedCounts).length > 0 ? ` (${Object.values(receivedCounts).reduce((a,b)=>a+parseInt(b),0)})` : ''}
+                        {saving ? 'Guardando...' : `Guardar${Object.keys(receivedCounts).length > 0 ? ` (${Object.values(receivedCounts).reduce((a,b)=>a+parseInt(b),0)})` : ''}`}
                     </button>
                 </div>
             </div>
