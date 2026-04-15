@@ -303,11 +303,12 @@ export default function ReceptionManagement() {
                     const forStore = Math.max(0, qtyRec - preAllocatedIds.length);
 
                     if (forStore > 0) {
-                        const { data: prod } = await supabase
+                        const { data: prods } = await supabase
                             .from('catalogo_productos')
-                            .select('id, stock_fisico')
-                            .ilike('titulo', item.titulo.trim())
-                            .maybeSingle();
+                            .select('id, stock_fisico, titulo')
+                            .ilike('titulo', `%${item.titulo.trim()}%`);
+                        
+                        const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
                         
                         if (prod) {
                             await supabase
@@ -373,11 +374,12 @@ export default function ReceptionManagement() {
                     const forStore = Math.max(0, qtyRec - preAllocatedIds.length);
 
                     if (forStore > 0) {
-                        const { data: prod } = await supabase
+                        const { data: prods } = await supabase
                             .from('catalogo_productos')
-                            .select('id, stock_fisico')
-                            .ilike('titulo', item.titulo.trim())
-                            .maybeSingle();
+                            .select('id, stock_fisico, titulo')
+                            .ilike('titulo', `%${item.titulo.trim()}%`);
+                        
+                        const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
                         
                         if (prod) {
                             await supabase
