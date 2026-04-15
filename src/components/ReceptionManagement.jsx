@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
+import { catalogService } from '../services/catalogService';
 import { 
     Package, CheckCircle2, AlertCircle, Search, 
     ChevronRight, ChevronDown, Save, Loader2,
@@ -319,6 +320,8 @@ export default function ReceptionManagement() {
                 if (stockRows.length > 0) {
                     await supabase.from('catalogo_productos')
                         .upsert(stockRows, { onConflict: 'id' });
+                    // Actualizar caché local para que CatalogUpdatedView refleje los cambios
+                    catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
                 }
             }
 
@@ -401,6 +404,7 @@ export default function ReceptionManagement() {
                 if (stockRows.length > 0) {
                     await supabase.from('catalogo_productos')
                         .upsert(stockRows, { onConflict: 'id' });
+                    catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
                 }
             }
 
