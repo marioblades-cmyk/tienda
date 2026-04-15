@@ -22,6 +22,9 @@ export default function ReceptionManagement() {
     const [hideComplete, setHideComplete] = useState(false);
     const [skipStockUpdate, setSkipStockUpdate] = useState(false);
     const [clientItems, setClientItems] = useState([]);
+    const [showVerify, setShowVerify] = useState(false);
+    const [verifyData, setVerifyData] = useState([]);
+    const [verifyLoading, setVerifyLoading] = useState(false);
     const { isAdmin } = useAuth();
 
     useEffect(() => {
@@ -441,9 +444,45 @@ export default function ReceptionManagement() {
         }
     };
 
+    const handleVerifyStock = async () => {
+        if (!selectedSemana || Object.keys(alreadyReceived).length === 0) return;
+        setVerifyLoading(true);
+        setShowVerify(true);
+        try {
+            // Cargar stock actual del catálogo para los títulos recibidos
+            const titulos = Object.keys(alreadyReceived);
+            const { data: prods } = await supabase
+                .from('catalogo_productos')
+                .select('id, titulo, stock_fisico, updated_at');
+            const prodMap = {};
+            (prods || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+
+            const rows = titulos.map(key => {
+                const prod = prodMap[key];
+                const recibido = alreadyReceived[key] || 0;
+                const stockActual = prod?.stock_fisico ?? null;
+                const stockAntes = stockActual !== null ? stockActual - recibido : null;
+                return {
+                    titulo: prod?.titulo || key.toUpperCase(),
+                    recibido,
+                    stockActual,
+                    stockAntes,
+                    updatedAt: prod?.updated_at,
+                };
+            }).sort((a, b) => a.titulo.localeCompare(b.titulo, 'es'));
+
+            setVerifyData(rows);
+        } catch (e) {
+            alert('Error al cargar verificación: ' + e.message);
+        } finally {
+            setVerifyLoading(false);
+        }
+    };
+
     if (!semanas.length && !loading) return <div className="p-8 text-center text-muted">Cargando semanas...</div>;
 
     return (
+        <>
         <div className="space-y-6 max-w-6xl mx-auto">
             {/* Header */}
             <div className="glass p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
@@ -515,6 +554,18 @@ export default function ReceptionManagement() {
                             </button>
 
                         </>
+                    )}
+
+                    {Object.keys(alreadyReceived).length > 0 && (
+                        <button
+                            onClick={handleVerifyStock}
+                            disabled={verifyLoading}
+                            className="p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+                            title="Ver stock antes y después de esta recepción"
+                        >
+                            <Package size={16} />
+                            Verificar Stock
+                        </button>
                     )}
 
                     <button 
@@ -677,5 +728,54 @@ export default function ReceptionManagement() {
                 </div>
             )}
         </div>
+
+        {/* Modal de verificación de stock */}
+        {showVerify && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+                    <div className="flex items-center justify-between p-5 border-b border-border">
+                        <div>
+                            <h3 className="text-lg font-black uppercase tracking-tight">Verificación de Stock</h3>
+                            <p className="text-xs text-muted mt-0.5">Stock antes = stock actual − cantidad recibida en esta semana</p>
+                        </div>
+                        <button onClick={() => setShowVerify(false)} className="text-muted hover:text-text p-1 rounded-lg hover:bg-border/30 transition-all text-xl font-bold">✕</button>
+                    </div>
+                    <div className="overflow-auto flex-1 p-4">
+                        {verifyLoading ? (
+                            <div className="py-16 flex justify-center"><Loader2 size={36} className="animate-spin text-secondary" /></div>
+                        ) : (
+                            <table className="w-full text-sm border-collapse">
+                                <thead>
+                                    <tr className="bg-surface border-b border-border text-xs uppercase text-muted font-black">
+                                        <th className="text-left p-3">Título</th>
+                                        <th className="text-center p-3 text-emerald-700">Stock antes<br/><span className="font-normal normal-case text-[10px]">(tu conteo)</span></th>
+                                        <th className="text-center p-3 text-blue-600">+ Recibido</th>
+                                        <th className="text-center p-3">= Stock ahora</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {verifyData.map((row, i) => (
+                                        <tr key={i} className={`border-b border-border/40 ${row.stockAntes < 0 ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-surface/50'}`}>
+                                            <td className="p-3 font-medium text-xs">{row.titulo}</td>
+                                            <td className="p-3 text-center font-black font-mono text-emerald-700">
+                                                {row.stockAntes !== null ? row.stockAntes : '—'}
+                                                {row.stockAntes < 0 && <span className="ml-1 text-[9px] text-red-500 font-bold">⚠ revisar</span>}
+                                            </td>
+                                            <td className="p-3 text-center font-black font-mono text-blue-600">+{row.recibido}</td>
+                                            <td className="p-3 text-center font-black font-mono">{row.stockActual !== null ? row.stockActual : '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                    <div className="p-4 border-t border-border flex justify-between items-center text-xs text-muted">
+                        <span>{verifyData.length} títulos recibidos en esta semana</span>
+                        <button onClick={() => setShowVerify(false)} className="btn-primary text-xs py-2 px-5">Cerrar</button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 }
