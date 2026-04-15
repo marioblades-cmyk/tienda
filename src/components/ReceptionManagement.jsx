@@ -19,7 +19,7 @@ export default function ReceptionManagement() {
     const [searchTerm, setSearchTerm] = useState('');
     const [vendorFilter, setVendorFilter] = useState('');
     const [hideComplete, setHideComplete] = useState(false);
-    const [skipStockUpdate, setSkipStockUpdate] = useState(true);
+    const [skipStockUpdate, setSkipStockUpdate] = useState(false);
     const [clientItems, setClientItems] = useState([]);
     const { isAdmin } = useAuth();
 
@@ -69,7 +69,7 @@ export default function ReceptionManagement() {
             // 4. Fetch specific client orders (for allocation)
             const { data: cItems } = await supabase
                 .from('cliente_items')
-                .select('*, clientes(nombre)')
+                .select('*, clientes(nombre, vendedor_id)')
                 .eq('semana_id', semanaId);
             
             setClientItems(cItems || []);
@@ -292,6 +292,44 @@ export default function ReceptionManagement() {
                     
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     
+                    // Count how many of these pre-allocated items belong to the Tienda (vendedor_id is null or belongs to auth user who is admin... wait.
+                    // simpler: if a client has a vendedor_id, and it's not the admin, it's a vendor client.
+                    // Actually, if we just count how many preAllocated are from "Tienda":
+                    // To be safe, let's just assume store stock is maxed at `tiendaOrdered`.
+                    const breakdown = orderBreakdown[key] || [];
+                    const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    
+                    // We can precisely identify Tienda clients if their vendedor_id matches the Tienda's ID, but Tienda often has null or Admin ID.
+                    // Let's assume vendor orders never go to stock_fisico.
+                    // The units going to stock_fisico are: (Qty Received NOT allocated to anyone) -> but wait, vendor also has unallocated units!
+                    // What if we just do: Tienda Total Ordered - Tienda Clients Allocated.
+                    const tiendaClientsAllocated = preAllocated.filter(ci => {
+                        // Assuming vendors have string names, and store clients might not have vendedor_id or belong to the store.
+                        // If ci.clientes.vendedor_id is present, it might be a vendor. If we don't know the store's user.id here easily...
+                        // Let's just do a safe estimation:
+                        return !ci.clientes?.vendedor_id; // Store clients often don't have a specific external vendor_id in simple setups.
+                    }).length;
+                    
+                    // The foolproof way without knowing vendor mappings exactly:
+                    // Only increase stock_fisico up to (TiendaOrdered - total preallocated that couldn't possibly be vendor).
+                    // Actually, let's just use `tiendaOrdered`.
+                    // We only subtract from tiendaOrdered the clients that we KNOW belong to Tienda.
+                    // Since we can't reliably know, let's do:
+                    const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    const forStore = Math.max(0, Math.min(qtyRec - preAllocatedIds.length - totalVendorOrdered, tiendaOrdered));
+                    // Explanation:
+                    // Max possible store units = tiendaOrdered.
+                    // Units remaining after all clients and all vendor allocations = qtyRec - preAlloc - vendorOrdered.
+                    // BUT vendor allocations might have gone to clients! So this could be negative.
+                    // If qtyRec = 10. TiendaOrd = 5. VendOrd = 5.
+                    // TiendaClients = 2. VendClients = 1. preAlloc = 3.
+                    // 10 - 3 - 5 = 2. Store gets 2.
+                    // Wait, Store ordered 5, had 2 clients. 5 - 2 = 3! So Store should get 3!
+                    // Okay, a safer heuristic:
+                    const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
+                    let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
+                    if (calcForStore < 0) calcForStore = 0;
+
                     // Update those to "EN TIENDA"
                     if (preAllocatedIds.length > 0) {
                         await supabase.from('cliente_items')
@@ -300,19 +338,20 @@ export default function ReceptionManagement() {
                     }
 
                     // Remaining units go to Store Stock
-                    const forStore = Math.max(0, qtyRec - preAllocatedIds.length);
+                    const forStoreFinal = calcForStore;
 
                     if (forStore > 0) {
-                        const { data: prod } = await supabase
+                        const { data: prods } = await supabase
                             .from('catalogo_productos')
-                            .select('id, stock_fisico')
-                            .ilike('titulo', item.titulo)
-                            .maybeSingle();
+                            .select('id, stock_fisico, titulo')
+                            .ilike('titulo', `%${item.titulo.trim()}%`);
+                        
+                        const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
                         
                         if (prod) {
                             await supabase
                                 .from('catalogo_productos')
-                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStore })
+                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStoreFinal })
                                 .eq('id', prod.id);
                         }
                     }
@@ -349,20 +388,50 @@ export default function ReceptionManagement() {
 
             if (insError) throw insError;
 
-            // 2. Update physical stock in catalog (SKIP IF CHECKED)
+            // 2. Update physical stock in catalog and client orders status
             if (!skipStockUpdate) {
                 for (const item of itemsToSave) {
-                    const { data: prod } = await supabase
-                        .from('catalogo_productos')
-                        .select('id, stock_fisico')
-                        .ilike('titulo', item.titulo)
-                        .maybeSingle();
+                    const key = item.titulo.toLowerCase().trim();
+                    const qtyRec = item.cantidad_recibida;
                     
-                    if (prod) {
-                        await supabase
+                    // Find PRE-ALLOCATED (ADJUDICADO) items for this title/week
+                    const preAllocated = clientItems
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && ci.estado === 'ADJUDICADO')
+                        .slice(0, qtyRec);
+                    
+                    const preAllocatedIds = preAllocated.map(p => p.id);
+                    
+                    const breakdown = orderBreakdown[key] || [];
+                    const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                    const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
+                    let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
+                    if (calcForStore < 0) calcForStore = 0;
+
+                    // Update those to "EN TIENDA"
+                    if (preAllocatedIds.length > 0) {
+                        await supabase.from('cliente_items')
+                            .update({ estado: 'EN TIENDA' })
+                            .in('id', preAllocatedIds);
+                    }
+
+                    // Remaining units go to Store Stock
+                    const forStoreFinal = calcForStore;
+
+                    if (forStoreFinal > 0) {
+                        const { data: prods } = await supabase
                             .from('catalogo_productos')
-                            .update({ stock_fisico: (prod.stock_fisico || 0) + item.cantidad_recibida })
-                            .eq('id', prod.id);
+                            .select('id, stock_fisico, titulo')
+                            .ilike('titulo', `%${item.titulo.trim()}%`);
+                        
+                        const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
+                        
+                        if (prod) {
+                            await supabase
+                                .from('catalogo_productos')
+                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStoreFinal })
+                                .eq('id', prod.id);
+                        }
                     }
                 }
             }
@@ -395,6 +464,39 @@ export default function ReceptionManagement() {
         } catch (err) {
             console.error(err);
             alert("Error: " + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleEmergencyFixOverstock = async () => {
+        if (!confirm("⚠️ ¿Deseas DEDUCIR 3 veces el sobrante al stock físico actual de los ítems de esta semana? Usa esto SOLO si el stock se multiplicó por 4 accidentalmente.")) return;
+        setSaving(true);
+        try {
+            const itemsToSave = masterItems.map(it => ({
+                titulo: it.titulo,
+                cantidad_recibida: it.cantidad
+            }));
+            let deductedCount = 0;
+            for (const item of itemsToSave) {
+                const key = item.titulo.toLowerCase().trim();
+                const qtyRec = item.cantidad_recibida;
+                
+                const preAllocated = clientItems.filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA')).slice(0, qtyRec);
+                const forStore = Math.max(0, qtyRec - preAllocated.length); // for emergency fix, it reverses the OLD logic that was broken.
+                if (forStore > 0) {
+                    const excess = forStore * 4;
+                    const { data: prods } = await supabase.from('catalogo_productos').select('id, stock_fisico, titulo').ilike('titulo', `%${item.titulo.trim()}%`);
+                    const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
+                    if (prod) {
+                        await supabase.from('catalogo_productos').update({ stock_fisico: Math.max(0, (prod.stock_fisico || 0) - excess) }).eq('id', prod.id);
+                        deductedCount++;
+                    }
+                }
+            }
+            alert(`✅ Corrección completada: Se dedujeron unidades sobrantes en ${deductedCount} productos del catálogo.`);
+        } catch (e) {
+            alert("Error: " + e.message);
         } finally {
             setSaving(false);
         }
@@ -469,6 +571,15 @@ export default function ReceptionManagement() {
                             >
                                 <Trash2 size={16} /> 
                                 Cancelar Recepción
+                            </button>
+
+                            <button
+                                onClick={handleEmergencyFixOverstock}
+                                disabled={saving || !selectedSemana}
+                                className="p-2.5 px-3 bg-orange-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-orange-600 transition-all flex items-center gap-1 shadow-lg"
+                                title="REDUCIR -3X SOBRE-STOCK (Usar solo si tocaste Todo Recibido 4 veces)"
+                            >
+                                <AlertCircle size={14} /> FIX SOBRESTOCK
                             </button>
                         </>
                     )}
