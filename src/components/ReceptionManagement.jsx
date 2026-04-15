@@ -485,7 +485,7 @@ export default function ReceptionManagement() {
                 const preAllocated = clientItems.filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA')).slice(0, qtyRec);
                 const forStore = Math.max(0, qtyRec - preAllocated.length); // for emergency fix, it reverses the OLD logic that was broken.
                 if (forStore > 0) {
-                    const excess = forStore * 3;
+                    const excess = forStore * 4;
                     const { data: prods } = await supabase.from('catalogo_productos').select('id, stock_fisico, titulo').ilike('titulo', `%${item.titulo.trim()}%`);
                     const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
                     if (prod) {
