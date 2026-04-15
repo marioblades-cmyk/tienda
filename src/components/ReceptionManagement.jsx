@@ -47,30 +47,17 @@ export default function ReceptionManagement() {
     const fetchReceptionData = async (semanaId) => {
         setLoading(true);
         try {
-            // 1. Fetch Master Confirmation
-            const { data: master } = await supabase
-                .from('master_confirmaciones')
-                .select('*')
-                .eq('semana_id', semanaId)
-                .maybeSingle();
-
-            // 2. Fetch Seller Orders for breakdown
-            const { data: orders } = await supabase
-                .from('pedido_items')
-                .select('*, pedido:pedidos!inner(vendedor_nombre, tipo)')
-                .eq('pedido.semana_id', semanaId);
-
-            // 3. Fetch current reception status
-            const { data: currentReception } = await supabase
-                .from('pedido_items_recepcion')
-                .select('*')
-                .eq('semana_id', semanaId);
-
-            // 4. Fetch specific client orders (for allocation)
-            const { data: cItems } = await supabase
-                .from('cliente_items')
-                .select('*, clientes(nombre, vendedor_id)')
-                .eq('semana_id', semanaId);
+            // Todas las queries en paralelo
+            const [masterRes, ordersRes, receptionRes, cItemsRes] = await Promise.all([
+                supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
+                supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
+                supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
+            ]);
+            const master = masterRes.data;
+            const orders = ordersRes.data;
+            const currentReception = receptionRes.data;
+            const cItems = cItemsRes.data;
             
             setClientItems(cItems || []);
 
@@ -281,80 +268,57 @@ export default function ReceptionManagement() {
 
             // 2. Update physical stock and client orders status
             if (!skipStockUpdate) {
+                // Cargar catálogo UNA sola vez antes del loop
+                const { data: allProds } = await supabase
+                    .from('catalogo_productos')
+                    .select('id, stock_fisico, titulo');
+                const prodMap = {};
+                (allProds || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+
+                // Calcular todos los cambios sin hacer queries por item
+                const allPreAllocatedIds = [];
+                const stockDeltas = {}; // prod.id → cantidad a sumar
+
                 for (const item of itemsToSave) {
                     const key = item.titulo.toLowerCase().trim();
                     const qtyRec = item.cantidad_recibida;
-                    
-                    // Find PRE-ALLOCATED (ADJUDICADO) items for this title/week
+
                     const preAllocated = clientItems
                         .filter(ci => ci.titulo.toLowerCase().trim() === key && ci.estado === 'ADJUDICADO')
                         .slice(0, qtyRec);
-                    
                     const preAllocatedIds = preAllocated.map(p => p.id);
-                    
-                    // Count how many of these pre-allocated items belong to the Tienda (vendedor_id is null or belongs to auth user who is admin... wait.
-                    // simpler: if a client has a vendedor_id, and it's not the admin, it's a vendor client.
-                    // Actually, if we just count how many preAllocated are from "Tienda":
-                    // To be safe, let's just assume store stock is maxed at `tiendaOrdered`.
+                    allPreAllocatedIds.push(...preAllocatedIds);
+
                     const breakdown = orderBreakdown[key] || [];
                     const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                    
-                    // We can precisely identify Tienda clients if their vendedor_id matches the Tienda's ID, but Tienda often has null or Admin ID.
-                    // Let's assume vendor orders never go to stock_fisico.
-                    // The units going to stock_fisico are: (Qty Received NOT allocated to anyone) -> but wait, vendor also has unallocated units!
-                    // What if we just do: Tienda Total Ordered - Tienda Clients Allocated.
-                    const tiendaClientsAllocated = preAllocated.filter(ci => {
-                        // Assuming vendors have string names, and store clients might not have vendedor_id or belong to the store.
-                        // If ci.clientes.vendedor_id is present, it might be a vendor. If we don't know the store's user.id here easily...
-                        // Let's just do a safe estimation:
-                        return !ci.clientes?.vendedor_id; // Store clients often don't have a specific external vendor_id in simple setups.
-                    }).length;
-                    
-                    // The foolproof way without knowing vendor mappings exactly:
-                    // Only increase stock_fisico up to (TiendaOrdered - total preallocated that couldn't possibly be vendor).
-                    // Actually, let's just use `tiendaOrdered`.
-                    // We only subtract from tiendaOrdered the clients that we KNOW belong to Tienda.
-                    // Since we can't reliably know, let's do:
                     const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                    const forStore = Math.max(0, Math.min(qtyRec - preAllocatedIds.length - totalVendorOrdered, tiendaOrdered));
-                    // Explanation:
-                    // Max possible store units = tiendaOrdered.
-                    // Units remaining after all clients and all vendor allocations = qtyRec - preAlloc - vendorOrdered.
-                    // BUT vendor allocations might have gone to clients! So this could be negative.
-                    // If qtyRec = 10. TiendaOrd = 5. VendOrd = 5.
-                    // TiendaClients = 2. VendClients = 1. preAlloc = 3.
-                    // 10 - 3 - 5 = 2. Store gets 2.
-                    // Wait, Store ordered 5, had 2 clients. 5 - 2 = 3! So Store should get 3!
-                    // Okay, a safer heuristic:
                     const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
                     let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
                     if (calcForStore < 0) calcForStore = 0;
 
-                    // Update those to "EN TIENDA"
-                    if (preAllocatedIds.length > 0) {
-                        await supabase.from('cliente_items')
-                            .update({ estado: 'EN TIENDA' })
-                            .in('id', preAllocatedIds);
-                    }
-
-                    // Remaining units go to Store Stock
-                    const forStoreFinal = calcForStore;
-
-                    if (forStore > 0) {
-                        const { data: prods } = await supabase
-                            .from('catalogo_productos')
-                            .select('id, stock_fisico, titulo')
-                            .ilike('titulo', `%${item.titulo.trim()}%`);
-                        
-                        const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
-                        
+                    if (calcForStore > 0) {
+                        const prod = prodMap[key];
                         if (prod) {
-                            await supabase
-                                .from('catalogo_productos')
-                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStoreFinal })
-                                .eq('id', prod.id);
+                            stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
                         }
                     }
+                }
+
+                // Un solo UPDATE para todos los cliente_items
+                if (allPreAllocatedIds.length > 0) {
+                    await supabase.from('cliente_items')
+                        .update({ estado: 'EN TIENDA' })
+                        .in('id', allPreAllocatedIds);
+                }
+
+                // Un solo UPSERT para todos los stocks
+                const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
+                    id,
+                    stock_fisico: (prodMap[Object.keys(prodMap).find(k => prodMap[k].id === id)] ?.stock_fisico || 0) + delta,
+                }));
+                if (stockRows.length > 0) {
+                    await supabase.from('catalogo_productos')
+                        .upsert(stockRows, { onConflict: 'id' });
                 }
             }
 
@@ -390,17 +354,25 @@ export default function ReceptionManagement() {
 
             // 2. Update physical stock in catalog and client orders status
             if (!skipStockUpdate) {
+                const { data: allProds } = await supabase
+                    .from('catalogo_productos')
+                    .select('id, stock_fisico, titulo');
+                const prodMap = {};
+                (allProds || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+
+                const allPreAllocatedIds = [];
+                const stockDeltas = {};
+
                 for (const item of itemsToSave) {
                     const key = item.titulo.toLowerCase().trim();
                     const qtyRec = item.cantidad_recibida;
-                    
-                    // Find PRE-ALLOCATED (ADJUDICADO) items for this title/week
+
                     const preAllocated = clientItems
                         .filter(ci => ci.titulo.toLowerCase().trim() === key && ci.estado === 'ADJUDICADO')
                         .slice(0, qtyRec);
-                    
                     const preAllocatedIds = preAllocated.map(p => p.id);
-                    
+                    allPreAllocatedIds.push(...preAllocatedIds);
+
                     const breakdown = orderBreakdown[key] || [];
                     const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                     const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
@@ -408,31 +380,27 @@ export default function ReceptionManagement() {
                     let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
                     if (calcForStore < 0) calcForStore = 0;
 
-                    // Update those to "EN TIENDA"
-                    if (preAllocatedIds.length > 0) {
-                        await supabase.from('cliente_items')
-                            .update({ estado: 'EN TIENDA' })
-                            .in('id', preAllocatedIds);
-                    }
-
-                    // Remaining units go to Store Stock
-                    const forStoreFinal = calcForStore;
-
-                    if (forStoreFinal > 0) {
-                        const { data: prods } = await supabase
-                            .from('catalogo_productos')
-                            .select('id, stock_fisico, titulo')
-                            .ilike('titulo', `%${item.titulo.trim()}%`);
-                        
-                        const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
-                        
+                    if (calcForStore > 0) {
+                        const prod = prodMap[key];
                         if (prod) {
-                            await supabase
-                                .from('catalogo_productos')
-                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStoreFinal })
-                                .eq('id', prod.id);
+                            stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
                         }
                     }
+                }
+
+                if (allPreAllocatedIds.length > 0) {
+                    await supabase.from('cliente_items')
+                        .update({ estado: 'EN TIENDA' })
+                        .in('id', allPreAllocatedIds);
+                }
+
+                const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
+                    id,
+                    stock_fisico: (prodMap[Object.keys(prodMap).find(k => prodMap[k].id === id)]?.stock_fisico || 0) + delta,
+                }));
+                if (stockRows.length > 0) {
+                    await supabase.from('catalogo_productos')
+                        .upsert(stockRows, { onConflict: 'id' });
                 }
             }
 
