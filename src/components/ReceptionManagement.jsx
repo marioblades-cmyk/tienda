@@ -288,7 +288,7 @@ export default function ReceptionManagement() {
                     const qtyRec = item.cantidad_recibida;
 
                     const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && ci.estado === 'ADJUDICADO')
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'CONFIRMADO'))
                         .slice(0, qtyRec);
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     allPreAllocatedIds.push(...preAllocatedIds);
@@ -374,7 +374,7 @@ export default function ReceptionManagement() {
                     const qtyRec = item.cantidad_recibida;
 
                     const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && ci.estado === 'ADJUDICADO')
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'CONFIRMADO'))
                         .slice(0, qtyRec);
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     allPreAllocatedIds.push(...preAllocatedIds);
@@ -682,7 +682,7 @@ export default function ReceptionManagement() {
                                                             ))}
                                                         </div>
                                                         <div className="mt-1 text-[9px] font-bold text-secondary uppercase animate-pulse">
-                                                            {clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key && ci.estado === 'ADJUDICADO').length} Adjudicados en plan
+                                                            {clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key && ci.estado === 'ADJUDICADO' || ci.estado === 'CONFIRMADO').length} Adjudicados en plan
                                                         </div>
                                                     </td>
                                                     <td className="p-4 text-center">
