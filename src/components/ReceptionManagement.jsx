@@ -424,6 +424,39 @@ export default function ReceptionManagement() {
         }
     };
 
+    const handleEmergencyFixOverstock = async () => {
+        if (!confirm("⚠️ ¿Deseas DEDUCIR 3 veces el sobrante al stock físico actual de los ítems de esta semana? Usa esto SOLO si el stock se multiplicó por 4 accidentalmente.")) return;
+        setSaving(true);
+        try {
+            const itemsToSave = masterItems.map(it => ({
+                titulo: it.titulo,
+                cantidad_recibida: it.cantidad
+            }));
+            let deductedCount = 0;
+            for (const item of itemsToSave) {
+                const key = item.titulo.toLowerCase().trim();
+                const qtyRec = item.cantidad_recibida;
+                
+                const preAllocated = clientItems.filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA')).slice(0, qtyRec);
+                const forStore = Math.max(0, qtyRec - preAllocated.length);
+                if (forStore > 0) {
+                    const excess = forStore * 3;
+                    const { data: prods } = await supabase.from('catalogo_productos').select('id, stock_fisico, titulo').ilike('titulo', `%${item.titulo.trim()}%`);
+                    const prod = prods && prods.length > 0 ? (prods.find(p => (p.titulo||'').trim().toLowerCase() === item.titulo.trim().toLowerCase()) || prods[0]) : null;
+                    if (prod) {
+                        await supabase.from('catalogo_productos').update({ stock_fisico: Math.max(0, (prod.stock_fisico || 0) - excess) }).eq('id', prod.id);
+                        deductedCount++;
+                    }
+                }
+            }
+            alert(`✅ Corrección completada: Se dedujeron unidades sobrantes en ${deductedCount} productos del catálogo.`);
+        } catch (e) {
+            alert("Error: " + e.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     if (!semanas.length && !loading) return <div className="p-8 text-center text-muted">Cargando semanas...</div>;
 
     return (
@@ -493,6 +526,15 @@ export default function ReceptionManagement() {
                             >
                                 <Trash2 size={16} /> 
                                 Cancelar Recepción
+                            </button>
+
+                            <button
+                                onClick={handleEmergencyFixOverstock}
+                                disabled={saving || !selectedSemana}
+                                className="p-2.5 px-3 bg-orange-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-orange-600 transition-all flex items-center gap-1 shadow-lg"
+                                title="REDUCIR -3X SOBRE-STOCK (Usar solo si tocaste Todo Recibido 4 veces)"
+                            >
+                                <AlertCircle size={14} /> FIX SOBRESTOCK
                             </button>
                         </>
                     )}
