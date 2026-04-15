@@ -556,19 +556,7 @@ export default function ReceptionManagement() {
                         </>
                     )}
 
-                    {Object.keys(alreadyReceived).length > 0 && (
-                        <button
-                            onClick={handleVerifyStock}
-                            disabled={verifyLoading}
-                            className="p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                            title="Ver stock antes y después de esta recepción"
-                        >
-                            <Package size={16} />
-                            Verificar Stock
-                        </button>
-                    )}
-
-                    <button 
+                    <button
                         onClick={handleSaveReception}
                         disabled={saving || !selectedSemana || Object.keys(receivedCounts).length === 0}
                         className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all shadow-md ${saving ? 'bg-secondary/50 text-white/50 cursor-not-allowed' : 'bg-secondary text-white hover:bg-secondary/90'}`}
@@ -624,6 +612,18 @@ export default function ReceptionManagement() {
                                 />
                                 <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
                             </label>
+
+                            {Object.keys(alreadyReceived).length > 0 && (
+                                <button
+                                    onClick={handleVerifyStock}
+                                    disabled={verifyLoading}
+                                    className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-4 rounded-2xl text-sm font-bold hover:bg-emerald-700 transition-all whitespace-nowrap"
+                                    title="Ver stock antes y después de esta recepción"
+                                >
+                                    <Package size={18} />
+                                    Verificar Stock
+                                </button>
+                            )}
                         </div>
 
                         {/* Items Table */}
