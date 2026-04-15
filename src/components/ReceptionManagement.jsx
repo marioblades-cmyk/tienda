@@ -19,7 +19,7 @@ export default function ReceptionManagement() {
     const [searchTerm, setSearchTerm] = useState('');
     const [vendorFilter, setVendorFilter] = useState('');
     const [hideComplete, setHideComplete] = useState(false);
-    const [skipStockUpdate, setSkipStockUpdate] = useState(true);
+    const [skipStockUpdate, setSkipStockUpdate] = useState(false);
     const [clientItems, setClientItems] = useState([]);
     const { isAdmin } = useAuth();
 
@@ -306,7 +306,7 @@ export default function ReceptionManagement() {
                         const { data: prod } = await supabase
                             .from('catalogo_productos')
                             .select('id, stock_fisico')
-                            .ilike('titulo', item.titulo)
+                            .ilike('titulo', item.titulo.trim())
                             .maybeSingle();
                         
                         if (prod) {
@@ -349,20 +349,42 @@ export default function ReceptionManagement() {
 
             if (insError) throw insError;
 
-            // 2. Update physical stock in catalog (SKIP IF CHECKED)
+            // 2. Update physical stock in catalog and client orders status
             if (!skipStockUpdate) {
                 for (const item of itemsToSave) {
-                    const { data: prod } = await supabase
-                        .from('catalogo_productos')
-                        .select('id, stock_fisico')
-                        .ilike('titulo', item.titulo)
-                        .maybeSingle();
+                    const key = item.titulo.toLowerCase().trim();
+                    const qtyRec = item.cantidad_recibida;
                     
-                    if (prod) {
-                        await supabase
+                    // Find PRE-ALLOCATED (ADJUDICADO) items for this title/week
+                    const preAllocated = clientItems
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && ci.estado === 'ADJUDICADO')
+                        .slice(0, qtyRec);
+                    
+                    const preAllocatedIds = preAllocated.map(p => p.id);
+                    
+                    // Update those to "EN TIENDA"
+                    if (preAllocatedIds.length > 0) {
+                        await supabase.from('cliente_items')
+                            .update({ estado: 'EN TIENDA' })
+                            .in('id', preAllocatedIds);
+                    }
+
+                    // Remaining units go to Store Stock
+                    const forStore = Math.max(0, qtyRec - preAllocatedIds.length);
+
+                    if (forStore > 0) {
+                        const { data: prod } = await supabase
                             .from('catalogo_productos')
-                            .update({ stock_fisico: (prod.stock_fisico || 0) + item.cantidad_recibida })
-                            .eq('id', prod.id);
+                            .select('id, stock_fisico')
+                            .ilike('titulo', item.titulo.trim())
+                            .maybeSingle();
+                        
+                        if (prod) {
+                            await supabase
+                                .from('catalogo_productos')
+                                .update({ stock_fisico: (prod.stock_fisico || 0) + forStore })
+                                .eq('id', prod.id);
+                        }
                     }
                 }
             }
