@@ -19,7 +19,7 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3, ShoppingBag, Wallet, BookMarked
+    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -27,6 +27,7 @@ import CatalogUpdatedView from './components/CatalogUpdatedView';
 import ClientOrdersView from './components/ClientOrdersView';
 import FlujoCajaView from './components/FlujoCajaView';
 import ContabilidadView from './components/ContabilidadView';
+import StockHistorialView from './components/StockHistorialView';
 
 // --- Nav item ---
 function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
@@ -71,6 +72,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
         { id: 'caja', icon: Wallet, label: 'Flujo de Caja' },
         { id: 'contabilidad', icon: BookMarked, label: 'Contabilidad' },
+        { id: 'stock-historial', icon: History, label: 'Historial de Stock' },
     ];
 
     const sellerItems = [
@@ -271,6 +273,7 @@ function Main() {
         activeTab === 'clientes' ? <ClientOrdersView /> :
         activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
         activeTab === 'contabilidad' ? <ContabilidadView /> :
+        activeTab === 'stock-historial' ? <StockHistorialView /> :
         activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback

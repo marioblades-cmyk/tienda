@@ -262,16 +262,23 @@ export default function ReceptionManagement() {
             if (prodIds.length > 0) {
                 const { data: prods, error: prodErr } = await supabase
                     .from('catalogo_productos')
-                    .select('id, stock_fisico')
+                    .select('id, stock_fisico, titulo')
                     .in('id', prodIds);
                 if (prodErr) throw prodErr;
 
+                const semanaNameCancel = semanas.find(s => s.id === selectedSemana)?.nombre || '';
                 for (const prod of (prods || [])) {
                     const delta = savedDeltas[prod.id] || 0;
                     const newStock = Math.max(0, (prod.stock_fisico || 0) - delta);
                     await supabase.from('catalogo_productos')
                         .update({ stock_fisico: newStock, updated_at: new Date().toISOString() })
                         .eq('id', prod.id);
+                    await catalogService.logStockMovement({
+                        productoId: prod.id, titulo: prod.titulo || '',
+                        delta: -delta, stockDespues: newStock,
+                        motivo: 'CANCELAR RECEPCIÓN',
+                        detalle: semanaNameCancel,
+                    });
                 }
                 catalogService.patchStockInCache((prods || []).map(p => ({ id: p.id, delta: -(savedDeltas[p.id] || 0) })));
 
@@ -417,6 +424,19 @@ export default function ReceptionManagement() {
                         mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
                     });
                     await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
+
+                    // Registrar en historial de stock
+                    const semanaName = semanas.find(s => s.id === selectedSemana)?.nombre || '';
+                    for (const row of stockRows) {
+                        const titulo = prodMap[Object.keys(prodMap).find(k => prodMap[k].id === row.id)]?.titulo || '';
+                        await catalogService.logStockMovement({
+                            productoId: row.id, titulo,
+                            delta: stockDeltas[row.id],
+                            stockDespues: row.stock_fisico,
+                            motivo: 'RECEPCIÓN',
+                            detalle: semanaName,
+                        });
+                    }
                 }
             }
 
@@ -510,6 +530,19 @@ export default function ReceptionManagement() {
                         mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
                     });
                     await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
+
+                    // Registrar en historial de stock
+                    const semanaNameFull = semanas.find(s => s.id === selectedSemana)?.nombre || '';
+                    for (const row of stockRows) {
+                        const tituloFull = prodMap[Object.keys(prodMap).find(k => prodMap[k].id === row.id)]?.titulo || '';
+                        await catalogService.logStockMovement({
+                            productoId: row.id, titulo: tituloFull,
+                            delta: stockDeltas[row.id],
+                            stockDespues: row.stock_fisico,
+                            motivo: 'RECEPCIÓN',
+                            detalle: semanaNameFull,
+                        });
+                    }
                 }
             }
 

@@ -62,12 +62,25 @@ const CatalogUpdatedView = () => {
 
         setIsResetting(true);
         try {
+            // Calcular total anterior para el log
+            const { data: tots } = await supabase.from('catalogo_productos').select('stock_fisico');
+            const totalAnterior = (tots || []).reduce((s, p) => s + (p.stock_fisico || 0), 0);
+
             const { error } = await supabase
                 .from('catalogo_productos')
                 .update({ stock_fisico: 0 })
                 .neq('id', '00000000-0000-0000-0000-000000000000'); // Dummy filter for matching all
 
             if (error) throw error;
+
+            await catalogService.logStockMovement({
+                productoId: null,
+                titulo: 'TODOS LOS PRODUCTOS',
+                delta: -totalAnterior,
+                stockDespues: 0,
+                motivo: 'RESET',
+                detalle: 'Reset global de stock a 0',
+            });
 
             console.log('🧹 Limpiando caché tras reset global...');
             localStorage.removeItem('mcb_catalog_full_cache');
