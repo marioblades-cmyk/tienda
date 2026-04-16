@@ -51,30 +51,87 @@ export default function ReceptionManagement() {
     const fetchReceptionData = async (semanaId) => {
         setLoading(true);
         try {
+            // Obtener nombre de la semana para buscar por estado (CONFIRMADO {semana})
+            const semanaName = semanas.find(s => s.id === semanaId)?.nombre || '';
+
             // Todas las queries en paralelo
-            const [masterRes, ordersRes, receptionRes, cItemsRes] = await Promise.all([
+            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmadosRes] = await Promise.all([
                 supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
+                // Por semana_id (items ADJUDICADO asignados a esta semana)
                 supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
+                // Todos los CONFIRMADO (filtramos por semana en JS para evitar problemas de acentos en ILIKE)
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', 'CONFIRMADO%'),
             ]);
             const master = masterRes.data;
             const orders = ordersRes.data;
             const currentReception = receptionRes.data;
-            const cItems = cItemsRes.data;
-            
-            setClientItems(cItems || []);
+
+            // Filtrar CONFIRMADO por semana en JS (maneja acentos correctamente)
+            const semanaNameLower = semanaName.toLowerCase();
+            const confirmadosDeSemana = (cItemsConfirmadosRes.data || []).filter(ci => {
+                if (!semanaName) return false;
+                const suffix = ci.estado.slice('CONFIRMADO '.length).trim().toLowerCase();
+                return suffix === semanaNameLower || suffix.startsWith(semanaNameLower);
+            });
+
+            // Combinar y deduplicar clientItems (semana_id + CONFIRMADO de esta semana)
+            const seenIds = new Set();
+            const cItems = [...(cItemsByIdRes.data || []), ...confirmadosDeSemana].filter(ci => {
+                if (seenIds.has(ci.id)) return false;
+                seenIds.add(ci.id);
+                return true;
+            });
+
+            // Index current reception
+            const receptionMap = {};
+            (currentReception || []).forEach(r => {
+                const key = r.titulo.toLowerCase().trim();
+                receptionMap[key] = (receptionMap[key] || 0) + r.cantidad_recibida;
+            });
+
+            // Auto-heal: si hay ítems ya recibidos pero sus cliente_items siguen en CONFIRMADO/ADJUDICADO,
+            // actualizarlos a EN TIENDA (corrige recepciones anteriores hechas con código buggy)
+            if (Object.keys(receptionMap).length > 0 && cItems.length > 0) {
+                const toHeal = [];
+                const healCount = {};
+                for (const ci of cItems) {
+                    const key = (ci.titulo || '').toLowerCase().trim();
+                    const received = receptionMap[key] || 0;
+                    if (received > 0 && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'))) {
+                        const already = healCount[key] || 0;
+                        if (already < received) {
+                            toHeal.push(ci.id);
+                            healCount[key] = already + 1;
+                        }
+                    }
+                }
+                if (toHeal.length > 0) {
+                    await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', toHeal);
+                    // Re-fetch cItems frescos después del heal
+                    const [healed1, healed2] = await Promise.all([
+                        supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
+                        semanaName
+                            ? supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', `CONFIRMADO ${semanaName}%`)
+                            : Promise.resolve({ data: [] }),
+                    ]);
+                    const seenIds2 = new Set();
+                    const cItemsHealed = [...(healed1.data || []), ...(healed2.data || [])].filter(ci => {
+                        if (seenIds2.has(ci.id)) return false;
+                        seenIds2.add(ci.id);
+                        return true;
+                    });
+                    setClientItems(cItemsHealed);
+                } else {
+                    setClientItems(cItems);
+                }
+            } else {
+                setClientItems(cItems);
+            }
 
             if (master && master.datos_json) {
                 setMasterItems(master.datos_json);
-                
-                // Index current reception
-                const receptionMap = {};
-                (currentReception || []).forEach(r => {
-                    const key = r.titulo.toLowerCase().trim();
-                    receptionMap[key] = (receptionMap[key] || 0) + r.cantidad_recibida;
-                });
-                
                 setAlreadyReceived(receptionMap);
                 setReceivedCounts({});
             } else {
@@ -195,24 +252,50 @@ export default function ReceptionManagement() {
 
         setSaving(true);
         try {
-            // 1. Borrar registros de recepción
+            // 1. Leer el delta de stock guardado al hacer la recepción
+            const { data: deltaRow } = await supabase.from('app_state')
+                .select('data').eq('id', `reception_delta_${selectedSemana}`).maybeSingle();
+            const savedDeltas = deltaRow?.data || {};
+
+            // 2. Revertir stock exactamente (usando el delta guardado, no cantidad_recibida)
+            const prodIds = Object.keys(savedDeltas);
+            if (prodIds.length > 0) {
+                const { data: prods, error: prodErr } = await supabase
+                    .from('catalogo_productos')
+                    .select('id, stock_fisico')
+                    .in('id', prodIds);
+                if (prodErr) throw prodErr;
+
+                for (const prod of (prods || [])) {
+                    const delta = savedDeltas[prod.id] || 0;
+                    const newStock = Math.max(0, (prod.stock_fisico || 0) - delta);
+                    await supabase.from('catalogo_productos')
+                        .update({ stock_fisico: newStock, updated_at: new Date().toISOString() })
+                        .eq('id', prod.id);
+                }
+                catalogService.patchStockInCache((prods || []).map(p => ({ id: p.id, delta: -(savedDeltas[p.id] || 0) })));
+
+                // Eliminar el registro de delta
+                await supabase.from('app_state').delete().eq('id', `reception_delta_${selectedSemana}`);
+            }
+
+            // 3. Borrar registros de recepción
             const { error: delError } = await supabase
                 .from('pedido_items_recepcion')
                 .delete()
                 .eq('semana_id', selectedSemana);
-
             if (delError) throw delError;
 
-            // 2. Resetear estados de cliente_items de esa semana (de EN TIENDA a ADJUDICADO)
+            // 4. Resetear estados de cliente_items de esa semana (EN TIENDA → ADJUDICADO)
             const { error: updError } = await supabase
                 .from('cliente_items')
                 .update({ estado: 'ADJUDICADO' })
                 .eq('semana_id', selectedSemana)
                 .eq('estado', 'EN TIENDA');
-
             if (updError) throw updError;
 
-            alert("✅ ÉXITO: La recepción de esta semana ha sido reiniciada. Puedes volver a procesarla.");
+            const stockMsg = prodIds.length > 0 ? ' El stock fue revertido.' : ' (No había delta de stock guardado — revisá el stock manualmente.)';
+            alert(`✅ Recepción reiniciada.${stockMsg} Podés volver a procesarla.`);
             setReceivedCounts({});
             fetchReceptionData(selectedSemana);
         } catch (err) {
@@ -288,7 +371,7 @@ export default function ReceptionManagement() {
                     const qtyRec = item.cantidad_recibida;
 
                     const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'CONFIRMADO'))
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
                         .slice(0, qtyRec);
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     allPreAllocatedIds.push(...preAllocatedIds);
@@ -323,8 +406,17 @@ export default function ReceptionManagement() {
                 if (stockRows.length > 0) {
                     await supabase.from('catalogo_productos')
                         .upsert(stockRows, { onConflict: 'id' });
-                    // Actualizar caché local para que CatalogUpdatedView refleje los cambios
                     catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
+
+                    // Guardar delta exacto en app_state para poder revertir en cancel
+                    const { data: prevDeltaRow } = await supabase.from('app_state')
+                        .select('data').eq('id', `reception_delta_${selectedSemana}`).maybeSingle();
+                    const prevDeltas = prevDeltaRow?.data || {};
+                    const mergedDeltas = { ...prevDeltas };
+                    Object.entries(stockDeltas).forEach(([id, delta]) => {
+                        mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
+                    });
+                    await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
                 }
             }
 
@@ -374,7 +466,7 @@ export default function ReceptionManagement() {
                     const qtyRec = item.cantidad_recibida;
 
                     const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado === 'CONFIRMADO'))
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
                         .slice(0, qtyRec);
                     const preAllocatedIds = preAllocated.map(p => p.id);
                     allPreAllocatedIds.push(...preAllocatedIds);
@@ -408,6 +500,16 @@ export default function ReceptionManagement() {
                     await supabase.from('catalogo_productos')
                         .upsert(stockRows, { onConflict: 'id' });
                     catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
+
+                    // Guardar delta exacto en app_state para poder revertir en cancel
+                    const { data: prevDeltaRow } = await supabase.from('app_state')
+                        .select('data').eq('id', `reception_delta_${selectedSemana}`).maybeSingle();
+                    const prevDeltas = prevDeltaRow?.data || {};
+                    const mergedDeltas = { ...prevDeltas };
+                    Object.entries(stockDeltas).forEach(([id, delta]) => {
+                        mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
+                    });
+                    await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
                 }
             }
 
@@ -427,12 +529,20 @@ export default function ReceptionManagement() {
         setSaving(true);
         try {
             // Mark remaining (PEDIDO/CONFIRMADO/ADJUDICADO) items for this week as RECORTADO
-            const { error } = await supabase.from('cliente_items')
-                .update({ estado: 'RECORTADO' })
-                .eq('semana_id', selectedSemana)
-                .in('estado', ['PEDIDO', 'CONFIRMADO', 'ADJUDICADO', 'PEDIDO (RE-PROG)']);
-
-            if (error) throw error;
+            // Using 2-step approach because PEDIDO and CONFIRMADO have semana suffixes (e.g. "CONFIRMADO ENTELEQUIA 15")
+            const { data: itemsToMark, error: fetchErr } = await supabase.from('cliente_items')
+                .select('id, estado')
+                .eq('semana_id', selectedSemana);
+            if (fetchErr) throw fetchErr;
+            const idsToMark = (itemsToMark || [])
+                .filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO') || ci.estado.startsWith('PEDIDO'))
+                .map(ci => ci.id);
+            if (idsToMark.length > 0) {
+                const { error } = await supabase.from('cliente_items')
+                    .update({ estado: 'RECORTADO' })
+                    .in('id', idsToMark);
+                if (error) throw error;
+            }
             
             alert("✅ Despacho finalizado. Los ítems pendientes ahora figuran como 'RECORTADO'.");
             fetchReceptionData(selectedSemana);
@@ -681,9 +791,20 @@ export default function ReceptionManagement() {
                                                                 </span>
                                                             ))}
                                                         </div>
-                                                        <div className="mt-1 text-[9px] font-bold text-secondary uppercase animate-pulse">
-                                                            {clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key && ci.estado === 'ADJUDICADO' || ci.estado === 'CONFIRMADO').length} Adjudicados en plan
-                                                        </div>
+                                                                        {(() => {
+                                                            const forTitle = clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key);
+                                                            const pending = forTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')).length;
+                                                            const inStore = forTitle.filter(ci => ci.estado === 'EN TIENDA').length;
+                                                            const total = forTitle.length;
+                                                            return (
+                                                                <div className="mt-1 text-[9px] font-bold uppercase">
+                                                                    {total === 0
+                                                                        ? <span className="text-red-400 animate-pulse">⚠ 0 clientes cargados</span>
+                                                                        : <span className="text-secondary">{pending > 0 ? `${pending} pendientes` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} en tienda` : ''}</span>
+                                                                    }
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </td>
                                                     <td className="p-4 text-center">
                                                         {isFullyReceivedBefore ? (

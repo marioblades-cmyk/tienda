@@ -330,7 +330,9 @@ export default function ClientOrdersView() {
 
         let displayEstado;
         if (compact) {
-            if (isAdjudicado || it.estado.startsWith('CONFIRMADO')) {
+            if (isAdjudicado) {
+                displayEstado = weekNum ? `AD. CONF. sem.${weekNum}` : 'AD. CONF.';
+            } else if (it.estado.startsWith('CONFIRMADO')) {
                 displayEstado = weekNum ? `CONF. sem.${weekNum}` : 'CONF.';
             } else if (it.estado.startsWith('PEDIDO')) {
                 displayEstado = weekNum ? `PED. sem.${weekNum}` : 'PEDIDO';
@@ -338,7 +340,7 @@ export default function ClientOrdersView() {
                 displayEstado = it.estado;
             }
         } else {
-            displayEstado = isAdjudicado ? `CONFIRMADO${week ? ' ' + week.nombre : ''}` : it.estado;
+            displayEstado = isAdjudicado ? `AD. CONFIRMADO${week ? ' ' + week.nombre : ''}` : it.estado;
         }
 
         let dateStr = null;
@@ -1166,8 +1168,10 @@ export default function ClientOrdersView() {
         // 1. Determine which clients should be visible
         const searchLower = search ? search.toLowerCase().trim() : '';
         const visibleClients = clientes.filter(c => {
-            // Non-admin: must have at least one item from this vendor
-            if (!isAdmin && !items.some(i => i.cliente_id === c.id)) return false;
+            // Todos los usuarios: solo mostrar clientes con al menos un pedido
+            if (!items.some(i => i.cliente_id === c.id)) return false;
+            // Non-admin: además debe ser de su vendedor
+            if (!isAdmin && !items.some(i => i.cliente_id === c.id && i.vendedor_id === user?.id)) return false;
 
             // Search filter: match client name/celular OR any item title
             if (searchLower) {
@@ -1298,6 +1302,7 @@ export default function ClientOrdersView() {
                     <button onClick={()=>setView('clientes')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='clientes'?'bg-surface text-primary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Por Cliente</button>
                     <button onClick={()=>setView('items')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='items'?'bg-surface text-primary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Resumen Ítems</button>
                     <button onClick={()=>setView('hoja')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='hoja'?'bg-surface text-secondary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>📋 Hoja de Pedido</button>
+                    <button onClick={()=>setView('lista')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='lista'?'bg-surface text-muted shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Lista de Clientes</button>
                 </div>
                 <div className="text-[10px] font-black text-muted uppercase tracking-widest hidden md:block">Gestión de Cartera de Clientes</div>
             </div>
@@ -1807,6 +1812,62 @@ export default function ClientOrdersView() {
                             <strong className="text-text">Consejo Pro:</strong> Esta hoja resume los libros exactos que tus clientes ya te confirmaron y pagaron (o reservaron). Asegúrate de que tu Excel final tenga **como mínimo** estas cantidades para no dejar a nadie sin su pedido.
                         </p>
                     </div>
+                </div>
+            ) : view === 'lista' ? (
+                <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-border bg-background flex items-center justify-between">
+                        <span className="text-xs font-black uppercase text-muted tracking-widest">Todos los clientes registrados</span>
+                        <span className="text-[10px] font-bold text-muted bg-muted/10 px-3 py-1 rounded-full">{clientes.length} clientes</span>
+                    </div>
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-left text-muted text-[10px] uppercase border-b border-border bg-muted/20 font-black tracking-widest">
+                                <th className="px-5 py-3">Nombre</th>
+                                <th className="px-5 py-3">Celular</th>
+                                <th className="px-5 py-3 text-center">Pedidos</th>
+                                <th className="px-5 py-3 text-right">Saldo Deuda</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                            {clientes.length === 0 && (
+                                <tr><td colSpan={4} className="py-10 text-center text-muted italic">No hay clientes registrados.</td></tr>
+                            )}
+                            {clientes.map(c => {
+                                const cItems = items.filter(i => i.cliente_id === c.id);
+                                const nPedidos = cItems.length;
+                                const cVentas = cItems.reduce((s,i) => s + Number(i.precio_venta||0), 0);
+                                const cPagado = cItems.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                                const deuda = Math.max(0, cVentas - cPagado);
+                                return (
+                                    <tr key={c.id} className="hover:bg-white/5 transition-colors">
+                                        <td className="px-5 py-3">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-sm shrink-0">
+                                                    {(c.nombre || '?')[0].toUpperCase()}
+                                                </div>
+                                                <span className="font-bold text-text">{c.nombre}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-5 py-3 text-muted font-mono text-xs">{c.celular || '—'}</td>
+                                        <td className="px-5 py-3 text-center">
+                                            {nPedidos > 0
+                                                ? <span className="bg-primary/10 text-primary font-black text-[10px] px-2.5 py-1 rounded-full border border-primary/20">{nPedidos}</span>
+                                                : <span className="text-muted/40 text-[10px] font-bold">Sin pedidos</span>
+                                            }
+                                        </td>
+                                        <td className="px-5 py-3 text-right font-mono font-bold">
+                                            {deuda > 0
+                                                ? <span className="text-error">BS {formatS(deuda)}</span>
+                                                : nPedidos > 0
+                                                    ? <span className="text-success text-xs">Al día</span>
+                                                    : <span className="text-muted/40 text-xs">—</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
                 </div>
             ) : (
                 <div className="bg-surface border border-border rounded-xl shadow-sm overflow-x-auto">
