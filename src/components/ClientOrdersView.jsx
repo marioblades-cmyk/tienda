@@ -15,12 +15,14 @@ export default function ClientOrdersView() {
     const [otherSellersItems, setOtherSellersItems] = useState([]);
     const [pagos, setPagos] = useState([]);
     const [semanas, setSemanas] = useState([]);
+    const [vendedores, setVendedores] = useState([]);
 
     // Controles vista
     const [view, setView] = useState('clientes'); // 'clientes' | 'items' | 'hoja'
     const [search, setSearch] = useState('');
     const [filterEstado, setFilterEstado] = useState('todos'); // 'todos' | 'PEDIDO' | 'CONFIRMADO' | 'EN TIENDA' | 'ENTREGADO'
     const [filterSemana, setFilterSemana] = useState('todos'); // 'todos' | semana_id
+    const [filterVendedor, setFilterVendedor] = useState('mine'); // 'mine' | 'todos' | vendedor_id
     const [expandedCliente, setExpandedCliente] = useState(new Set());
     const [compactClients, setCompactClients] = useState(new Set()); // IDs en modo compacto
     const [selectedSemanaHoja, setSelectedSemanaHoja] = useState('');
@@ -196,12 +198,13 @@ export default function ClientOrdersView() {
                     .neq('estado', 'ENTREGADO');
             }
 
-            const [clientesRes, semanasRes, itemsRes, pagosRes, othersRes] = await Promise.all([
+            const [clientesRes, semanasRes, itemsRes, pagosRes, othersRes, vendedoresRes] = await Promise.all([
                 supabase.from('clientes').select('*').order('created_at', { ascending: false }),
                 supabase.from('semanas').select('*').order('created_at', { ascending: false }),
                 itemsQuery.order('created_at', { ascending: false }),
                 pagosQuery.order('created_at', { ascending: false }),
-                othersQuery ? othersQuery : Promise.resolve({ data: [] })
+                othersQuery ? othersQuery : Promise.resolve({ data: [] }),
+                supabase.from('vendedores').select('id, nombre, email').order('nombre')
             ]);
 
             if (clientesRes.error) throw clientesRes.error;
@@ -211,6 +214,7 @@ export default function ClientOrdersView() {
             setOtherSellersItems(othersRes.data || []);
             setPagos(pagosRes.data || []);
             setSemanas(semanasRes.data || []);
+            setVendedores(vendedoresRes.data || []);
         } catch (error) {
             console.error("Error fetching data:", error);
             alert("Error al cargar datos. Actualiza la página.");
@@ -1139,12 +1143,14 @@ export default function ClientOrdersView() {
                 if (!matchCliente && !matchTitulo) return false;
             }
 
-            // SEGURIDAD: Solo mis items si no soy admin
+            // Filtro por vendedor (admin puede elegir, no-admin siempre sus propios)
+            const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
             if (!isAdmin && it.vendedor_id !== user?.id) return false;
+            if (isAdmin && activeVId && it.vendedor_id !== activeVId) return false;
 
             return true;
         });
-    }, [items, filterEstado, filterSemana, search, isAdmin, user]);
+    }, [items, filterEstado, filterSemana, search, isAdmin, user, filterVendedor]);
 
     const totalPedidos = items.filter(i => {
         if (!isAdmin && i.vendedor_id !== user?.id) return false;
@@ -1167,11 +1173,16 @@ export default function ClientOrdersView() {
         
         // 1. Determine which clients should be visible
         const searchLower = search ? search.toLowerCase().trim() : '';
+        // Resolver qué vendedor_id filtrar
+        const activeVendedorId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
+
         const visibleClients = clientes.filter(c => {
             // Todos los usuarios: solo mostrar clientes con al menos un pedido
             if (!items.some(i => i.cliente_id === c.id)) return false;
-            // Non-admin: además debe ser de su vendedor
-            if (!isAdmin && !items.some(i => i.cliente_id === c.id && i.vendedor_id === user?.id)) return false;
+            // Filtro por vendedor (aplica a admin y no-admin)
+            if (activeVendedorId) {
+                if (!items.some(i => i.cliente_id === c.id && i.vendedor_id === activeVendedorId)) return false;
+            }
 
             // Search filter: match client name/celular OR any item title
             if (searchLower) {
@@ -1237,7 +1248,7 @@ export default function ClientOrdersView() {
         });
         
         return Object.values(groups);
-    }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user]);
+    }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user, filterVendedor]);
 
     const sendWhatsApp = (client, type) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
@@ -1367,9 +1378,9 @@ export default function ClientOrdersView() {
                     ) : (
                         <>
                             <div className="relative group flex-1 xl:w-48">
-                                <select 
-                                    value={filterSemana} 
-                                    onChange={e=>setFilterSemana(e.target.value)} 
+                                <select
+                                    value={filterSemana}
+                                    onChange={e=>setFilterSemana(e.target.value)}
                                     className="w-full bg-background border border-border/40 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer"
                                 >
                                     <option value="todos">📦 TODAS LAS SEMANAS</option>
@@ -1377,6 +1388,23 @@ export default function ClientOrdersView() {
                                 </select>
                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
                             </div>
+
+                            {isAdmin && (
+                                <div className="relative group xl:w-44">
+                                    <select
+                                        value={filterVendedor}
+                                        onChange={e => setFilterVendedor(e.target.value)}
+                                        className="w-full bg-background border border-primary/30 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer text-primary"
+                                    >
+                                        <option value="mine">👤 MIS PEDIDOS</option>
+                                        <option value="todos">👥 TODOS</option>
+                                        {vendedores.filter(v => v.id !== user?.id).map(v => (
+                                            <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none" size={16} />
+                                </div>
+                            )}
 
                             <button onClick={() => setShowAddModal(true)} className="bg-primary text-background font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 hover:scale-105 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
                                 <Plus size={18} /> Nuevo Pedido
