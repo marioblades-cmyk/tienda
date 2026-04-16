@@ -24,6 +24,27 @@ export default function ConfirmationInfoView() {
         fetchDashboardData();
     }, []);
 
+    // Realtime: actualizar Stock Físico Real al instante cuando cambia cualquier producto
+    useEffect(() => {
+        const channel = supabase
+            .channel('stock_flotante_realtime')
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'catalogo_productos',
+            }, (payload) => {
+                const oldStock = payload.old?.stock_fisico ?? 0;
+                const newStock = payload.new?.stock_fisico ?? 0;
+                const delta = newStock - oldStock;
+                if (delta !== 0) {
+                    setGlobalStats(prev => ({ ...prev, fisico: prev.fisico + delta }));
+                }
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+
     const fetchDashboardData = async () => {
         setLoading(true);
         try {
