@@ -109,10 +109,10 @@ const CatalogUpdatedView = () => {
                 schema: 'public',
                 table: 'catalogo_productos',
             }, (payload) => {
+                console.log('⚡ Realtime stock update recibido:', payload.new?.titulo, 'stock:', payload.new?.stock_fisico);
                 const updated = payload.new;
                 setCatalogData(prev => {
                     const existing = prev.find(item => item.id === updated.id);
-                    // Calcular delta para parchear el caché correctamente
                     if (existing) {
                         const delta = (updated.stock_fisico ?? 0) - (existing.stock_fisico ?? 0);
                         if (delta !== 0) catalogService.patchStockInCache([{ id: updated.id, delta }]);
@@ -124,7 +124,9 @@ const CatalogUpdatedView = () => {
                     );
                 });
             })
-            .subscribe();
+            .subscribe((status, err) => {
+                console.log('⚡ Realtime status:', status, err || '');
+            });
 
         return () => { supabase.removeChannel(channel); };
     }, []);
