@@ -100,6 +100,35 @@ const CatalogUpdatedView = () => {
         };
     }, []);
 
+    // Realtime: actualizar stock_fisico y stock_minimo al instante desde cualquier dispositivo
+    useEffect(() => {
+        const channel = supabase
+            .channel('catalogo_stock_realtime')
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'catalogo_productos',
+            }, (payload) => {
+                const updated = payload.new;
+                setCatalogData(prev => {
+                    const existing = prev.find(item => item.id === updated.id);
+                    // Calcular delta para parchear el caché correctamente
+                    if (existing) {
+                        const delta = (updated.stock_fisico ?? 0) - (existing.stock_fisico ?? 0);
+                        if (delta !== 0) catalogService.patchStockInCache([{ id: updated.id, delta }]);
+                    }
+                    return prev.map(item =>
+                        item.id === updated.id
+                            ? { ...item, stock_fisico: updated.stock_fisico, stock_minimo: updated.stock_minimo }
+                            : item
+                    );
+                });
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+
     const loadCatalog = async (force = false) => {
         setIsLoading(true);
         if (force) {
