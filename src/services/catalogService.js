@@ -290,15 +290,51 @@ export const catalogService = {
     },
 
     /**
+     * Registra un movimiento de stock en la tabla stock_movimientos
+     */
+    async logStockMovement({ productoId, titulo, delta, stockDespues, motivo, detalle = '' }) {
+        try {
+            await supabase.from('stock_movimientos').insert({
+                producto_id: productoId || null,
+                titulo: titulo || '',
+                delta,
+                stock_despues: stockDespues ?? null,
+                motivo,
+                detalle,
+            });
+        } catch (e) {
+            console.warn('stock_movimientos insert error:', e);
+        }
+    },
+
+    /**
      * Actualiza el stock físico de un producto
      */
-    async updateProductStock(id, stock) {
+    async updateProductStock(id, stock, { motivo = 'EDICIÓN MANUAL', detalle = '', titulo = '' } = {}) {
+        // Leer stock anterior para calcular delta
+        const { data: prev } = await supabase
+            .from('catalogo_productos')
+            .select('stock_fisico, titulo')
+            .eq('id', id)
+            .maybeSingle();
+
         const { error } = await supabase
             .from('catalogo_productos')
             .update({ stock_fisico: stock, updated_at: new Date().toISOString() })
             .eq('id', id);
 
         if (error) throw error;
+
+        const delta = stock - (prev?.stock_fisico ?? 0);
+        await this.logStockMovement({
+            productoId: id,
+            titulo: titulo || prev?.titulo || '',
+            delta,
+            stockDespues: stock,
+            motivo,
+            detalle,
+        });
+
         this.clearCache();
         return true;
     },

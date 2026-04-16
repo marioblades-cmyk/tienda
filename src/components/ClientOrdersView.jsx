@@ -137,13 +137,21 @@ export default function ClientOrdersView() {
                     const lookupCol = it.catalog_id ? 'id' : 'product_id';
                     const lookupVal = it.catalog_id || it.product_id;
                     const { data: prod } = await supabase.from('catalogo_productos')
-                        .select('id, stock_fisico')
+                        .select('id, stock_fisico, titulo')
                         .eq(lookupCol, lookupVal)
                         .maybeSingle();
                     if (prod) {
                         await supabase.from('catalogo_productos')
                             .update({ stock_fisico: (prod.stock_fisico || 0) + 1 })
                             .eq('id', prod.id);
+                        await catalogService.logStockMovement({
+                            productoId: prod.id,
+                            titulo: prod.titulo || it.titulo || '',
+                            delta: 1,
+                            stockDespues: (prod.stock_fisico || 0) + 1,
+                            motivo: 'DEVOLUCIÓN',
+                            detalle: 'Ítem eliminado del pedido (bulk)',
+                        });
                     }
                 }
             }
@@ -783,14 +791,22 @@ export default function ClientOrdersView() {
                     
                     if (lookupCol && lookupVal) {
                         const { data: prod } = await supabase.from('catalogo_productos')
-                            .select('id, stock_fisico')
+                            .select('id, stock_fisico, titulo')
                             .eq(lookupCol, lookupVal)
                             .maybeSingle();
-                        
+
                         if (prod && (prod.stock_fisico || 0) > 0) {
                             await supabase.from('catalogo_productos')
                                 .update({ stock_fisico: prod.stock_fisico - 1 })
                                 .eq('id', prod.id);
+                            await catalogService.logStockMovement({
+                                productoId: prod.id,
+                                titulo: prod.titulo || cItem.titulo || '',
+                                delta: -1,
+                                stockDespues: prod.stock_fisico - 1,
+                                motivo: 'VENTA',
+                                detalle: `Cliente: ${clientes.find(c => c.id === clienteId)?.nombre || clienteId}`,
+                            });
                         }
                     }
                 }
@@ -1640,9 +1656,10 @@ export default function ClientOrdersView() {
                                                                             if (shouldRestore && (it.catalog_id || it.product_id)) {
                                                                                 const lookupCol = it.catalog_id ? 'id' : 'product_id';
                                                                                 const lookupVal = it.catalog_id || it.product_id;
-                                                                                const { data: prod } = await supabase.from('catalogo_productos').select('id, stock_fisico').eq(lookupCol, lookupVal).maybeSingle();
+                                                                                const { data: prod } = await supabase.from('catalogo_productos').select('id, stock_fisico, titulo').eq(lookupCol, lookupVal).maybeSingle();
                                                                                 if (prod) {
                                                                                     await supabase.from('catalogo_productos').update({ stock_fisico: (prod.stock_fisico || 0) + 1 }).eq('id', prod.id);
+                                                                                    await catalogService.logStockMovement({ productoId: prod.id, titulo: prod.titulo || it.titulo || '', delta: 1, stockDespues: (prod.stock_fisico || 0) + 1, motivo: 'DEVOLUCIÓN', detalle: 'Ítem eliminado del pedido' });
                                                                                     if (typeof catalogService !== 'undefined') catalogService.clearCache();
                                                                                 }
                                                                             }
@@ -1967,9 +1984,10 @@ export default function ClientOrdersView() {
                                                 if (shouldRestore && (it.catalog_id || it.product_id)) {
                                                     const lookupCol = it.catalog_id ? 'id' : 'product_id';
                                                     const lookupVal = it.catalog_id || it.product_id;
-                                                    const { data: prod } = await supabase.from('catalogo_productos').select('id, stock_fisico').eq(lookupCol, lookupVal).maybeSingle();
+                                                    const { data: prod } = await supabase.from('catalogo_productos').select('id, stock_fisico, titulo').eq(lookupCol, lookupVal).maybeSingle();
                                                     if (prod) {
                                                         await supabase.from('catalogo_productos').update({ stock_fisico: (prod.stock_fisico || 0) + 1 }).eq('id', prod.id);
+                                                        await catalogService.logStockMovement({ productoId: prod.id, titulo: prod.titulo || it.titulo || '', delta: 1, stockDespues: (prod.stock_fisico || 0) + 1, motivo: 'DEVOLUCIÓN', detalle: 'Ítem eliminado del pedido' });
                                                         if (typeof catalogService !== 'undefined') catalogService.clearCache();
                                                     }
                                                 }
