@@ -986,7 +986,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 monto: 0,
                 fecha: new Date().toISOString().slice(0, 10),
                 nota: `Pago Plan #${pid}`,
-                banco: 'Banco Unión',
+                banco: 'Banco Unión (QR/Transf)',
                 caja_id: null,
             };
             p.pagos.push(newPago);
@@ -1039,7 +1039,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
             await supabase.from('caja_movimientos').update({
                 monto: pg.monto,
                 concepto,
-                metodo_pago: pg.banco || 'Banco Unión',
+                metodo_pago: pg.banco || 'Banco Unión (QR/Transf)',
             }).eq('id', pg.caja_id);
         } else {
             // Crear nuevo registro en contabilidad
@@ -1048,7 +1048,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 categoria: 'Transferencia Recibida',
                 monto: pg.monto,
                 concepto,
-                metodo_pago: pg.banco || 'Banco Unión',
+                metodo_pago: pg.banco || 'Banco Unión (QR/Transf)',
                 origen: 'Planes',
             }).select('id').single();
             if (data?.id) {
@@ -2661,15 +2661,15 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                                                     <input type="date" readOnly={!isEditing} value={pg.fecha || ''} onChange={e => updatePagoPlan(p.id, pidx, 'fecha', e.target.value)} style={{ padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', color: '#666', background: isEditing ? '#fff' : 'transparent' }} />
                                                                                     <select
                                                                                         disabled={!isEditing}
-                                                                                        value={pg.banco || 'Banco Unión'}
+                                                                                        value={pg.banco || 'Banco Unión (QR/Transf)'}
                                                                                         onChange={e => updatePagoPlan(p.id, pidx, 'banco', e.target.value)}
                                                                                         style={{ padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', color: '#444', background: isEditing ? '#fff' : 'transparent', fontWeight: 'bold', cursor: isEditing ? 'pointer' : 'default' }}
                                                                                     >
-                                                                                        <option>Banco Unión</option>
-                                                                                        <option>BNB</option>
-                                                                                        <option>Yasta (QR)</option>
-                                                                                        <option>Efectivo</option>
-                                                                                        <option>Otro</option>
+                                                                                        <option value="Banco Unión (QR/Transf)">Banco Unión</option>
+                                                                                        <option value="BNB">BNB</option>
+                                                                                        <option value="Yasta (QR)">Yasta (QR)</option>
+                                                                                        <option value="Efectivo">Efectivo</option>
+                                                                                        <option value="Otros">Otros</option>
                                                                                     </select>
                                                                                 </div>
                                                                                 <input
