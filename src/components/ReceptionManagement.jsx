@@ -25,6 +25,9 @@ export default function ReceptionManagement() {
     const [showVerify, setShowVerify] = useState(false);
     const [verifyData, setVerifyData] = useState([]);
     const [verifyLoading, setVerifyLoading] = useState(false);
+    const [showDiag, setShowDiag] = useState(false);
+    const [diagData, setDiagData] = useState([]);
+    const [diagLoading, setDiagLoading] = useState(false);
     const { isAdmin } = useAuth();
 
     useEffect(() => {
@@ -626,15 +629,11 @@ export default function ReceptionManagement() {
         setVerifyLoading(true);
         setShowVerify(true);
         try {
-            // Cargar stock actual del catálogo para los títulos recibidos
-            const titulos = Object.keys(alreadyReceived);
-            const { data: prods } = await supabase
-                .from('catalogo_productos')
-                .select('id, titulo, stock_fisico, updated_at');
+            const allProds = await catalogService.fetchFullCatalog(true);
             const prodMap = {};
-            (prods || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+            allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
 
-            const rows = titulos.map(key => {
+            const rows = Object.keys(alreadyReceived).map(key => {
                 const prod = prodMap[key];
                 const recibido = alreadyReceived[key] || 0;
                 const stockActual = prod?.stock_fisico ?? null;
@@ -653,6 +652,53 @@ export default function ReceptionManagement() {
             alert('Error al cargar verificación: ' + e.message);
         } finally {
             setVerifyLoading(false);
+        }
+    };
+
+    const handleDiagnostico = async () => {
+        if (!selectedSemana) return;
+        setDiagLoading(true);
+        setShowDiag(true);
+        try {
+            const allProds = await catalogService.fetchFullCatalog(true);
+            const prodMap = {};
+            allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
+
+            const findNearest = (key) => {
+                const words = key.split(/\s+/).filter(w => w.length > 2);
+                if (words.length === 0) return null;
+                let best = null, bestScore = 0;
+                for (const t of Object.keys(prodMap)) {
+                    const score = words.filter(w => t.includes(w)).length;
+                    if (score > bestScore) { bestScore = score; best = prodMap[t].titulo; }
+                }
+                return bestScore > 0 ? best : null;
+            };
+
+            const rows = masterItems.map(item => {
+                const key = (item.titulo || '').toLowerCase().trim();
+                const qtyRec = Number(receivedCounts[key]) || 0;
+                const prod = prodMap[key];
+                const nearest = !prod ? findNearest(key) : null;
+
+                const breakdown = orderBreakdown[key] || [];
+                const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+                const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
+                const clientsToEnTienda = clientItems
+                    .filter(ci => (ci.titulo || '').toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
+                    .slice(0, clientSliceLimit).length;
+                let calcForStore = Math.min(tiendaOrdered, qtyRec);
+                if (calcForStore < 0) calcForStore = 0;
+
+                return { titulo: item.titulo, key, qtyRec, matchEnCatalogo: !!prod, nearest, tiendaOrdered, totalVendorOrdered, calcForStore, clientsToEnTienda };
+            });
+
+            setDiagData(rows);
+        } catch (e) {
+            alert('Error en diagnóstico: ' + e.message);
+        } finally {
+            setDiagLoading(false);
         }
     };
 
@@ -790,6 +836,15 @@ export default function ReceptionManagement() {
                                     <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
                                 </label>
 
+                                <button
+                                    onClick={handleDiagnostico}
+                                    disabled={diagLoading}
+                                    className="flex items-center gap-2 bg-orange-500 text-white px-5 py-4 rounded-2xl text-sm font-bold hover:bg-orange-600 transition-all whitespace-nowrap"
+                                    title="Ver qué pasará con cada título antes de guardar"
+                                >
+                                    <Search size={18} />
+                                    {diagLoading ? 'Cargando...' : 'Diagnosticar'}
+                                </button>
                                 {Object.keys(alreadyReceived).length > 0 && (
                                     <button
                                         onClick={handleVerifyStock}
@@ -960,6 +1015,79 @@ export default function ReceptionManagement() {
                         <div className="p-4 border-t border-border flex justify-between items-center text-xs text-muted">
                             <span>{verifyData.length} títulos recibidos en esta semana</span>
                             <button onClick={() => setShowVerify(false)} className="btn-primary text-xs py-2 px-5">Cerrar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {showDiag && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+                        <div className="flex items-center justify-between p-5 border-b border-border">
+                            <div>
+                                <h3 className="text-lg font-black uppercase tracking-tight text-orange-600">🔍 Diagnóstico Pre-Recepción</h3>
+                                <p className="text-xs text-muted mt-0.5">Qué pasará con cada título cuando guardes. Verde = OK · Rojo = sin match en catálogo · Naranja = stock no subirá</p>
+                            </div>
+                            <button onClick={() => setShowDiag(false)} className="text-muted hover:text-text p-1 rounded-lg hover:bg-border/30 transition-all text-xl font-bold">✕</button>
+                        </div>
+                        <div className="overflow-auto flex-1 p-4">
+                            {diagLoading ? (
+                                <div className="py-16 flex justify-center"><Loader2 size={36} className="animate-spin text-orange-500" /></div>
+                            ) : (
+                                <table className="w-full text-xs border-collapse">
+                                    <thead>
+                                        <tr className="bg-surface border-b border-border text-[10px] uppercase text-muted font-black">
+                                            <th className="text-left p-3">Título (en pedido)</th>
+                                            <th className="text-center p-3">Cant.<br/>recibida</th>
+                                            <th className="text-center p-3">Catálogo</th>
+                                            <th className="text-center p-3">Tienda<br/>ordenó</th>
+                                            <th className="text-center p-3">Vendedores<br/>ordenaron</th>
+                                            <th className="text-center p-3 text-emerald-700">Stock<br/>+</th>
+                                            <th className="text-center p-3 text-blue-600">Clientes<br/>→EN TIENDA</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {diagData.map((row, i) => {
+                                            const isNoMatch = !row.matchEnCatalogo && row.tiendaOrdered > 0;
+                                            const isZeroUnexpected = row.matchEnCatalogo && row.calcForStore === 0 && row.tiendaOrdered > 0 && row.qtyRec > 0;
+                                            const isOk = row.matchEnCatalogo && row.calcForStore > 0;
+                                            const bg = isNoMatch ? 'bg-red-50' : isZeroUnexpected ? 'bg-orange-50' : isOk ? 'bg-emerald-50' : i % 2 === 0 ? 'bg-white' : 'bg-surface/40';
+                                            return (
+                                                <tr key={i} className={`border-b border-border/30 ${bg}`}>
+                                                    <td className="p-3 font-medium max-w-[260px]">
+                                                        <div className="truncate" title={row.titulo}>{row.titulo}</div>
+                                                        {isNoMatch && row.nearest && (
+                                                            <div className="text-[10px] text-red-500 mt-0.5">⚠ ¿Quisiste decir: <span className="font-black">{row.nearest}</span>?</div>
+                                                        )}
+                                                        {isNoMatch && !row.nearest && (
+                                                            <div className="text-[10px] text-red-500 mt-0.5">⚠ No encontrado en catálogo</div>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-3 text-center font-mono font-black">{row.qtyRec || '—'}</td>
+                                                    <td className="p-3 text-center">
+                                                        {row.matchEnCatalogo
+                                                            ? <span className="text-emerald-600 font-black">✓</span>
+                                                            : <span className="text-red-500 font-black">✗</span>}
+                                                    </td>
+                                                    <td className="p-3 text-center font-mono">{row.tiendaOrdered || '—'}</td>
+                                                    <td className="p-3 text-center font-mono">{row.totalVendorOrdered || '—'}</td>
+                                                    <td className="p-3 text-center font-mono font-black text-emerald-700">
+                                                        {row.calcForStore > 0 ? `+${row.calcForStore}` : row.tiendaOrdered > 0 ? <span className="text-orange-500">0</span> : '—'}
+                                                    </td>
+                                                    <td className="p-3 text-center font-mono text-blue-600">{row.clientsToEnTienda > 0 ? row.clientsToEnTienda : '—'}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                        <div className="p-4 border-t border-border flex justify-between items-center text-xs text-muted">
+                            <div className="flex gap-4">
+                                <span className="text-emerald-600 font-bold">✓ {diagData.filter(r => r.matchEnCatalogo && r.calcForStore > 0).length} OK</span>
+                                <span className="text-red-500 font-bold">✗ {diagData.filter(r => !r.matchEnCatalogo && r.tiendaOrdered > 0).length} sin match</span>
+                                <span className="text-orange-500 font-bold">⚠ {diagData.filter(r => r.matchEnCatalogo && r.calcForStore === 0 && r.tiendaOrdered > 0 && r.qtyRec > 0).length} stock 0 inesperado</span>
+                            </div>
+                            <button onClick={() => setShowDiag(false)} className="bg-orange-500 text-white font-bold text-xs py-2 px-5 rounded-xl hover:bg-orange-600 transition-all">Cerrar</button>
                         </div>
                     </div>
                 </div>
