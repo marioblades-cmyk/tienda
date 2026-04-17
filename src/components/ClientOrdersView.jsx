@@ -1175,9 +1175,12 @@ export default function ClientOrdersView() {
                 if (!matchCliente && !matchTitulo) return false;
             }
 
-            // Filtro por vendedor (todos los usuarios pueden elegir)
-            const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
-            if (activeVId && it.vendedor_id !== activeVId) return false;
+            // Filtro por vendedor — no-admin siempre ve solo los suyos, admin puede elegir
+            if (!isAdmin && it.vendedor_id !== user?.id) return false;
+            if (isAdmin) {
+                const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
+                if (activeVId && it.vendedor_id !== activeVId) return false;
+            }
 
             return true;
         });
@@ -1420,20 +1423,22 @@ export default function ClientOrdersView() {
                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
                             </div>
 
-                            <div className="relative group xl:w-44">
-                                <select
-                                    value={filterVendedor}
-                                    onChange={e => setFilterVendedor(e.target.value)}
-                                    className="w-full bg-background border border-primary/30 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer text-primary"
-                                >
-                                    <option value="mine">👤 MIS CLIENTES</option>
-                                    <option value="todos">👥 TODOS</option>
-                                    {vendedores.filter(v => v.id !== user?.id).map(v => (
-                                        <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
-                                    ))}
-                                </select>
-                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none" size={16} />
-                            </div>
+                            {isAdmin && (
+                                <div className="relative group xl:w-44">
+                                    <select
+                                        value={filterVendedor}
+                                        onChange={e => setFilterVendedor(e.target.value)}
+                                        className="w-full bg-background border border-primary/30 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer text-primary"
+                                    >
+                                        <option value="mine">👤 MIS CLIENTES</option>
+                                        <option value="todos">👥 TODOS</option>
+                                        {vendedores.filter(v => v.id !== user?.id).map(v => (
+                                            <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none" size={16} />
+                                </div>
+                            )}
 
                             <button onClick={() => setShowAddModal(true)} className="bg-primary text-background font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 hover:scale-105 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
                                 <Plus size={18} /> Nuevo Pedido
@@ -1479,17 +1484,17 @@ export default function ClientOrdersView() {
                                                 <h3 className="font-bold text-text mb-0.5">{group.client.nombre}</h3>
                                                 <button
                                                     onClick={e => { e.stopPropagation(); setEditCliente({ id: group.client.id, nombre: group.client.nombre, celular: group.client.celular || '', ci: group.client.ci || '', ciudad: group.client.ciudad || '', sucursal: group.client.sucursal || '', direccion: group.client.direccion || '', notas_cliente: group.client.notas_cliente || '' }); }}
-                                                    className="text-muted hover:text-primary transition-colors p-0.5 rounded"
+                                                    className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[11px] font-semibold"
                                                     title="Editar datos del cliente"
                                                 >
-                                                    <Edit2 size={13}/>
+                                                    <Edit2 size={11}/> Editar
                                                 </button>
                                                 <button
                                                     onClick={e => { e.stopPropagation(); setDeleteCliente({ id: group.client.id, nombre: group.client.nombre }); }}
-                                                    className="text-muted hover:text-red-500 transition-colors p-0.5 rounded"
+                                                    className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition-colors text-[11px] font-semibold"
                                                     title="Eliminar cliente"
                                                 >
-                                                    <Trash2 size={13}/>
+                                                    <Trash2 size={11}/> Eliminar
                                                 </button>
                                             </div>
                                             <div className="text-xs text-muted font-mono">{group.client.celular} • {group.items.length} ítems</div>
