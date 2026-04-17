@@ -84,6 +84,7 @@ export default function ClientOrdersView() {
     const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
     const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
     const [editCliente, setEditCliente] = useState(null); // { id, nombre, celular, ci, ciudad, sucursal, direccion, notas_cliente }
+    const [deleteCliente, setDeleteCliente] = useState(null); // { id, nombre } para confirmación
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -1041,6 +1042,21 @@ export default function ClientOrdersView() {
         }
     };
 
+    const handleDeleteCliente = async () => {
+        if (!deleteCliente) return;
+        try {
+            setLoading(true);
+            const { error } = await supabase.from('clientes').delete().eq('id', deleteCliente.id);
+            if (error) throw error;
+            setDeleteCliente(null);
+            await fetchData();
+        } catch (e) {
+            alert('Error al eliminar cliente: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleUpdatePago = async () => {
         if (!editPago) return;
         const amt = Number(editPago.monto);
@@ -1470,6 +1486,13 @@ export default function ClientOrdersView() {
                                                     title="Editar datos del cliente"
                                                 >
                                                     <Edit2 size={13}/>
+                                                </button>
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); setDeleteCliente({ id: group.client.id, nombre: group.client.nombre }); }}
+                                                    className="text-muted hover:text-red-500 transition-colors p-0.5 rounded"
+                                                    title="Eliminar cliente"
+                                                >
+                                                    <Trash2 size={13}/>
                                                 </button>
                                             </div>
                                             <div className="text-xs text-muted font-mono">{group.client.celular} • {group.items.length} ítems</div>
@@ -2052,6 +2075,32 @@ export default function ClientOrdersView() {
                             <button onClick={() => setEditCliente(null)} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
                             <button onClick={handleUpdateCliente} disabled={loading} className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:brightness-105 disabled:opacity-50">
                                 Guardar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL: ELIMINAR CLIENTE */}
+            {deleteCliente && (
+                <div className="fixed inset-0 z-[10030] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-sm p-6 space-y-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                                <Trash2 size={18} className="text-red-500"/>
+                            </div>
+                            <div>
+                                <h3 className="text-base font-bold text-text">Eliminar Cliente</h3>
+                                <p className="text-xs text-muted">Esta acción no se puede deshacer</p>
+                            </div>
+                        </div>
+                        <p className="text-sm text-text">
+                            ¿Seguro que deseas eliminar a <span className="font-bold">{deleteCliente.nombre}</span>? Se eliminarán también todos sus pedidos y abonos.
+                        </p>
+                        <div className="flex justify-end gap-3 pt-1">
+                            <button onClick={() => setDeleteCliente(null)} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
+                            <button onClick={handleDeleteCliente} disabled={loading} className="px-5 py-2 bg-red-500 text-white text-sm font-bold rounded-lg hover:bg-red-600 disabled:opacity-50">
+                                Eliminar
                             </button>
                         </div>
                     </div>
