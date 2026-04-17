@@ -1127,12 +1127,18 @@ export default function FlujoCajaView({ user, profile }) {
                                                         className="w-full bg-background border-2 border-border/10 p-4 rounded-2xl text-[11px] font-black uppercase outline-none focus:border-primary/50 transition-all cursor-pointer"
                                                     >
                                                         {categorias
-                                                            .filter(c => c.tipo === moveForm.tipo || c.tipo === 'AMBOS')
+                                                            .filter(c =>
+                                                                (c.tipo === moveForm.tipo || c.tipo === 'AMBOS') &&
+                                                                (moveForm.tipo !== 'EGRESO' || c.show_in_caja)
+                                                            )
                                                             .map(c => (
                                                                 <option key={c.id} value={c.nombre}>{c.nombre}</option>
                                                             ))
                                                         }
-                                                        {categorias.filter(c => c.tipo === moveForm.tipo || c.tipo === 'AMBOS').length === 0 && (
+                                                        {categorias.filter(c =>
+                                                            (c.tipo === moveForm.tipo || c.tipo === 'AMBOS') &&
+                                                            (moveForm.tipo !== 'EGRESO' || c.show_in_caja)
+                                                        ).length === 0 && (
                                                             <option value="">Sin categorías</option>
                                                         )}
                                                     </select>
