@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { 
-    Package, CheckCircle2, AlertCircle, Search, 
+import {
+    Package, CheckCircle2, AlertCircle, Search,
     ChevronRight, ChevronDown, Save, Loader2,
     Users, Info, Truck, ShieldAlert, Trash2
 } from 'lucide-react';
@@ -177,7 +177,7 @@ export default function ReceptionManagement() {
         let result = masterItems;
 
         if (searchTerm) {
-            result = result.filter(it => 
+            result = result.filter(it =>
                 it.titulo.toLowerCase().includes(searchTerm.toLowerCase())
             );
         }
@@ -210,7 +210,7 @@ export default function ReceptionManagement() {
 
     const handleQuantityChange = (key, val, confirmedQty, prevReceived) => {
         if (val === '') {
-            setReceivedCounts({...receivedCounts, [key]: ''});
+            setReceivedCounts({ ...receivedCounts, [key]: '' });
             return;
         }
 
@@ -222,19 +222,19 @@ export default function ReceptionManagement() {
         if (numVal > maxAllowed) {
             const extra = numVal - maxAllowed;
             const message = `⚠️ ATENCIÓN: EXCESO DE UNIDADES ⚠️\n\n` +
-                          `Título: ${key.toUpperCase()}\n` +
-                          `Confirmados (Pendientes): ${maxAllowed}\n` +
-                          `Ingresando: ${numVal}\n\n` +
-                          `¿Estás SEGURO de que quieres recibir ${extra} unidades MÁS de lo que el proveedor confirmó?`;
-            
+                `Título: ${key.toUpperCase()}\n` +
+                `Confirmados (Pendientes): ${maxAllowed}\n` +
+                `Ingresando: ${numVal}\n\n` +
+                `¿Estás SEGURO de que quieres recibir ${extra} unidades MÁS de lo que el proveedor confirmó?`;
+
             if (window.confirm(message)) {
-                setReceivedCounts({...receivedCounts, [key]: numVal.toString()});
+                setReceivedCounts({ ...receivedCounts, [key]: numVal.toString() });
             } else {
                 // Si cancela, volvemos al máximo sugerido (o lo que ya tenía si era válido)
-                setReceivedCounts({...receivedCounts, [key]: maxAllowed.toString()});
+                setReceivedCounts({ ...receivedCounts, [key]: maxAllowed.toString() });
             }
         } else {
-            setReceivedCounts({...receivedCounts, [key]: numVal.toString()});
+            setReceivedCounts({ ...receivedCounts, [key]: numVal.toString() });
         }
     };
 
@@ -243,7 +243,7 @@ export default function ReceptionManagement() {
         if (!isAdmin) return;
 
         const weekName = semanas.find(s => s.id === selectedSemana)?.nombre || 'esta semana';
-        
+
         const firstConfirm = window.confirm(`⚠️ ¿ESTÁS SEGURO? Se borrará TODO el historial de recepción de:\n\n"${weekName}"\n\nEsto te permitirá empezar de nuevo la recepción desde cero.`);
         if (!firstConfirm) return;
 
@@ -267,18 +267,21 @@ export default function ReceptionManagement() {
                 if (prodErr) throw prodErr;
 
                 const semanaNameCancel = semanas.find(s => s.id === selectedSemana)?.nombre || '';
+
+                // Borrar los registros RECEPCIÓN de esta semana del historial (audit trail limpio para re-recepcionar)
+                if (semanaNameCancel) {
+                    await supabase.from('stock_movimientos')
+                        .delete()
+                        .eq('motivo', 'RECEPCIÓN')
+                        .eq('detalle', semanaNameCancel);
+                }
+
                 for (const prod of (prods || [])) {
                     const delta = savedDeltas[prod.id] || 0;
                     const newStock = Math.max(0, (prod.stock_fisico || 0) - delta);
                     await supabase.from('catalogo_productos')
                         .update({ stock_fisico: newStock, updated_at: new Date().toISOString() })
                         .eq('id', prod.id);
-                    await catalogService.logStockMovement({
-                        productoId: prod.id, titulo: prod.titulo || '',
-                        delta: -delta, stockDespues: newStock,
-                        motivo: 'CANCELAR RECEPCIÓN',
-                        detalle: semanaNameCancel,
-                    });
                 }
                 catalogService.patchStockInCache((prods || []).map(p => ({ id: p.id, delta: -(savedDeltas[p.id] || 0) })));
 
@@ -318,11 +321,11 @@ export default function ReceptionManagement() {
             e.preventDefault();
             const allInputs = Array.from(document.querySelectorAll('input[data-reception-input="true"]'));
             const currentIndex = allInputs.indexOf(e.target);
-            
+
             setTimeout(() => {
                 const newInputs = Array.from(document.querySelectorAll('input[data-reception-input="true"]'));
                 let nextIndex = currentIndex + 1;
-                
+
                 const stillInDOM = newInputs.includes(e.target);
                 if (!stillInDOM) {
                     nextIndex = currentIndex;
@@ -360,6 +363,8 @@ export default function ReceptionManagement() {
 
             if (insError) throw insError;
 
+            const missingFromCatalog = [];
+
             // 2. Update physical stock and client orders status
             if (!skipStockUpdate) {
                 // Cargar catálogo UNA sola vez antes del loop
@@ -368,6 +373,9 @@ export default function ReceptionManagement() {
                     .select('id, stock_fisico, titulo');
                 const prodMap = {};
                 (allProds || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+                // Mapa inverso id→key para lookups O(1) en vez de búsqueda lineal O(N)
+                const idToKey = {};
+                (allProds || []).forEach(p => { idToKey[p.id] = p.titulo.trim().toLowerCase(); });
 
                 // Calcular todos los cambios sin hacer queries por item
                 const allPreAllocatedIds = [];
@@ -377,23 +385,29 @@ export default function ReceptionManagement() {
                     const key = item.titulo.toLowerCase().trim();
                     const qtyRec = item.cantidad_recibida;
 
-                    const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
-                        .slice(0, qtyRec);
-                    const preAllocatedIds = preAllocated.map(p => p.id);
-                    allPreAllocatedIds.push(...preAllocatedIds);
-
+                    // Breakdown PRIMERO para saber cuántas copias son de vendedor (no de tienda)
                     const breakdown = orderBreakdown[key] || [];
                     const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                     const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                    const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
-                    let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
+
+                    // Clientes solo consumen copias de vendedores, nunca las copias de tienda
+                    const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
+                    const preAllocated = clientItems
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
+                        .slice(0, clientSliceLimit);
+                    const preAllocatedIds = preAllocated.map(p => p.id);
+                    allPreAllocatedIds.push(...preAllocatedIds);
+
+                    // Tienda siempre recibe lo que ordenó (hasta lo recibido)
+                    let calcForStore = Math.min(tiendaOrdered, qtyRec);
                     if (calcForStore < 0) calcForStore = 0;
 
                     if (calcForStore > 0) {
                         const prod = prodMap[key];
                         if (prod) {
                             stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
+                        } else {
+                            missingFromCatalog.push(item.titulo);
                         }
                     }
                 }
@@ -408,7 +422,7 @@ export default function ReceptionManagement() {
                 // Un solo UPSERT para todos los stocks
                 const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
                     id,
-                    stock_fisico: (prodMap[Object.keys(prodMap).find(k => prodMap[k].id === id)] ?.stock_fisico || 0) + delta,
+                    stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
                 }));
                 if (stockRows.length > 0) {
                     await supabase.from('catalogo_productos')
@@ -428,7 +442,7 @@ export default function ReceptionManagement() {
                     // Registrar en historial de stock
                     const semanaName = semanas.find(s => s.id === selectedSemana)?.nombre || '';
                     for (const row of stockRows) {
-                        const titulo = prodMap[Object.keys(prodMap).find(k => prodMap[k].id === row.id)]?.titulo || '';
+                        const titulo = prodMap[idToKey[row.id]]?.titulo || '';
                         await catalogService.logStockMovement({
                             productoId: row.id, titulo,
                             delta: stockDeltas[row.id],
@@ -438,9 +452,15 @@ export default function ReceptionManagement() {
                         });
                     }
                 }
+
+                if (missingFromCatalog.length > 0) {
+                    console.warn('Títulos sin match en catálogo:', missingFromCatalog);
+                }
             }
 
-            alert(skipStockUpdate ? "✅ Recepción guardada en el historial (sin afectar stock)." : "✅ Recepción guardada con éxito y stock actualizado.");
+            const missingMsg = !skipStockUpdate && missingFromCatalog?.length > 0
+                ? `\n⚠️ Sin match en catálogo: ${missingFromCatalog.join(', ')}` : '';
+            alert(skipStockUpdate ? "✅ Recepción guardada en el historial (sin afectar stock)." : `✅ Recepción guardada con éxito y stock actualizado.${missingMsg}`);
             setReceivedCounts({});
             fetchReceptionData(selectedSemana);
         } catch (err) {
@@ -453,7 +473,7 @@ export default function ReceptionManagement() {
 
     const handleFullReception = async () => {
         if (!confirm("¿Deseas marcar TODO el pedido como recibido físicamente? Esto actualizará el stock de todos los títulos confirmados.")) return;
-        
+
         const itemsToSave = masterItems.map(it => ({
             semana_id: selectedSemana,
             titulo: it.titulo,
@@ -470,6 +490,8 @@ export default function ReceptionManagement() {
 
             if (insError) throw insError;
 
+            const missingFromCatalog = [];
+
             // 2. Update physical stock in catalog and client orders status
             if (!skipStockUpdate) {
                 const { data: allProds } = await supabase
@@ -477,6 +499,9 @@ export default function ReceptionManagement() {
                     .select('id, stock_fisico, titulo');
                 const prodMap = {};
                 (allProds || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+                // Mapa inverso id→key para lookups O(1) en vez de búsqueda lineal O(N)
+                const idToKey = {};
+                (allProds || []).forEach(p => { idToKey[p.id] = p.titulo.trim().toLowerCase(); });
 
                 const allPreAllocatedIds = [];
                 const stockDeltas = {};
@@ -485,23 +510,29 @@ export default function ReceptionManagement() {
                     const key = item.titulo.toLowerCase().trim();
                     const qtyRec = item.cantidad_recibida;
 
-                    const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
-                        .slice(0, qtyRec);
-                    const preAllocatedIds = preAllocated.map(p => p.id);
-                    allPreAllocatedIds.push(...preAllocatedIds);
-
+                    // Breakdown PRIMERO para saber cuántas copias son de vendedor (no de tienda)
                     const breakdown = orderBreakdown[key] || [];
                     const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                     const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                    const estTiendaClients = preAllocatedIds.length * (tiendaOrdered / (tiendaOrdered + totalVendorOrdered || 1));
-                    let calcForStore = Math.round(tiendaOrdered - estTiendaClients);
+
+                    // Clientes solo consumen copias de vendedores, nunca las copias de tienda
+                    const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
+                    const preAllocated = clientItems
+                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
+                        .slice(0, clientSliceLimit);
+                    const preAllocatedIds = preAllocated.map(p => p.id);
+                    allPreAllocatedIds.push(...preAllocatedIds);
+
+                    // Tienda siempre recibe lo que ordenó (hasta lo recibido)
+                    let calcForStore = Math.min(tiendaOrdered, qtyRec);
                     if (calcForStore < 0) calcForStore = 0;
 
                     if (calcForStore > 0) {
                         const prod = prodMap[key];
                         if (prod) {
                             stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
+                        } else {
+                            missingFromCatalog.push(item.titulo);
                         }
                     }
                 }
@@ -514,7 +545,7 @@ export default function ReceptionManagement() {
 
                 const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
                     id,
-                    stock_fisico: (prodMap[Object.keys(prodMap).find(k => prodMap[k].id === id)]?.stock_fisico || 0) + delta,
+                    stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
                 }));
                 if (stockRows.length > 0) {
                     await supabase.from('catalogo_productos')
@@ -534,7 +565,7 @@ export default function ReceptionManagement() {
                     // Registrar en historial de stock
                     const semanaNameFull = semanas.find(s => s.id === selectedSemana)?.nombre || '';
                     for (const row of stockRows) {
-                        const tituloFull = prodMap[Object.keys(prodMap).find(k => prodMap[k].id === row.id)]?.titulo || '';
+                        const tituloFull = prodMap[idToKey[row.id]]?.titulo || '';
                         await catalogService.logStockMovement({
                             productoId: row.id, titulo: tituloFull,
                             delta: stockDeltas[row.id],
@@ -544,9 +575,15 @@ export default function ReceptionManagement() {
                         });
                     }
                 }
+
+                if (missingFromCatalog.length > 0) {
+                    console.warn('Títulos sin match en catálogo:', missingFromCatalog);
+                }
             }
 
-            alert(skipStockUpdate ? "✅ Pedido archivado sin afectar el stock físico." : "✅ Semana marcada como recibida y stock actualizado.");
+            const missingMsgFull = !skipStockUpdate && missingFromCatalog.length > 0
+                ? `\n⚠️ Sin match en catálogo: ${missingFromCatalog.join(', ')}` : '';
+            alert(skipStockUpdate ? "✅ Pedido archivado sin afectar el stock físico." : `✅ Semana marcada como recibida y stock actualizado.${missingMsgFull}`);
             fetchReceptionData(selectedSemana);
         } catch (err) {
             console.error(err);
@@ -558,7 +595,7 @@ export default function ReceptionManagement() {
 
     const handleFinalizeCuts = async () => {
         if (!confirm("¿Deseas dar por terminada la recepción de esta semana?\n\nLos pedidos que NO fueron adjudicados se marcarán como 'RECORTADO' para que el vendedor pueda gestionarlos.")) return;
-        
+
         setSaving(true);
         try {
             // Mark remaining (PEDIDO/CONFIRMADO/ADJUDICADO) items for this week as RECORTADO
@@ -576,7 +613,7 @@ export default function ReceptionManagement() {
                     .in('id', idsToMark);
                 if (error) throw error;
             }
-            
+
             alert("✅ Despacho finalizado. Los ítems pendientes ahora figuran como 'RECORTADO'.");
             fetchReceptionData(selectedSemana);
         } catch (err) {
@@ -626,310 +663,310 @@ export default function ReceptionManagement() {
 
     return (
         <>
-        <div className="space-y-6 max-w-6xl mx-auto">
-            {/* Header */}
-            <div className="glass p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="flex items-center gap-4">
-                    <div className="p-3 bg-secondary/20 text-secondary rounded-xl">
-                        <Truck size={24} />
+            <div className="space-y-6 max-w-6xl mx-auto">
+                {/* Header */}
+                <div className="glass p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-secondary/20 text-secondary rounded-xl">
+                            <Truck size={24} />
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold uppercase tracking-tight">Recepción de Mercadería</h3>
+                            <p className="text-xs text-muted-2 font-mono">Control de cajas y stock físico por despacho</p>
+                        </div>
                     </div>
-                    <div>
-                        <h3 className="text-xl font-bold uppercase tracking-tight">Recepción de Mercadería</h3>
-                        <p className="text-xs text-muted-2 font-mono">Control de cajas y stock físico por despacho</p>
+
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                        <select
+                            value={selectedSemana}
+                            onChange={(e) => setSelectedSemana(e.target.value)}
+                            className="flex-1 md:w-64 bg-background border border-border/40 p-2.5 rounded-xl text-sm font-bold focus:ring-2 focus:ring-secondary outline-none transition-all"
+                        >
+                            <option value="">-- Seleccionar Semana --</option>
+                            {semanas.map(s => (
+                                <option key={s.id} value={s.id}>{s.nombre}</option>
+                            ))}
+                        </select>
+
+                        {isAdmin && (
+                            <>
+                                <label className="flex items-center gap-2 bg-white/50 px-3 py-2 rounded-xl cursor-pointer hover:bg-white transition-all border border-border/20 shadow-sm mr-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={skipStockUpdate}
+                                        onChange={(e) => setSkipStockUpdate(e.target.checked)}
+                                        className="accent-secondary w-4 h-4 rounded"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-black text-navy leading-none">MODO ARCHIVADO</span>
+                                        <span className="text-[9px] text-muted font-bold">No afecta stock físico</span>
+                                    </div>
+                                </label>
+
+                                <button
+                                    onClick={handleFullReception}
+                                    disabled={saving || !selectedSemana}
+                                    className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${saving ? 'bg-navy/50 text-white/50 cursor-not-allowed' : 'bg-navy text-white hover:bg-navy/90'}`}
+                                    title="Marcar todo como recibido"
+                                >
+                                    {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                                    {saving ? 'Procesando...' : 'Todo Recibido'}
+                                </button>
+
+                                <button
+                                    onClick={handleFinalizeCuts}
+                                    disabled={saving || !selectedSemana}
+                                    className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${saving ? 'bg-red-600/50 text-white/50 cursor-not-allowed' : 'bg-red-600 text-white hover:bg-red-700'}`}
+                                    title="Finalizar despacho y procesar recortes"
+                                >
+                                    {saving ? <Loader2 size={16} className="animate-spin" /> : <AlertCircle size={16} />}
+                                    {saving ? 'Procesando...' : 'Finalizar Despacho'}
+                                </button>
+
+                                <button
+                                    onClick={handleCancelReception}
+                                    disabled={saving || !selectedSemana || loading}
+                                    className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border shadow-lg ${saving ? 'bg-slate-900/50 border-slate-700/50 text-white/50 cursor-not-allowed' : 'bg-slate-900 border-slate-700 text-white hover:bg-slate-800'}`}
+                                    title="REINICIAR TODA LA RECEPCIÓN (Borrar registros de esta semana)"
+                                >
+                                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                                    {saving ? 'Cancelando...' : 'Cancelar Recepción'}
+                                </button>
+
+                            </>
+                        )}
+
+                        <button
+                            onClick={handleSaveReception}
+                            disabled={saving || !selectedSemana || Object.keys(receivedCounts).length === 0}
+                            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all shadow-md ${saving ? 'bg-secondary/50 text-white/50 cursor-not-allowed' : 'bg-secondary text-white hover:bg-secondary/90'}`}
+                            title="Guardar recepción actual"
+                        >
+                            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                            {saving ? 'Guardando...' : `Guardar${Object.keys(receivedCounts).length > 0 ? ` (${Object.values(receivedCounts).reduce((a, b) => a + parseInt(b), 0)})` : ''}`}
+                        </button>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                    <select
-                        value={selectedSemana}
-                        onChange={(e) => setSelectedSemana(e.target.value)}
-                        className="flex-1 md:w-64 bg-background border border-border/40 p-2.5 rounded-xl text-sm font-bold focus:ring-2 focus:ring-secondary outline-none transition-all"
-                    >
-                        <option value="">-- Seleccionar Semana --</option>
-                        {semanas.map(s => (
-                            <option key={s.id} value={s.id}>{s.nombre}</option>
-                        ))}
-                    </select>
-
-                    {isAdmin && (
-                        <>
-                            <label className="flex items-center gap-2 bg-white/50 px-3 py-2 rounded-xl cursor-pointer hover:bg-white transition-all border border-border/20 shadow-sm mr-2">
-                                <input 
-                                    type="checkbox" 
-                                    checked={skipStockUpdate}
-                                    onChange={(e) => setSkipStockUpdate(e.target.checked)}
-                                    className="accent-secondary w-4 h-4 rounded"
-                                />
-                                <div className="flex flex-col">
-                                    <span className="text-[10px] font-black text-navy leading-none">MODO ARCHIVADO</span>
-                                    <span className="text-[9px] text-muted font-bold">No afecta stock físico</span>
+                {selectedSemana ? (
+                    loading ? (
+                        <div className="py-20 flex justify-center"><Loader2 size={40} className="animate-spin text-secondary" /></div>
+                    ) : masterItems.length === 0 ? (
+                        <div className="glass p-12 text-center border-dashed border-2">
+                            <AlertCircle size={48} className="mx-auto text-muted mb-4 opacity-20" />
+                            <p className="text-muted font-bold">Esta semana no tiene una "Base Master" (Excel de confirmación) cargada.</p>
+                            <p className="text-xs text-muted/60 mt-1">Primero sube el Excel en la pestaña 'Base Master'.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Filters */}
+                            <div className="flex flex-col md:flex-row gap-4">
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar título en la caja..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full bg-white border border-border/40 p-4 pl-12 rounded-2xl text-sm font-bold shadow-sm focus:border-secondary outline-none transition-all"
+                                    />
                                 </div>
-                            </label>
 
-                            <button
-                                onClick={handleFullReception}
-                                disabled={saving || !selectedSemana}
-                                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${saving ? 'bg-navy/50 text-white/50 cursor-not-allowed' : 'bg-navy text-white hover:bg-navy/90'}`}
-                                title="Marcar todo como recibido"
-                            >
-                                {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                                {saving ? 'Procesando...' : 'Todo Recibido'}
-                            </button>
+                                <select
+                                    value={vendorFilter}
+                                    onChange={(e) => setVendorFilter(e.target.value)}
+                                    className="bg-white border border-border/40 p-4 rounded-2xl text-sm font-bold focus:border-secondary outline-none transition-all md:w-64"
+                                >
+                                    <option value="">Todos los destinos</option>
+                                    {allVendors.map(v => (
+                                        <option key={v} value={v}>{v}</option>
+                                    ))}
+                                </select>
 
-                            <button
-                                onClick={handleFinalizeCuts}
-                                disabled={saving || !selectedSemana}
-                                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${saving ? 'bg-red-600/50 text-white/50 cursor-not-allowed' : 'bg-red-600 text-white hover:bg-red-700'}`}
-                                title="Finalizar despacho y procesar recortes"
-                            >
-                                {saving ? <Loader2 size={16} className="animate-spin" /> : <AlertCircle size={16} />}
-                                {saving ? 'Procesando...' : 'Finalizar Despacho'}
-                            </button>
+                                <label className="flex items-center gap-3 bg-white border border-border/40 px-5 py-4 rounded-2xl cursor-pointer hover:border-secondary/50 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={hideComplete}
+                                        onChange={(e) => setHideComplete(e.target.checked)}
+                                        className="accent-secondary w-5 h-5 rounded"
+                                    />
+                                    <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
+                                </label>
 
-                            <button
-                                onClick={handleCancelReception}
-                                disabled={saving || !selectedSemana || loading}
-                                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border shadow-lg ${saving ? 'bg-slate-900/50 border-slate-700/50 text-white/50 cursor-not-allowed' : 'bg-slate-900 border-slate-700 text-white hover:bg-slate-800'}`}
-                                title="REINICIAR TODA LA RECEPCIÓN (Borrar registros de esta semana)"
-                            >
-                                {saving ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                                {saving ? 'Cancelando...' : 'Cancelar Recepción'}
-                            </button>
+                                {Object.keys(alreadyReceived).length > 0 && (
+                                    <button
+                                        onClick={handleVerifyStock}
+                                        disabled={verifyLoading}
+                                        className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-4 rounded-2xl text-sm font-bold hover:bg-emerald-700 transition-all whitespace-nowrap"
+                                        title="Ver stock antes y después de esta recepción"
+                                    >
+                                        <Package size={18} />
+                                        Verificar Stock
+                                    </button>
+                                )}
+                            </div>
 
-                        </>
-                    )}
+                            {/* Items Table */}
+                            <div className="glass rounded-2xl overflow-hidden border border-border/40">
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="bg-secondary/5 text-[10px] font-bold uppercase tracking-widest text-secondary">
+                                        <tr>
+                                            <th className="p-4 w-12"></th>
+                                            <th className="p-4">TÍTULO CONFIRMADO</th>
+                                            <th className="p-4 text-center">CONFIRMADO</th>
+                                            <th className="p-4">DISTRIBUCIÓN (QUIÉN)</th>
+                                            <th className="p-4 text-center">LLEGARON (HOY)</th>
+                                            <th className="p-4 text-center">FALTANTES</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/20">
+                                        {filteredItems.map((it, idx) => {
+                                            const key = (it.titulo || '').toLowerCase().trim();
+                                            const breakdown = orderBreakdown[key] || [];
 
-                    <button
-                        onClick={handleSaveReception}
-                        disabled={saving || !selectedSemana || Object.keys(receivedCounts).length === 0}
-                        className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all shadow-md ${saving ? 'bg-secondary/50 text-white/50 cursor-not-allowed' : 'bg-secondary text-white hover:bg-secondary/90'}`}
-                        title="Guardar recepción actual"
-                    >
-                        {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        {saving ? 'Guardando...' : `Guardar${Object.keys(receivedCounts).length > 0 ? ` (${Object.values(receivedCounts).reduce((a,b)=>a+parseInt(b),0)})` : ''}`}
-                    </button>
-                </div>
+                                            const confirmedQty = it.cantidad || 0;
+                                            const prevReceived = alreadyReceived[key] || 0;
+                                            const inputVal = receivedCounts[key] || '';
+
+                                            const isFullyReceivedBefore = prevReceived >= confirmedQty;
+
+                                            const totalNow = prevReceived + (parseInt(inputVal) || 0);
+                                            const missingQty = Math.max(0, confirmedQty - totalNow);
+
+                                            let rowClass = 'transition-colors hover:bg-white/50 border-b border-border/10 ';
+                                            if (isFullyReceivedBefore || (missingQty === 0 && confirmedQty > 0)) {
+                                                rowClass += 'bg-green-50/50 hover:bg-green-50 ';
+                                            } else if (missingQty < confirmedQty && parseInt(inputVal) > 0) {
+                                                rowClass += 'bg-orange-50/50 hover:bg-orange-50 ';
+                                            }
+
+                                            return (
+                                                <React.Fragment key={idx}>
+                                                    <tr className={rowClass}>
+                                                        <td className="p-4 w-12 text-center text-muted">
+                                                            <Package size={18} opacity={0.3} />
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="font-bold text-navy flex items-center gap-2 text-sm">
+                                                                {it.titulo}
+                                                                {isFullyReceivedBefore && <CheckCircle2 size={14} className="text-green-500" />}
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4 text-center font-black text-navy text-lg">{confirmedQty}</td>
+                                                        <td className="p-4">
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {breakdown.map((b, bIdx) => (
+                                                                    <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
+                                                                        {b.tipo === 'tienda' ? '🏢' : '👤'} {b.vendedor}: {b.cantidad}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                            {(() => {
+                                                                const forTitle = clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key);
+                                                                const pending = forTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')).length;
+                                                                const inStore = forTitle.filter(ci => ci.estado === 'EN TIENDA').length;
+                                                                const total = forTitle.length;
+                                                                return (
+                                                                    <div className="mt-1 text-[9px] font-bold uppercase">
+                                                                        {total === 0
+                                                                            ? <span className="text-red-400 animate-pulse">⚠ 0 clientes cargados</span>
+                                                                            : <span className="text-secondary">{pending > 0 ? `${pending} pendientes` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} en tienda` : ''}</span>
+                                                                        }
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </td>
+                                                        <td className="p-4 text-center">
+                                                            {isFullyReceivedBefore ? (
+                                                                <div className="bg-green-100 text-green-700 font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1">
+                                                                    <CheckCircle2 size={14} /> Ya Recibido ({prevReceived})
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center justify-center gap-1">
+                                                                    {prevReceived > 0 && <span className="text-[10px] font-bold text-muted bg-white border border-border/40 px-1.5 py-1 rounded">Ya: {prevReceived}</span>}
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        data-reception-input="true"
+                                                                        placeholder="0"
+                                                                        value={inputVal}
+                                                                        onChange={(e) => handleQuantityChange(key, e.target.value, confirmedQty, prevReceived)}
+                                                                        onKeyDown={handleKeyDown}
+                                                                        className={`w-16 p-2 text-center rounded-xl border-2 font-black text-lg transition-all outline-none 
+                                                                        ${inputVal ? 'border-secondary bg-secondary/10 text-secondary' : 'border-border/40 bg-background focus:border-secondary'}`}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-4 text-center">
+                                                            <span className={`font-bold px-3 py-1 rounded-full text-[10px] uppercase tracking-wider ${missingQty > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                                                                {missingQty > 0 ? `Faltan ${missingQty}` : 'Completo'}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )
+                ) : (
+                    <div className="glass p-20 text-center border-dashed border-2 animate-pulse">
+                        <Truck size={64} className="mx-auto text-muted mb-4 opacity-10" />
+                        <p className="text-muted font-display text-xl uppercase tracking-widest">Selecciona una semana para comenzar la recepción</p>
+                    </div>
+                )}
             </div>
 
-            {selectedSemana ? (
-                loading ? (
-                    <div className="py-20 flex justify-center"><Loader2 size={40} className="animate-spin text-secondary" /></div>
-                ) : masterItems.length === 0 ? (
-                    <div className="glass p-12 text-center border-dashed border-2">
-                        <AlertCircle size={48} className="mx-auto text-muted mb-4 opacity-20" />
-                        <p className="text-muted font-bold">Esta semana no tiene una "Base Master" (Excel de confirmación) cargada.</p>
-                        <p className="text-xs text-muted/60 mt-1">Primero sube el Excel en la pestaña 'Base Master'.</p>
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        {/* Filters */}
-                        <div className="flex flex-col md:flex-row gap-4">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
-                                <input 
-                                    type="text" 
-                                    placeholder="Buscar título en la caja..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full bg-white border border-border/40 p-4 pl-12 rounded-2xl text-sm font-bold shadow-sm focus:border-secondary outline-none transition-all"
-                                />
+            {/* Modal de verificación de stock */}
+            {showVerify && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+                        <div className="flex items-center justify-between p-5 border-b border-border">
+                            <div>
+                                <h3 className="text-lg font-black uppercase tracking-tight">Verificación de Stock</h3>
+                                <p className="text-xs text-muted mt-0.5">Stock antes = stock actual − cantidad recibida en esta semana</p>
                             </div>
-                            
-                            <select
-                                value={vendorFilter}
-                                onChange={(e) => setVendorFilter(e.target.value)}
-                                className="bg-white border border-border/40 p-4 rounded-2xl text-sm font-bold focus:border-secondary outline-none transition-all md:w-64"
-                            >
-                                <option value="">Todos los destinos</option>
-                                {allVendors.map(v => (
-                                    <option key={v} value={v}>{v}</option>
-                                ))}
-                            </select>
-
-                            <label className="flex items-center gap-3 bg-white border border-border/40 px-5 py-4 rounded-2xl cursor-pointer hover:border-secondary/50 transition-colors">
-                                <input 
-                                    type="checkbox" 
-                                    checked={hideComplete}
-                                    onChange={(e) => setHideComplete(e.target.checked)}
-                                    className="accent-secondary w-5 h-5 rounded"
-                                />
-                                <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
-                            </label>
-
-                            {Object.keys(alreadyReceived).length > 0 && (
-                                <button
-                                    onClick={handleVerifyStock}
-                                    disabled={verifyLoading}
-                                    className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-4 rounded-2xl text-sm font-bold hover:bg-emerald-700 transition-all whitespace-nowrap"
-                                    title="Ver stock antes y después de esta recepción"
-                                >
-                                    <Package size={18} />
-                                    Verificar Stock
-                                </button>
+                            <button onClick={() => setShowVerify(false)} className="text-muted hover:text-text p-1 rounded-lg hover:bg-border/30 transition-all text-xl font-bold">✕</button>
+                        </div>
+                        <div className="overflow-auto flex-1 p-4">
+                            {verifyLoading ? (
+                                <div className="py-16 flex justify-center"><Loader2 size={36} className="animate-spin text-secondary" /></div>
+                            ) : (
+                                <table className="w-full text-sm border-collapse">
+                                    <thead>
+                                        <tr className="bg-surface border-b border-border text-xs uppercase text-muted font-black">
+                                            <th className="text-left p-3">Título</th>
+                                            <th className="text-center p-3 text-emerald-700">Stock antes<br /><span className="font-normal normal-case text-[10px]">(tu conteo)</span></th>
+                                            <th className="text-center p-3 text-blue-600">+ Recibido</th>
+                                            <th className="text-center p-3">= Stock ahora</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {verifyData.map((row, i) => (
+                                            <tr key={i} className={`border-b border-border/40 ${row.stockAntes < 0 ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-surface/50'}`}>
+                                                <td className="p-3 font-medium text-xs">{row.titulo}</td>
+                                                <td className="p-3 text-center font-black font-mono text-emerald-700">
+                                                    {row.stockAntes !== null ? row.stockAntes : '—'}
+                                                    {row.stockAntes < 0 && <span className="ml-1 text-[9px] text-red-500 font-bold">⚠ revisar</span>}
+                                                </td>
+                                                <td className="p-3 text-center font-black font-mono text-blue-600">+{row.recibido}</td>
+                                                <td className="p-3 text-center font-black font-mono">{row.stockActual !== null ? row.stockActual : '—'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             )}
                         </div>
-
-                        {/* Items Table */}
-                        <div className="glass rounded-2xl overflow-hidden border border-border/40">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-secondary/5 text-[10px] font-bold uppercase tracking-widest text-secondary">
-                                    <tr>
-                                        <th className="p-4 w-12"></th>
-                                        <th className="p-4">TÍTULO CONFIRMADO</th>
-                                        <th className="p-4 text-center">CONFIRMADO</th>
-                                        <th className="p-4">DISTRIBUCIÓN (QUIÉN)</th>
-                                        <th className="p-4 text-center">LLEGARON (HOY)</th>
-                                        <th className="p-4 text-center">FALTANTES</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-border/20">
-                                    {filteredItems.map((it, idx) => {
-                                        const key = (it.titulo || '').toLowerCase().trim();
-                                        const breakdown = orderBreakdown[key] || [];
-                                        
-                                        const confirmedQty = it.cantidad || 0;
-                                        const prevReceived = alreadyReceived[key] || 0;
-                                        const inputVal = receivedCounts[key] || '';
-                                        
-                                        const isFullyReceivedBefore = prevReceived >= confirmedQty;
-
-                                        const totalNow = prevReceived + (parseInt(inputVal) || 0);
-                                        const missingQty = Math.max(0, confirmedQty - totalNow);
-
-                                        let rowClass = 'transition-colors hover:bg-white/50 border-b border-border/10 ';
-                                        if (isFullyReceivedBefore || (missingQty === 0 && confirmedQty > 0)) {
-                                            rowClass += 'bg-green-50/50 hover:bg-green-50 ';
-                                        } else if (missingQty < confirmedQty && parseInt(inputVal) > 0) {
-                                            rowClass += 'bg-orange-50/50 hover:bg-orange-50 ';
-                                        }
-
-                                        return (
-                                            <React.Fragment key={idx}>
-                                                <tr className={rowClass}>
-                                                    <td className="p-4 w-12 text-center text-muted">
-                                                        <Package size={18} opacity={0.3} />
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="font-bold text-navy flex items-center gap-2 text-sm">
-                                                            {it.titulo}
-                                                            {isFullyReceivedBefore && <CheckCircle2 size={14} className="text-green-500" />}
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4 text-center font-black text-navy text-lg">{confirmedQty}</td>
-                                                    <td className="p-4">
-                                                        <div className="flex flex-wrap gap-1">
-                                                            {breakdown.map((b, bIdx) => (
-                                                                <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                    {b.tipo === 'tienda' ? '🏢' : '👤'} {b.vendedor}: {b.cantidad}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                                        {(() => {
-                                                            const forTitle = clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key);
-                                                            const pending = forTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')).length;
-                                                            const inStore = forTitle.filter(ci => ci.estado === 'EN TIENDA').length;
-                                                            const total = forTitle.length;
-                                                            return (
-                                                                <div className="mt-1 text-[9px] font-bold uppercase">
-                                                                    {total === 0
-                                                                        ? <span className="text-red-400 animate-pulse">⚠ 0 clientes cargados</span>
-                                                                        : <span className="text-secondary">{pending > 0 ? `${pending} pendientes` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} en tienda` : ''}</span>
-                                                                    }
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        {isFullyReceivedBefore ? (
-                                                            <div className="bg-green-100 text-green-700 font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1">
-                                                                <CheckCircle2 size={14} /> Ya Recibido ({prevReceived})
-                                                            </div>
-                                                        ) : (
-                                                            <div className="flex items-center justify-center gap-1">
-                                                                {prevReceived > 0 && <span className="text-[10px] font-bold text-muted bg-white border border-border/40 px-1.5 py-1 rounded">Ya: {prevReceived}</span>}
-                                                                <input 
-                                                                    type="number" 
-                                                                    min="0"
-                                                                    data-reception-input="true"
-                                                                    placeholder="0"
-                                                                    value={inputVal}
-                                                                    onChange={(e) => handleQuantityChange(key, e.target.value, confirmedQty, prevReceived)}
-                                                                    onKeyDown={handleKeyDown}
-                                                                    className={`w-16 p-2 text-center rounded-xl border-2 font-black text-lg transition-all outline-none 
-                                                                        ${inputVal ? 'border-secondary bg-secondary/10 text-secondary' : 'border-border/40 bg-background focus:border-secondary'}`}
-                                                                />
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <span className={`font-bold px-3 py-1 rounded-full text-[10px] uppercase tracking-wider ${missingQty > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                                                            {missingQty > 0 ? `Faltan ${missingQty}` : 'Completo'}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            </React.Fragment>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                        <div className="p-4 border-t border-border flex justify-between items-center text-xs text-muted">
+                            <span>{verifyData.length} títulos recibidos en esta semana</span>
+                            <button onClick={() => setShowVerify(false)} className="btn-primary text-xs py-2 px-5">Cerrar</button>
                         </div>
                     </div>
-                )
-            ) : (
-                <div className="glass p-20 text-center border-dashed border-2 animate-pulse">
-                    <Truck size={64} className="mx-auto text-muted mb-4 opacity-10" />
-                    <p className="text-muted font-display text-xl uppercase tracking-widest">Selecciona una semana para comenzar la recepción</p>
                 </div>
             )}
-        </div>
-
-        {/* Modal de verificación de stock */}
-        {showVerify && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
-                    <div className="flex items-center justify-between p-5 border-b border-border">
-                        <div>
-                            <h3 className="text-lg font-black uppercase tracking-tight">Verificación de Stock</h3>
-                            <p className="text-xs text-muted mt-0.5">Stock antes = stock actual − cantidad recibida en esta semana</p>
-                        </div>
-                        <button onClick={() => setShowVerify(false)} className="text-muted hover:text-text p-1 rounded-lg hover:bg-border/30 transition-all text-xl font-bold">✕</button>
-                    </div>
-                    <div className="overflow-auto flex-1 p-4">
-                        {verifyLoading ? (
-                            <div className="py-16 flex justify-center"><Loader2 size={36} className="animate-spin text-secondary" /></div>
-                        ) : (
-                            <table className="w-full text-sm border-collapse">
-                                <thead>
-                                    <tr className="bg-surface border-b border-border text-xs uppercase text-muted font-black">
-                                        <th className="text-left p-3">Título</th>
-                                        <th className="text-center p-3 text-emerald-700">Stock antes<br/><span className="font-normal normal-case text-[10px]">(tu conteo)</span></th>
-                                        <th className="text-center p-3 text-blue-600">+ Recibido</th>
-                                        <th className="text-center p-3">= Stock ahora</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {verifyData.map((row, i) => (
-                                        <tr key={i} className={`border-b border-border/40 ${row.stockAntes < 0 ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-surface/50'}`}>
-                                            <td className="p-3 font-medium text-xs">{row.titulo}</td>
-                                            <td className="p-3 text-center font-black font-mono text-emerald-700">
-                                                {row.stockAntes !== null ? row.stockAntes : '—'}
-                                                {row.stockAntes < 0 && <span className="ml-1 text-[9px] text-red-500 font-bold">⚠ revisar</span>}
-                                            </td>
-                                            <td className="p-3 text-center font-black font-mono text-blue-600">+{row.recibido}</td>
-                                            <td className="p-3 text-center font-black font-mono">{row.stockActual !== null ? row.stockActual : '—'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                    <div className="p-4 border-t border-border flex justify-between items-center text-xs text-muted">
-                        <span>{verifyData.length} títulos recibidos en esta semana</span>
-                        <button onClick={() => setShowVerify(false)} className="btn-primary text-xs py-2 px-5">Cerrar</button>
-                    </div>
-                </div>
-            </div>
-        )}
         </>
     );
 }
