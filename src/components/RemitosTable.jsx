@@ -985,7 +985,9 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                 id: 'pg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
                 monto: 0,
                 fecha: new Date().toISOString().slice(0, 10),
-                nota: `Pago Plan #${pid}`
+                nota: `Pago Plan #${pid}`,
+                banco: 'Banco Unión',
+                caja_id: null,
             };
             p.pagos.push(newPago);
             setPlans(newPlans);
@@ -1022,12 +1024,57 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         }
     };
 
+    // Sincroniza el pago con caja_movimientos al confirmar edición
+    const handleConfirmarPagoPlan = async (pid, pidx) => {
+        setEditingPagoPlanKey(null);
+        const newPlans = [...plans];
+        const p = newPlans.find(x => x.id === pid);
+        if (!p) return;
+        const pg = p.pagos[pidx];
+        if (!pg || pg.monto <= 0) return;
+
+        const concepto = `Pago Plan #${pid}${pg.nota ? ' — ' + pg.nota : ''}`;
+        if (pg.caja_id) {
+            // Actualizar registro existente
+            await supabase.from('caja_movimientos').update({
+                monto: pg.monto,
+                concepto,
+                metodo_pago: pg.banco || 'Banco Unión',
+            }).eq('id', pg.caja_id);
+        } else {
+            // Crear nuevo registro en contabilidad
+            const { data } = await supabase.from('caja_movimientos').insert({
+                tipo: 'INGRESO',
+                categoria: 'Transferencia Recibida',
+                monto: pg.monto,
+                concepto,
+                metodo_pago: pg.banco || 'Banco Unión',
+                origen: 'Planes',
+            }).select('id').single();
+            if (data?.id) {
+                pg.caja_id = data.id;
+                // Sync CTA
+                const newCta = { ...cta };
+                const ctp = (newCta.pagos || []).find(x => x.id === pg.id);
+                if (ctp) { ctp.caja_id = data.id; setCta(newCta); await saveCta(newCta); }
+                await savePlans(newPlans, nplan);
+            }
+        }
+        showToast('Pago registrado en contabilidad.', 'success');
+    };
+
     const deletePagoPlan = async (pid, pidx) => {
         openConfirm('Confirmar Eliminación', '¿Borrar pago del plan?', async () => {
             const newPlans = [...plans];
             const p = newPlans.find(x => x.id === pid);
             if (p) {
                 const pg = p.pagos[pidx];
+
+                // Eliminar de caja_movimientos si existe
+                if (pg.caja_id) {
+                    await supabase.from('caja_movimientos').delete().eq('id', pg.caja_id);
+                }
+
                 p.pagos.splice(pidx, 1);
                 setPlans(newPlans);
 
@@ -2608,10 +2655,22 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                                         const key = `${p.id}-${pidx}`;
                                                                         const isEditing = editingPagoPlanKey === key;
                                                                         return (
-                                                                            <div key={pidx} style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', padding: '12px', background: isEditing ? '#fffaf2' : '#fcfcfc', border: '1px solid ' + (isEditing ? 'var(--warn)' : '#eee'), borderRadius: '6px' }}>
+                                                                            <div key={pidx} style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', padding: '12px', background: isEditing ? '#fffaf2' : '#fcfcfc', border: '1px solid ' + (isEditing ? 'var(--warn)' : (pg.caja_id ? '#c6f0c2' : '#eee')), borderRadius: '6px' }}>
                                                                                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                                                                     <input type="number" readOnly={!isEditing} value={pg.monto || ''} onChange={e => updatePagoPlan(p.id, pidx, 'monto', e.target.value)} placeholder="0.00" style={{ width: '100px', padding: '8px', fontFamily: 'monospace', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', background: isEditing ? '#fff' : 'transparent', fontWeight: 'bold' }} />
                                                                                     <input type="date" readOnly={!isEditing} value={pg.fecha || ''} onChange={e => updatePagoPlan(p.id, pidx, 'fecha', e.target.value)} style={{ padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', color: '#666', background: isEditing ? '#fff' : 'transparent' }} />
+                                                                                    <select
+                                                                                        disabled={!isEditing}
+                                                                                        value={pg.banco || 'Banco Unión'}
+                                                                                        onChange={e => updatePagoPlan(p.id, pidx, 'banco', e.target.value)}
+                                                                                        style={{ padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', color: '#444', background: isEditing ? '#fff' : 'transparent', fontWeight: 'bold', cursor: isEditing ? 'pointer' : 'default' }}
+                                                                                    >
+                                                                                        <option>Banco Unión</option>
+                                                                                        <option>BNB</option>
+                                                                                        <option>Yasta (QR)</option>
+                                                                                        <option>Efectivo</option>
+                                                                                        <option>Otro</option>
+                                                                                    </select>
                                                                                 </div>
                                                                                 <input
                                                                                     type="text"
@@ -2621,9 +2680,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                                                     onChange={e => updatePagoPlan(p.id, pidx, 'nota', e.target.value)}
                                                                                     style={{ flex: 1, minWidth: '150px', padding: '8px', border: isEditing ? '1px solid var(--warn)' : '1px solid transparent', borderRadius: '4px', fontSize: '12px', background: isEditing ? '#fff' : 'transparent' }}
                                                                                 />
+                                                                                {pg.caja_id && !isEditing && (
+                                                                                    <span style={{ fontSize: '10px', color: '#2e7d32', fontWeight: 'bold', background: '#e8f5e9', padding: '3px 8px', borderRadius: '4px' }}>✓ En contabilidad</span>
+                                                                                )}
                                                                                 <div style={{ display: 'flex', gap: '6px' }}>
                                                                                     {isEditing ? (
-                                                                                        <button onClick={() => setEditingPagoPlanKey(null)} style={{ background: 'var(--ok)', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>Confirmar</button>
+                                                                                        <button onClick={() => handleConfirmarPagoPlan(p.id, pidx)} style={{ background: 'var(--ok)', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>Confirmar</button>
                                                                                     ) : (
                                                                                         <button onClick={() => setEditingPagoPlanKey(key)} style={{ background: '#fff', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '11px' }}>Editar</button>
                                                                                     )}
