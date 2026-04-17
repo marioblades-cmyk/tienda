@@ -1970,8 +1970,7 @@ export default function ClientOrdersView() {
                     </table>
                 </div>
                 );
-            })()
-            ) : (
+            })() : (
                 <div className="bg-surface border border-border rounded-xl shadow-sm overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
