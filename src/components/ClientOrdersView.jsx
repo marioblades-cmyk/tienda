@@ -1175,10 +1175,9 @@ export default function ClientOrdersView() {
                 if (!matchCliente && !matchTitulo) return false;
             }
 
-            // Filtro por vendedor (admin puede elegir, no-admin siempre sus propios)
+            // Filtro por vendedor (todos los usuarios pueden elegir)
             const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
-            if (!isAdmin && it.vendedor_id !== user?.id) return false;
-            if (isAdmin && activeVId && it.vendedor_id !== activeVId) return false;
+            if (activeVId && it.vendedor_id !== activeVId) return false;
 
             return true;
         });
@@ -1421,22 +1420,20 @@ export default function ClientOrdersView() {
                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
                             </div>
 
-                            {isAdmin && (
-                                <div className="relative group xl:w-44">
-                                    <select
-                                        value={filterVendedor}
-                                        onChange={e => setFilterVendedor(e.target.value)}
-                                        className="w-full bg-background border border-primary/30 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer text-primary"
-                                    >
-                                        <option value="mine">👤 MIS PEDIDOS</option>
-                                        <option value="todos">👥 TODOS</option>
-                                        {vendedores.filter(v => v.id !== user?.id).map(v => (
-                                            <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
-                                        ))}
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none" size={16} />
-                                </div>
-                            )}
+                            <div className="relative group xl:w-44">
+                                <select
+                                    value={filterVendedor}
+                                    onChange={e => setFilterVendedor(e.target.value)}
+                                    className="w-full bg-background border border-primary/30 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer text-primary"
+                                >
+                                    <option value="mine">👤 MIS CLIENTES</option>
+                                    <option value="todos">👥 TODOS</option>
+                                    {vendedores.filter(v => v.id !== user?.id).map(v => (
+                                        <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
+                                    ))}
+                                </select>
+                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none" size={16} />
+                            </div>
 
                             <button onClick={() => setShowAddModal(true)} className="bg-primary text-background font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 hover:scale-105 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
                                 <Plus size={18} /> Nuevo Pedido
