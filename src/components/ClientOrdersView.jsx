@@ -1883,11 +1883,24 @@ export default function ClientOrdersView() {
                         </p>
                     </div>
                 </div>
-            ) : view === 'lista' ? (
+            ) : view === 'lista' ? (() => {
+                // Filtrar clientes según vendedor activo
+                const listaVendedorId = !isAdmin ? user?.id :
+                    filterVendedor === 'mine' ? user?.id :
+                    filterVendedor === 'todos' ? null : filterVendedor;
+                const searchLow = search.toLowerCase().trim();
+                const listaClientes = clientes.filter(c => {
+                    if (listaVendedorId && !items.some(i => i.cliente_id === c.id && i.vendedor_id === listaVendedorId)) return false;
+                    if (searchLow && !c.nombre.toLowerCase().includes(searchLow) && !(c.celular||'').includes(searchLow)) return false;
+                    return true;
+                });
+                return (
                 <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
                     <div className="p-4 border-b border-border bg-background flex items-center justify-between">
-                        <span className="text-xs font-black uppercase text-muted tracking-widest">Todos los clientes registrados</span>
-                        <span className="text-[10px] font-bold text-muted bg-muted/10 px-3 py-1 rounded-full">{clientes.length} clientes</span>
+                        <span className="text-xs font-black uppercase text-muted tracking-widest">
+                            {listaVendedorId ? 'Clientes de este vendedor' : 'Todos los clientes registrados'}
+                        </span>
+                        <span className="text-[10px] font-bold text-muted bg-muted/10 px-3 py-1 rounded-full">{listaClientes.length} clientes</span>
                     </div>
                     <table className="w-full text-sm">
                         <thead>
@@ -1896,13 +1909,14 @@ export default function ClientOrdersView() {
                                 <th className="px-5 py-3">Celular</th>
                                 <th className="px-5 py-3 text-center">Pedidos</th>
                                 <th className="px-5 py-3 text-right">Saldo Deuda</th>
+                                <th className="px-5 py-3 text-right">Acciones</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border/30">
-                            {clientes.length === 0 && (
-                                <tr><td colSpan={4} className="py-10 text-center text-muted italic">No hay clientes registrados.</td></tr>
+                            {listaClientes.length === 0 && (
+                                <tr><td colSpan={5} className="py-10 text-center text-muted italic">No hay clientes.</td></tr>
                             )}
-                            {clientes.map(c => {
+                            {listaClientes.map(c => {
                                 const cItems = items.filter(i => i.cliente_id === c.id);
                                 const nPedidos = cItems.length;
                                 const cVentas = cItems.reduce((s,i) => s + Number(i.precio_venta||0), 0);
@@ -1933,12 +1947,30 @@ export default function ClientOrdersView() {
                                                     : <span className="text-muted/40 text-xs">—</span>
                                             }
                                         </td>
+                                        <td className="px-5 py-3">
+                                            <div className="flex items-center justify-end gap-2">
+                                                <button
+                                                    onClick={() => setEditCliente({ id: c.id, nombre: c.nombre, celular: c.celular || '', ci: c.ci || '', ciudad: c.ciudad || '', sucursal: c.sucursal || '', direccion: c.direccion || '', notas_cliente: c.notas_cliente || '' })}
+                                                    className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[11px] font-semibold"
+                                                >
+                                                    <Edit2 size={11}/> Editar
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteCliente({ id: c.id, nombre: c.nombre })}
+                                                    className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition-colors text-[11px] font-semibold"
+                                                >
+                                                    <Trash2 size={11}/> Eliminar
+                                                </button>
+                                            </div>
+                                        </td>
                                     </tr>
                                 );
                             })}
                         </tbody>
                     </table>
                 </div>
+                );
+            })()
             ) : (
                 <div className="bg-surface border border-border rounded-xl shadow-sm overflow-x-auto">
                     <table className="w-full text-sm">
