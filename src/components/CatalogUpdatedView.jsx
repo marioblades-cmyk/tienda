@@ -220,21 +220,17 @@ const CatalogUpdatedView = () => {
                             .filter(c => (c.titulo || '').toLowerCase().trim() === prodTitle)
                             .reduce((s, c) => s + (c.reservado || 0), 0);
                         
-                        // Store stock is ALL confirmed units MINUS what was for sellers, MINUS what arrived, MINUS CLIENT ASSIGNED.
-                        // This naturally handles "Extras" (unrequested items in Master) flowing to Store.
-                        qty = Math.max(0, (totalConfirmedForTitle - sellerRequestedQty) - received - clientReserved);
+                        // Store stock is ALL confirmed units MINUS what was for sellers, MINUS what arrived.
+                        // Clients (ADJUDICADO) take from vendor personal allocations, not from tienda copies.
+                        qty = Math.max(0, (totalConfirmedForTitle - sellerRequestedQty) - received);
                     } else {
                         // Not confirmed yet: Show full TIENDA request Baseline
                         const storeTotal = week.allOrdersData
                             .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'tienda')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // Pending Client Waitlist for this unconfirmed week - From Anonymous RPC
-                        const clientWaitlist = week.floatingSummary
-                            .filter(c => (c.titulo || '').toLowerCase().trim() === prodTitle)
-                            .reduce((s, c) => s + (c.reservado || 0), 0);
-                        
-                        qty = Math.max(0, storeTotal - clientWaitlist);
+                        // Clientes ADJUDICADO toman copias de vendedores, no de tienda — no restar aquí.
+                        qty = storeTotal;
                     }
                     if (qty > 0) floatingByWeek[week.id] = { qty, isConfirmed: week.isConfirmed };
                 });
