@@ -28,6 +28,7 @@ export default function ReceptionManagement() {
     const [showDiag, setShowDiag] = useState(false);
     const [diagData, setDiagData] = useState([]);
     const [diagLoading, setDiagLoading] = useState(false);
+    const [diagCatalogCount, setDiagCatalogCount] = useState(null);
     const { isAdmin } = useAuth();
 
     useEffect(() => {
@@ -426,8 +427,9 @@ export default function ReceptionManagement() {
                     stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
                 }));
                 if (stockRows.length > 0) {
-                    await supabase.from('catalogo_productos')
+                    const { error: upsertErr } = await supabase.from('catalogo_productos')
                         .upsert(stockRows, { onConflict: 'id' });
+                    if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
                     catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
 
                     // Guardar delta exacto en app_state para poder revertir en cancel
@@ -548,8 +550,9 @@ export default function ReceptionManagement() {
                     stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
                 }));
                 if (stockRows.length > 0) {
-                    await supabase.from('catalogo_productos')
+                    const { error: upsertErr } = await supabase.from('catalogo_productos')
                         .upsert(stockRows, { onConflict: 'id' });
+                    if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
                     catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
 
                     // Guardar delta exacto en app_state para poder revertir en cancel
@@ -661,6 +664,7 @@ export default function ReceptionManagement() {
         setShowDiag(true);
         try {
             const allProds = await catalogService.fetchFullCatalog(true);
+            setDiagCatalogCount(allProds.length);
             const prodMap = {};
             allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
 
@@ -685,13 +689,25 @@ export default function ReceptionManagement() {
                 const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                 const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                 const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
-                const clientsToEnTienda = clientItems
-                    .filter(ci => (ci.titulo || '').toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
-                    .slice(0, clientSliceLimit).length;
+
+                const allForTitle = clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key);
+                const pendingClients = allForTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'));
+                const enTiendaClients = allForTitle.filter(ci => ci.estado === 'EN TIENDA');
+                const clientsWillChange = pendingClients.slice(0, clientSliceLimit);
+                const clientsWontChange = pendingClients.slice(clientSliceLimit);
+
+                const getName = ci => ci.clientes?.nombre || `Cliente ${ci.cliente_id?.slice(-6) || '?'}`;
+
                 let calcForStore = Math.min(tiendaOrdered, qtyRec);
                 if (calcForStore < 0) calcForStore = 0;
 
-                return { titulo: item.titulo, key, qtyRec, matchEnCatalogo: !!prod, nearest, tiendaOrdered, totalVendorOrdered, calcForStore, clientsToEnTienda };
+                return {
+                    titulo: item.titulo, key, qtyRec, matchEnCatalogo: !!prod, nearest,
+                    tiendaOrdered, totalVendorOrdered, calcForStore,
+                    clientsWillChange: clientsWillChange.map(getName),
+                    clientsWontChange: clientsWontChange.map(getName),
+                    enTiendaCount: enTiendaClients.length,
+                };
             });
 
             setDiagData(rows);
@@ -1040,9 +1056,9 @@ export default function ReceptionManagement() {
                                             <th className="text-center p-3">Cant.<br/>recibida</th>
                                             <th className="text-center p-3">Catálogo</th>
                                             <th className="text-center p-3">Tienda<br/>ordenó</th>
-                                            <th className="text-center p-3">Vendedores<br/>ordenaron</th>
+                                            <th className="text-center p-3">Vend.<br/>ordenaron</th>
                                             <th className="text-center p-3 text-emerald-700">Stock<br/>+</th>
-                                            <th className="text-center p-3 text-blue-600">Clientes<br/>→EN TIENDA</th>
+                                            <th className="text-left p-3 text-blue-600">Clientes pendientes → EN TIENDA</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1051,9 +1067,10 @@ export default function ReceptionManagement() {
                                             const isZeroUnexpected = row.matchEnCatalogo && row.calcForStore === 0 && row.tiendaOrdered > 0 && row.qtyRec > 0;
                                             const isOk = row.matchEnCatalogo && row.calcForStore > 0;
                                             const bg = isNoMatch ? 'bg-red-50' : isZeroUnexpected ? 'bg-orange-50' : isOk ? 'bg-emerald-50' : i % 2 === 0 ? 'bg-white' : 'bg-surface/40';
+                                            const hasPending = row.clientsWillChange.length > 0 || row.clientsWontChange.length > 0;
                                             return (
                                                 <tr key={i} className={`border-b border-border/30 ${bg}`}>
-                                                    <td className="p-3 font-medium max-w-[260px]">
+                                                    <td className="p-3 font-medium max-w-[220px]">
                                                         <div className="truncate" title={row.titulo}>{row.titulo}</div>
                                                         {isNoMatch && row.nearest && (
                                                             <div className="text-[10px] text-red-500 mt-0.5">⚠ ¿Quisiste decir: <span className="font-black">{row.nearest}</span>?</div>
@@ -1073,7 +1090,28 @@ export default function ReceptionManagement() {
                                                     <td className="p-3 text-center font-mono font-black text-emerald-700">
                                                         {row.calcForStore > 0 ? `+${row.calcForStore}` : row.tiendaOrdered > 0 ? <span className="text-orange-500">0</span> : '—'}
                                                     </td>
-                                                    <td className="p-3 text-center font-mono text-blue-600">{row.clientsToEnTienda > 0 ? row.clientsToEnTienda : '—'}</td>
+                                                    <td className="p-3 text-left text-[11px] min-w-[200px]">
+                                                        {!hasPending && row.enTiendaCount === 0 && <span className="text-muted">—</span>}
+                                                        {row.clientsWillChange.length > 0 && (
+                                                            <div className="mb-1">
+                                                                <span className="text-blue-600 font-black">→ EN TIENDA ({row.clientsWillChange.length}):</span>
+                                                                <div className="text-blue-700 leading-tight mt-0.5">
+                                                                    {row.clientsWillChange.map((n, j) => <div key={j} className="truncate">• {n}</div>)}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {row.clientsWontChange.length > 0 && (
+                                                            <div className="mb-1">
+                                                                <span className="text-orange-500 font-black">⚠ Sin stock ({row.clientsWontChange.length}):</span>
+                                                                <div className="text-orange-600 leading-tight mt-0.5">
+                                                                    {row.clientsWontChange.map((n, j) => <div key={j} className="truncate">• {n}</div>)}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {row.enTiendaCount > 0 && (
+                                                            <div className="text-muted">{row.enTiendaCount} ya en tienda</div>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             );
                                         })}
@@ -1082,10 +1120,15 @@ export default function ReceptionManagement() {
                             )}
                         </div>
                         <div className="p-4 border-t border-border flex justify-between items-center text-xs text-muted">
-                            <div className="flex gap-4">
+                            <div className="flex gap-4 flex-wrap">
                                 <span className="text-emerald-600 font-bold">✓ {diagData.filter(r => r.matchEnCatalogo && r.calcForStore > 0).length} OK</span>
                                 <span className="text-red-500 font-bold">✗ {diagData.filter(r => !r.matchEnCatalogo && r.tiendaOrdered > 0).length} sin match</span>
                                 <span className="text-orange-500 font-bold">⚠ {diagData.filter(r => r.matchEnCatalogo && r.calcForStore === 0 && r.tiendaOrdered > 0 && r.qtyRec > 0).length} stock 0 inesperado</span>
+                                {diagCatalogCount !== null && (
+                                    <span className={diagCatalogCount <= 1000 ? 'text-red-500 font-bold' : 'text-muted'}>
+                                        {diagCatalogCount <= 1000 ? '⚠ ' : ''}Catálogo: {diagCatalogCount} productos{diagCatalogCount <= 1000 ? ' (¡límite alcanzado!)' : ''}
+                                    </span>
+                                )}
                             </div>
                             <button onClick={() => setShowDiag(false)} className="bg-orange-500 text-white font-bold text-xs py-2 px-5 rounded-xl hover:bg-orange-600 transition-all">Cerrar</button>
                         </div>

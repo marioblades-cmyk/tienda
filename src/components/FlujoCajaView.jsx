@@ -16,6 +16,7 @@ export default function FlujoCajaView({ user, profile }) {
     const [loading, setLoading] = useState(true);
     const [turnoActivo, setTurnoActivo] = useState(null);
     const [historialTurnos, setHistorialTurnos] = useState([]);
+    const [turnoTotals, setTurnoTotals] = useState({}); // { [turno_id]: { ingresos, egresos, nMovs } }
     const [vendedores, setVendedores] = useState([]);
     const [movimientos, setMovimientos] = useState([]);
     
@@ -30,7 +31,10 @@ export default function FlujoCajaView({ user, profile }) {
     const [showDetailModal, setShowDetailModal] = useState(null);
     const [showEditModal, setShowEditModal] = useState(null); // { id, responsable, turno, monto_inicial, monto_final }
     const [ultimoTurno, setUltimoTurno] = useState(null);
-    
+    const [showRetiroModal, setShowRetiroModal] = useState(false);
+    const [retiroForm, setRetiroForm] = useState({ monto: '', destino: 'Yasta (QR)' });
+    const [retiroSaving, setRetiroSaving] = useState(false);
+
     // Form states
     const [openForm, setOpenForm] = useState({ responsable: '', turno: 'MAÑANA', monto_inicial: '' });
     const [moveForm, setMoveForm] = useState({ tipo: 'INGRESO', categoria: '', concepto: '', monto: '', metodo_pago: 'Efectivo' });
@@ -234,13 +238,31 @@ export default function FlujoCajaView({ user, profile }) {
         }
             
         const { data } = await query.limit(historyLimit + 1);
-        
-        if (data && data.length > historyLimit) {
+        const turnos = data || [];
+
+        if (turnos.length > historyLimit) {
             setHasMore(true);
-            setHistorialTurnos(data.slice(0, historyLimit));
+            setHistorialTurnos(turnos.slice(0, historyLimit));
         } else {
             setHasMore(false);
-            setHistorialTurnos(data || []);
+            setHistorialTurnos(turnos);
+        }
+
+        // Calcular totales de ingresos/egresos por turno
+        const ids = turnos.slice(0, historyLimit).map(h => h.id);
+        if (ids.length > 0) {
+            const { data: movs } = await supabase
+                .from('caja_movimientos')
+                .select('turno_id, tipo, monto')
+                .in('turno_id', ids);
+            const totals = {};
+            (movs || []).forEach(m => {
+                if (!totals[m.turno_id]) totals[m.turno_id] = { ingresos: 0, egresos: 0, nMovs: 0 };
+                totals[m.turno_id].nMovs++;
+                if (m.tipo === 'INGRESO') totals[m.turno_id].ingresos += parseFloat(m.monto) || 0;
+                else totals[m.turno_id].egresos += parseFloat(m.monto) || 0;
+            });
+            setTurnoTotals(totals);
         }
     };
 
@@ -412,6 +434,33 @@ export default function FlujoCajaView({ user, profile }) {
         if (error) return alert('Error al registrar movimiento: ' + error.message);
         setMovimientos([data, ...movimientos]);
         setMoveForm({ ...moveForm, concepto: '', monto: '' });
+    };
+
+    const handleRetiroEfectivo = async () => {
+        const monto = parseFloat(retiroForm.monto);
+        if (!monto || monto <= 0 || !turnoActivo) return;
+        setRetiroSaving(true);
+        try {
+            const { data, error } = await supabase.from('caja_movimientos').insert([{
+                turno_id: turnoActivo.id,
+                tipo: 'EGRESO',
+                categoria: 'Retiro a Digital',
+                concepto: `Traspaso a ${retiroForm.destino}`,
+                monto,
+                vendedor_id: user?.id,
+                metodo_pago: 'Efectivo',
+                origen: 'Tienda',
+            }]).select().single();
+            if (error) throw error;
+            setMovimientos(prev => [data, ...prev]);
+            setShowRetiroModal(false);
+            setRetiroForm({ monto: '', destino: 'Yasta (QR)' });
+            showToast(`Retiro de Bs ${monto.toLocaleString()} registrado`, 'success');
+        } catch (e) {
+            alert('Error al registrar retiro: ' + e.message);
+        } finally {
+            setRetiroSaving(false);
+        }
     };
 
     const deleteMovement = async (id) => {
@@ -682,6 +731,13 @@ export default function FlujoCajaView({ user, profile }) {
                                         title="Calculadora de billetes"
                                     >
                                         🧮
+                                    </button>
+                                    <button
+                                        onClick={() => setShowRetiroModal(true)}
+                                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100 text-[10px] font-bold uppercase tracking-widest transition-all"
+                                        title="Retirar efectivo del cajón y transferir a cuenta digital"
+                                    >
+                                        💸 Retirar
                                     </button>
                                     <button
                                         onClick={() => setShowCloseModal(true)}
@@ -1363,29 +1419,41 @@ export default function FlujoCajaView({ user, profile }) {
                                             <tr className="text-xs font-bold text-navy uppercase tracking-widest">
                                                 <th className="p-4">Sesión / Turno</th>
                                                 <th className="p-4">Auditor Responsable</th>
+                                                <th className="p-4 text-right text-emerald-600">Ingresos</th>
+                                                <th className="p-4 text-right text-red-500">Egresos</th>
                                                 <th className="p-4 text-right">Efectivo Final</th>
                                                 <th className="p-4 text-center px-8">Acciones</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border/10">
-                                            {historialTurnos.map(h => (
+                                            {historialTurnos.map(h => {
+                                                const t = turnoTotals[h.id] || {};
+                                                return (
                                                 <tr key={h.id} className="hover:bg-primary/5 transition-all group">
                                                     <td className="p-4">
                                                         <div className="font-bold text-navy text-sm uppercase tracking-tight mb-0.5">{new Date(h.cerrado_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
                                                         <div className="text-xs font-bold uppercase text-primary tracking-widest">TURNO: {h.turno}</div>
                                                     </td>
                                                     <td className="p-4 font-bold text-navy text-sm uppercase truncate max-w-[150px]">{h.responsable}</td>
+                                                    <td className="p-4 text-right">
+                                                        <div className="font-black font-mono text-sm text-emerald-600">Bs {(t.ingresos || 0).toLocaleString()}</div>
+                                                        {t.nMovs > 0 && <div className="text-[10px] text-muted">{t.nMovs} mov.</div>}
+                                                    </td>
+                                                    <td className="p-4 text-right">
+                                                        <div className="font-black font-mono text-sm text-red-500">Bs {(t.egresos || 0).toLocaleString()}</div>
+                                                    </td>
                                                     <td className="p-4 text-right font-black font-mono text-base text-navy tracking-tighter leading-none">Bs {h.monto_final?.toLocaleString()}</td>
                                                     <td className="p-4 text-center">
-                                                        <button 
-                                                            onClick={() => setShowDetailModal(h)} 
-                                                            className="p-2 bg-background rounded-lg text-navy/40 hover:text-primary transition-all border border-border/20 shadow-sm" 
+                                                        <button
+                                                            onClick={() => setShowDetailModal(h)}
+                                                            className="p-2 bg-background rounded-lg text-navy/40 hover:text-primary transition-all border border-border/20 shadow-sm"
                                                         >
                                                             <Eye size={14} />
                                                         </button>
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                             {historialTurnos.length === 0 && (
                                                 <tr>
                                                     <td colSpan="4" className="p-12 text-center text-navy/20 uppercase font-black text-[9px] tracking-widest">Historial de caja vacío</td>
@@ -1698,6 +1766,80 @@ export default function FlujoCajaView({ user, profile }) {
                         onClose={() => setShowEditModal(null)} 
                     />
                 )}
+            </AnimatePresence>
+
+            {/* --- MODAL RETIRO DE EFECTIVO --- */}
+            <AnimatePresence>
+                {showRetiroModal && (() => {
+                    const totals = calculateTotals();
+                    const monto = parseFloat(retiroForm.monto) || 0;
+                    const excede = monto > totals.efectivoEnCaja;
+                    const DESTINOS = ['Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Otro'];
+                    return (
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                            onClick={() => setShowRetiroModal(false)}
+                        >
+                            <motion.div
+                                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+                                onClick={e => e.stopPropagation()}
+                            >
+                                <div className="flex items-center gap-3 mb-5">
+                                    <span className="text-2xl">💸</span>
+                                    <div>
+                                        <h3 className="font-black text-navy text-sm uppercase tracking-widest">Retirar Efectivo</h3>
+                                        <p className="text-xs text-muted">Traspaso del cajón a cuenta digital</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 mb-5 text-center">
+                                    <div className="text-[10px] font-bold text-orange-500 uppercase tracking-widest mb-0.5">Efectivo disponible en cajón</div>
+                                    <div className="text-2xl font-black font-mono text-orange-600">Bs {totals.efectivoEnCaja.toLocaleString()}</div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-[10px] font-black text-navy uppercase tracking-widest mb-1.5 block">Monto a retirar</label>
+                                        <input
+                                            type="number" min="1" placeholder="0"
+                                            value={retiroForm.monto}
+                                            onChange={e => setRetiroForm(f => ({ ...f, monto: e.target.value }))}
+                                            className="w-full border border-border rounded-xl px-4 py-3 text-lg font-black font-mono text-center focus:outline-none focus:border-orange-400"
+                                            autoFocus
+                                        />
+                                        {excede && <p className="text-[10px] text-red-500 font-bold mt-1 text-center">⚠ Supera el efectivo disponible</p>}
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] font-black text-navy uppercase tracking-widest mb-1.5 block">Destino</label>
+                                        <select
+                                            value={retiroForm.destino}
+                                            onChange={e => setRetiroForm(f => ({ ...f, destino: e.target.value }))}
+                                            className="w-full border border-border rounded-xl px-4 py-3 text-sm font-bold text-navy focus:outline-none focus:border-orange-400 bg-white"
+                                        >
+                                            {DESTINOS.map(d => <option key={d} value={d}>{d}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 mt-6">
+                                    <button onClick={() => setShowRetiroModal(false)} className="flex-1 py-3 rounded-xl border border-border text-[10px] font-black uppercase tracking-widest text-navy hover:bg-surface transition-all">
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={handleRetiroEfectivo}
+                                        disabled={retiroSaving || !retiroForm.monto || monto <= 0 || excede}
+                                        className="flex-1 py-3 rounded-xl bg-orange-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-orange-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {retiroSaving ? 'Guardando...' : 'Confirmar Retiro'}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        </motion.div>
+                    );
+                })()}
             </AnimatePresence>
 
             {/* --- MODAL DETALLE TURNO HISTORIAL --- */}

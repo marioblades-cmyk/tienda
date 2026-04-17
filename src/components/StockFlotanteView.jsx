@@ -24,20 +24,20 @@ export default function ConfirmationInfoView() {
         fetchDashboardData();
     }, []);
 
-    // Realtime: actualizar Stock Físico Real al instante cuando cambia cualquier producto
+    // Realtime: actualizar Stock Físico Real al instante
+    // Requiere: ALTER TABLE catalogo_productos REPLICA IDENTITY FULL + ADD TABLE a supabase_realtime
     useEffect(() => {
         const channel = supabase
-            .channel('stock_flotante_realtime')
+            .channel('stock_fisico_realtime')
             .on('postgres_changes', {
                 event: 'UPDATE',
                 schema: 'public',
                 table: 'catalogo_productos',
             }, (payload) => {
-                const oldStock = payload.old?.stock_fisico ?? 0;
-                const newStock = payload.new?.stock_fisico ?? 0;
-                const delta = newStock - oldStock;
-                if (delta !== 0) {
-                    setGlobalStats(prev => ({ ...prev, fisico: prev.fisico + delta }));
+                const oldStock = payload.old?.stock_fisico ?? null;
+                const newStock = payload.new?.stock_fisico ?? null;
+                if (oldStock !== null && newStock !== null && oldStock !== newStock) {
+                    setGlobalStats(prev => ({ ...prev, fisico: prev.fisico + (newStock - oldStock) }));
                 }
             })
             .subscribe();
