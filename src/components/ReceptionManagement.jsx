@@ -367,15 +367,13 @@ export default function ReceptionManagement() {
 
             // 2. Update physical stock and client orders status
             if (!skipStockUpdate) {
-                // Cargar catálogo UNA sola vez antes del loop
-                const { data: allProds } = await supabase
-                    .from('catalogo_productos')
-                    .select('id, stock_fisico, titulo');
+                // Usar fetchFullCatalog (paginado) para evitar el límite de 1000 filas de Supabase
+                const allProds = await catalogService.fetchFullCatalog(true);
                 const prodMap = {};
-                (allProds || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+                allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
                 // Mapa inverso id→key para lookups O(1) en vez de búsqueda lineal O(N)
                 const idToKey = {};
-                (allProds || []).forEach(p => { idToKey[p.id] = p.titulo.trim().toLowerCase(); });
+                allProds.forEach(p => { idToKey[p.id] = (p.titulo || '').trim().toLowerCase(); });
 
                 // Calcular todos los cambios sin hacer queries por item
                 const allPreAllocatedIds = [];
@@ -494,14 +492,13 @@ export default function ReceptionManagement() {
 
             // 2. Update physical stock in catalog and client orders status
             if (!skipStockUpdate) {
-                const { data: allProds } = await supabase
-                    .from('catalogo_productos')
-                    .select('id, stock_fisico, titulo');
+                // Usar fetchFullCatalog (paginado) para evitar el límite de 1000 filas de Supabase
+                const allProds = await catalogService.fetchFullCatalog(true);
                 const prodMap = {};
-                (allProds || []).forEach(p => { prodMap[p.titulo.trim().toLowerCase()] = p; });
+                allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
                 // Mapa inverso id→key para lookups O(1) en vez de búsqueda lineal O(N)
                 const idToKey = {};
-                (allProds || []).forEach(p => { idToKey[p.id] = p.titulo.trim().toLowerCase(); });
+                allProds.forEach(p => { idToKey[p.id] = (p.titulo || '').trim().toLowerCase(); });
 
                 const allPreAllocatedIds = [];
                 const stockDeltas = {};
