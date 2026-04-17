@@ -2045,15 +2045,20 @@ function TurnoDetailModal({ turno, onClose }) {
                                         <ArrowDownLeft size={14} /> Desglose de Ingresos
                                     </h5>
                                     <div className="divide-y divide-border/20 border border-border/20 rounded-2xl overflow-hidden shadow-sm">
-                                        {['Venta Stock', 'Cobro Pedido', 'Cobro Seña', 'Otro Ingreso'].map(cat => {
-                                            const amt = movs.filter(m => m.categoria === cat).reduce((acc, m) => acc + m.monto, 0);
-                                            return (
-                                                <div key={cat} className="p-4 flex justify-between items-center bg-white hover:bg-success/5 transition-all">
-                                                    <span className="text-[11px] font-bold text-text uppercase tracking-wide">{cat}</span>
-                                                    <span className="text-sm font-black font-mono text-success">Bs {amt.toLocaleString()}</span>
-                                                </div>
-                                            );
-                                        })}
+                                        {Object.entries(
+                                            movs.filter(m => m.tipo === 'INGRESO').reduce((acc, m) => {
+                                                acc[m.categoria] = (acc[m.categoria] || 0) + m.monto;
+                                                return acc;
+                                            }, {})
+                                        ).map(([cat, amt]) => (
+                                            <div key={cat} className="p-4 flex justify-between items-center bg-white hover:bg-success/5 transition-all">
+                                                <span className="text-[11px] font-bold text-text uppercase tracking-wide">{cat}</span>
+                                                <span className="text-sm font-black font-mono text-success">Bs {amt.toLocaleString()}</span>
+                                            </div>
+                                        ))}
+                                        {movs.filter(m => m.tipo === 'INGRESO').length === 0 && (
+                                            <div className="p-4 text-center text-xs text-muted italic">Sin ingresos</div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -2062,15 +2067,20 @@ function TurnoDetailModal({ turno, onClose }) {
                                         <ArrowUpRight size={14} /> Desglose de Egresos
                                     </h5>
                                     <div className="divide-y divide-border/20 border border-border/20 rounded-2xl overflow-hidden shadow-sm">
-                                        {['Compra/Gasto', 'Retiro', 'Pago Proveedor', 'Otro Egreso'].map(cat => {
-                                            const amt = movs.filter(m => m.categoria === cat).reduce((acc, m) => acc + m.monto, 0);
-                                            return (
-                                                <div key={cat} className="p-4 flex justify-between items-center bg-white hover:bg-error/5 transition-all">
-                                                    <span className="text-[11px] font-bold text-text uppercase tracking-wide">{cat}</span>
-                                                    <span className="text-sm font-black font-mono text-error">Bs {amt.toLocaleString()}</span>
-                                                </div>
-                                            );
-                                        })}
+                                        {Object.entries(
+                                            movs.filter(m => m.tipo === 'EGRESO').reduce((acc, m) => {
+                                                acc[m.categoria] = (acc[m.categoria] || 0) + m.monto;
+                                                return acc;
+                                            }, {})
+                                        ).map(([cat, amt]) => (
+                                            <div key={cat} className="p-4 flex justify-between items-center bg-white hover:bg-error/5 transition-all">
+                                                <span className="text-[11px] font-bold text-text uppercase tracking-wide">{cat}</span>
+                                                <span className="text-sm font-black font-mono text-error">Bs {amt.toLocaleString()}</span>
+                                            </div>
+                                        ))}
+                                        {movs.filter(m => m.tipo === 'EGRESO').length === 0 && (
+                                            <div className="p-4 text-center text-xs text-muted italic">Sin egresos</div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
