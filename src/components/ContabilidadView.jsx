@@ -4,7 +4,7 @@ import {
     TrendingUp, TrendingDown, Wallet, BarChart3,
     Search, X, CheckCircle2, AlertCircle, Clock,
     Save, History, ListFilter, ArrowRightLeft, Receipt,
-    Settings, Pencil, Trash2, Plus
+    Settings, Pencil, Trash2, Plus, HandCoins
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -250,9 +250,10 @@ function MovimientosTab() {
         return true;
     }), [movimientos, filterMetodo, filterOrigen, filterTipo, search]);
 
-    const totalIngresos = movimientos.filter(m => m.tipo === 'INGRESO').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
-    const totalEgresos  = movimientos.filter(m => m.tipo === 'EGRESO').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
-    const balanceNeto   = totalIngresos - totalEgresos;
+    const totalIngresos        = movimientos.filter(m => m.tipo === 'INGRESO').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const totalEgresos         = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria !== 'Préstamo Otorgado').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const totalPrestamosOtorg  = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria === 'Préstamo Otorgado').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const balanceNeto          = totalIngresos - totalEgresos;
 
     const porMetodo = METODOS.map(met => ({
         metodo: met,
@@ -333,20 +334,21 @@ function MovimientosTab() {
             </AnimatePresence>
 
             {/* KPIs */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
-                    { label: 'Total Ingresos', value: totalIngresos, icon: TrendingUp, color: 'success' },
-                    { label: 'Total Egresos',  value: totalEgresos,  icon: TrendingDown, color: 'error' },
-                    { label: 'Balance Neto',   value: balanceNeto,   icon: Wallet, color: balanceNeto >= 0 ? 'success' : 'error' },
+                    { label: 'Total Ingresos',      value: totalIngresos,       icon: TrendingUp,   textCls: 'text-success',   bgCls: 'bg-success/10' },
+                    { label: 'Egresos Operativos',  value: totalEgresos,        icon: TrendingDown, textCls: 'text-error',     bgCls: 'bg-error/10' },
+                    { label: 'Prestado (pendiente)',value: totalPrestamosOtorg, icon: HandCoins,    textCls: 'text-orange-500',bgCls: 'bg-orange-100' },
+                    { label: 'Balance Neto',        value: balanceNeto,         icon: Wallet,       textCls: balanceNeto >= 0 ? 'text-success' : 'text-error', bgCls: balanceNeto >= 0 ? 'bg-success/10' : 'bg-error/10' },
                 ].map((k, i) => (
                     <motion.div key={k.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                         className="bg-surface border border-border rounded-xl p-5 shadow-sm flex items-center gap-4">
-                        <div className={`p-3 bg-${k.color}/10 rounded-xl`}>
-                            <k.icon size={22} className={`text-${k.color}`} />
+                        <div className={`p-3 ${k.bgCls} rounded-xl`}>
+                            <k.icon size={22} className={k.textCls} />
                         </div>
                         <div>
                             <div className="text-[10px] font-black uppercase text-muted tracking-widest">{k.label}</div>
-                            <div className={`text-2xl font-black font-mono text-${k.color}`}>BS {formatS(k.value)}</div>
+                            <div className={`text-2xl font-black font-mono ${k.textCls}`}>BS {formatS(k.value)}</div>
                         </div>
                     </motion.div>
                 ))}
