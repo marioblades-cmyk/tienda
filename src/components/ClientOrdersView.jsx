@@ -468,12 +468,7 @@ export default function ClientOrdersView() {
                     const storeTotal = (allOrders || [])
                         .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id)
                         .reduce((s,p) => s + (p.cantidad||0), 0);
-                    const clientWaitlist = items.filter(it => 
-                        (it.titulo || '').toLowerCase().trim() === pTitle && 
-                        it.semana_id === w.id && 
-                        it.estado.includes('PEDIDO')
-                    ).length;
-                    qtyFlot = Math.max(0, storeTotal - clientWaitlist);
+                    qtyFlot = storeTotal;
                 }
                 
                 if (qtyFlot > 0) {
@@ -588,8 +583,7 @@ export default function ClientOrdersView() {
                             qtyFlot = Math.max(0, (totalConf - sellerRequested) - totalRec - clientReserved);
                         } else {
                             const storeTotal = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
-                            const clientWaitlist = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && it.estado.includes('PEDIDO')).length;
-                            qtyFlot = Math.max(0, storeTotal - clientWaitlist);
+                            qtyFlot = storeTotal;
                         }
                         if (qtyFlot > 0) {
                             const d = w.fecha_estimada_llegada ? new Date(w.fecha_estimada_llegada) : new Date(new Date(w.created_at).getTime() + (22*24*60*60*1000));
