@@ -3,7 +3,7 @@ import { supabase } from '../services/supabase';
 import {
     HandCoins, Plus, X, ChevronDown, ChevronUp,
     Pencil, Trash2, AlertCircle, CheckCircle2, Clock,
-    Search, ListFilter, TrendingUp, TrendingDown, Wallet
+    Search, ListFilter, TrendingUp, TrendingDown, Wallet, User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -50,7 +50,7 @@ function Modal({ title, icon: Icon, onClose, children }) {
 }
 
 // ── MODAL: NUEVO / EDITAR PRÉSTAMO ───────────────────────────────────────────
-function PrestamoModal({ prestamo, onClose, onDone }) {
+function PrestamoModal({ prestamo, deudoresExistentes, onClose, onDone }) {
     const [form, setForm] = useState({
         deudor_nombre: prestamo?.deudor_nombre || '',
         monto_original: prestamo?.monto_original || '',
@@ -61,9 +61,17 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
         metodo_origen: prestamo?.metodo_origen || 'Efectivo',
         es_preexistente: prestamo?.es_preexistente || false,
     });
+    const [showSuggestions, setShowSuggestions] = useState(false);
     const [saving, setSaving] = useState(false);
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
     const isEdit = !!prestamo;
+
+    const sugerencias = useMemo(() => {
+        if (!form.deudor_nombre.trim()) return deudoresExistentes;
+        return deudoresExistentes.filter(d =>
+            d.toLowerCase().includes(form.deudor_nombre.toLowerCase())
+        );
+    }, [form.deudor_nombre, deudoresExistentes]);
 
     const handleSave = async () => {
         if (!form.deudor_nombre.trim()) return alert('Ingresa el nombre del deudor.');
@@ -87,8 +95,6 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
                 if (error) throw error;
             } else {
                 let caja_mov_id = null;
-
-                // Si no es preexistente, registrar EGRESO en contabilidad
                 if (!form.es_preexistente) {
                     const concepto = `Préstamo otorgado a ${form.deudor_nombre.trim()}${form.concepto.trim() ? ' — ' + form.concepto.trim() : ''}`;
                     const { data: movData, error: movError } = await supabase
@@ -107,7 +113,6 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
                     if (movError) throw movError;
                     caja_mov_id = movData.id;
                 }
-
                 const { error } = await supabase.from('prestamos').insert([{
                     ...payload,
                     estado: 'ACTIVO',
@@ -115,7 +120,6 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
                 }]);
                 if (error) throw error;
             }
-
             onDone();
             onClose();
         } catch (e) {
@@ -128,11 +132,31 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
     return (
         <Modal title={isEdit ? 'Editar Préstamo' : 'Nuevo Préstamo'} icon={HandCoins} onClose={onClose}>
             <div className="space-y-3">
-                <div>
+                {/* Deudor con autocomplete */}
+                <div className="relative">
                     <label className="text-[10px] font-black uppercase text-muted tracking-widest">Deudor *</label>
-                    <input className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-primary mt-1"
-                        placeholder="Nombre del deudor" value={form.deudor_nombre} onChange={e => set('deudor_nombre', e.target.value)} />
+                    <input
+                        className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-primary mt-1"
+                        placeholder="Nombre del deudor"
+                        value={form.deudor_nombre}
+                        onChange={e => { set('deudor_nombre', e.target.value); setShowSuggestions(true); }}
+                        onFocus={() => setShowSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                        autoComplete="off"
+                    />
+                    {showSuggestions && sugerencias.length > 0 && (
+                        <div className="absolute top-full left-0 w-full z-10 mt-1 bg-surface border border-border rounded-xl shadow-xl overflow-hidden">
+                            {sugerencias.map(d => (
+                                <button key={d} type="button"
+                                    onMouseDown={() => { set('deudor_nombre', d); setShowSuggestions(false); }}
+                                    className="w-full text-left px-4 py-2.5 text-sm font-bold text-text hover:bg-primary/10 flex items-center gap-2 border-b border-border/50 last:border-0">
+                                    <User size={13} className="text-primary shrink-0" /> {d}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
+
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <label className="text-[10px] font-black uppercase text-muted tracking-widest">Monto (Bs) *</label>
@@ -148,7 +172,6 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
                     </div>
                 </div>
 
-                {/* Checkbox deuda preexistente */}
                 <label className="flex items-start gap-3 bg-background border border-border rounded-xl px-3 py-3 cursor-pointer hover:border-primary transition-colors">
                     <input type="checkbox" className="mt-0.5 accent-primary shrink-0"
                         checked={form.es_preexistente} onChange={e => set('es_preexistente', e.target.checked)} />
@@ -158,7 +181,6 @@ function PrestamoModal({ prestamo, onClose, onDone }) {
                     </div>
                 </label>
 
-                {/* Cuenta origen — solo si no es preexistente */}
                 {!form.es_preexistente && !isEdit && (
                     <div>
                         <label className="text-[10px] font-black uppercase text-muted tracking-widest">Sale de la cuenta *</label>
@@ -211,7 +233,6 @@ function PagoModal({ prestamo, saldoPendiente, onClose, onDone }) {
         if (monto > saldoPendiente + 0.01) return alert(`El pago (Bs ${formatS(monto)}) supera el saldo pendiente (Bs ${formatS(saldoPendiente)}).`);
         setSaving(true);
         try {
-            // Registrar INGRESO en contabilidad
             const concepto = `Cobro préstamo — ${prestamo.deudor_nombre}${form.nota ? ' — ' + form.nota : ''}`;
             const { data: movData, error: movError } = await supabase
                 .from('caja_movimientos')
@@ -256,8 +277,13 @@ function PagoModal({ prestamo, saldoPendiente, onClose, onDone }) {
             <div className="space-y-3">
                 <div className="bg-background border border-border rounded-xl p-3 flex justify-between items-center">
                     <span className="text-xs text-muted font-bold uppercase tracking-widest">Saldo pendiente</span>
-                    <span className="text-lg font-black text-warning">Bs {formatS(saldoPendiente)}</span>
+                    <span className="text-lg font-black text-orange-500">Bs {formatS(saldoPendiente)}</span>
                 </div>
+                {prestamo.concepto && (
+                    <div className="text-xs text-muted bg-background border border-border rounded-xl px-3 py-2">
+                        Préstamo: <span className="font-bold text-text">{prestamo.concepto}</span>
+                    </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <label className="text-[10px] font-black uppercase text-muted tracking-widest">Monto a pagar (Bs) *</label>
@@ -297,156 +323,227 @@ function PagoModal({ prestamo, saldoPendiente, onClose, onDone }) {
     );
 }
 
-// ── FILA EXPANDIBLE ──────────────────────────────────────────────────────────
-function PrestamoRow({ prestamo, onPago, onEdit, onDelete, onRefresh }) {
+// ── FILA DE DEUDOR (agrupada) ────────────────────────────────────────────────
+function DeudorRow({ grupo, onPago, onEdit, onDelete, onRefresh }) {
     const [expanded, setExpanded] = useState(false);
-    const [pagos, setPagos] = useState(null);
+    const [pagosMap, setPagosMap] = useState({});
+    const [expandedLoan, setExpandedLoan] = useState(null);
     const [loadingPagos, setLoadingPagos] = useState(false);
     const [deletingPago, setDeletingPago] = useState(null);
 
-    const totalPagado = prestamo.totalPagado || 0;
-    const saldoPendiente = Math.max(0, prestamo.monto_original - totalPagado);
-    const porcentaje = Math.min(100, (totalPagado / prestamo.monto_original) * 100);
-    const isVencido = prestamo.estado === 'ACTIVO' && prestamo.fecha_vencimiento && prestamo.fecha_vencimiento < today();
-
-    const estadoChip = prestamo.estado === 'CERRADO'
-        ? <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-success/10 text-success border border-success/20">CERRADO</span>
-        : isVencido
-        ? <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-error/10 text-error border border-error/20">VENCIDO</span>
-        : <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-primary/10 text-primary border border-primary/20">ACTIVO</span>;
+    const { deudor_nombre, prestamos, totalPrestado, totalPagado, saldoPendiente } = grupo;
+    const porcentaje = Math.min(100, totalPrestado > 0 ? (totalPagado / totalPrestado) * 100 : 0);
+    const tieneActivos = prestamos.some(p => p.estado === 'ACTIVO');
+    const tieneVencidos = prestamos.some(p => p.estado === 'ACTIVO' && p.fecha_vencimiento && p.fecha_vencimiento < today());
 
     const handleExpand = async () => {
-        if (!expanded && pagos === null) {
+        if (!expanded) {
             setLoadingPagos(true);
+            const ids = prestamos.map(p => p.id);
             const { data } = await supabase.from('prestamos_pagos')
-                .select('*').eq('prestamo_id', prestamo.id).order('fecha', { ascending: false });
-            setPagos(data || []);
+                .select('*').in('prestamo_id', ids).order('fecha', { ascending: false });
+            const map = {};
+            (data || []).forEach(pg => {
+                if (!map[pg.prestamo_id]) map[pg.prestamo_id] = [];
+                map[pg.prestamo_id].push(pg);
+            });
+            setPagosMap(map);
             setLoadingPagos(false);
         }
         setExpanded(e => !e);
     };
 
-    const handleDeletePago = async (pago) => {
-        if (!confirm(`¿Eliminar este pago de Bs ${formatS(pago.monto)}? También se eliminará el movimiento en contabilidad.`)) return;
+    const handleDeletePago = async (pago, prestamo) => {
+        if (!confirm(`¿Eliminar este pago de Bs ${formatS(pago.monto)}?`)) return;
         setDeletingPago(pago.id);
-        // Eliminar movimiento contable si existe
-        if (pago.caja_mov_id) {
-            await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
-        }
+        if (pago.caja_mov_id) await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
         await supabase.from('prestamos_pagos').delete().eq('id', pago.id);
-        // Reabrir préstamo si estaba cerrado
         if (prestamo.estado === 'CERRADO') {
             await supabase.from('prestamos').update({ estado: 'ACTIVO' }).eq('id', prestamo.id);
         }
         const { data } = await supabase.from('prestamos_pagos')
-            .select('*').eq('prestamo_id', prestamo.id).order('fecha', { ascending: false });
-        setPagos(data || []);
+            .select('*').in('prestamo_id', prestamos.map(p => p.id)).order('fecha', { ascending: false });
+        const map = {};
+        (data || []).forEach(pg => {
+            if (!map[pg.prestamo_id]) map[pg.prestamo_id] = [];
+            map[pg.prestamo_id].push(pg);
+        });
+        setPagosMap(map);
         setDeletingPago(null);
         onRefresh();
     };
 
+    const estadoBadge = saldoPendiente <= 0
+        ? <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-success/10 text-success border border-success/20">SALDADO</span>
+        : tieneVencidos
+        ? <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-error/10 text-error border border-error/20">VENCIDO</span>
+        : tieneActivos
+        ? <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-primary/10 text-primary border border-primary/20">ACTIVO</span>
+        : <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-success/10 text-success border border-success/20">CERRADO</span>;
+
     return (
         <>
-            <tr className="border-b border-border hover:bg-background/60 transition-colors">
-                <td className="px-4 py-3">
-                    <button onClick={handleExpand} className="text-muted hover:text-primary transition-colors">
+            {/* Fila principal del deudor */}
+            <tr className="border-b border-border hover:bg-background/60 transition-colors cursor-pointer" onClick={handleExpand}>
+                <td className="px-4 py-3.5 w-8">
+                    <span className="text-muted">
                         {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
+                    </span>
                 </td>
-                <td className="px-4 py-3">
-                    <div className="font-bold text-sm text-text">{prestamo.deudor_nombre}</div>
-                    {prestamo.concepto && <div className="text-xs text-muted truncate max-w-[180px]">{prestamo.concepto}</div>}
-                    {prestamo.es_preexistente && (
-                        <span className="text-[9px] font-black uppercase text-muted/60 bg-border rounded px-1">Preexistente</span>
-                    )}
-                </td>
-                <td className="px-4 py-3 text-sm text-muted whitespace-nowrap">
-                    {new Date(prestamo.fecha_prestamo + 'T12:00:00').toLocaleDateString('es-BO')}
-                </td>
-                <td className="px-4 py-3 text-sm font-bold text-right whitespace-nowrap">Bs {formatS(prestamo.monto_original)}</td>
-                <td className="px-4 py-3 text-sm text-success font-bold text-right whitespace-nowrap">Bs {formatS(totalPagado)}</td>
-                <td className="px-4 py-3 text-sm font-black text-right whitespace-nowrap text-warning">
-                    {saldoPendiente > 0 ? `Bs ${formatS(saldoPendiente)}` : '—'}
-                </td>
-                <td className="px-4 py-3 text-xs text-muted text-center whitespace-nowrap">
-                    {prestamo.fecha_vencimiento
-                        ? <span className={isVencido ? 'text-error font-bold' : ''}>{new Date(prestamo.fecha_vencimiento + 'T12:00:00').toLocaleDateString('es-BO')}</span>
-                        : <span className="text-muted/40">—</span>}
-                </td>
-                <td className="px-4 py-3 text-center">{estadoChip}</td>
-                <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 justify-end">
-                        {prestamo.estado === 'ACTIVO' && (
-                            <button onClick={() => onPago(prestamo, saldoPendiente)}
-                                className="px-2 py-1 rounded-lg bg-success/10 text-success text-xs font-black hover:bg-success/20 transition-colors flex items-center gap-1">
-                                <Plus size={12} /> Pago
-                            </button>
-                        )}
-                        <button onClick={() => onEdit(prestamo)} className="p-1.5 rounded-lg hover:bg-background text-muted hover:text-primary transition-colors">
-                            <Pencil size={14} />
-                        </button>
-                        <button onClick={() => onDelete(prestamo)} className="p-1.5 rounded-lg hover:bg-error/10 text-muted hover:text-error transition-colors">
-                            <Trash2 size={14} />
-                        </button>
+                <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <User size={14} className="text-primary" />
+                        </div>
+                        <div>
+                            <div className="font-black text-sm text-text">{deudor_nombre}</div>
+                            <div className="text-[10px] text-muted">{prestamos.length} préstamo{prestamos.length !== 1 ? 's' : ''}</div>
+                        </div>
                     </div>
                 </td>
+                <td className="px-4 py-3.5 text-sm font-bold text-right whitespace-nowrap">Bs {formatS(totalPrestado)}</td>
+                <td className="px-4 py-3.5 text-sm text-success font-bold text-right whitespace-nowrap">Bs {formatS(totalPagado)}</td>
+                <td className="px-4 py-3.5 text-sm font-black text-right whitespace-nowrap text-orange-500">
+                    {saldoPendiente > 0 ? `Bs ${formatS(saldoPendiente)}` : '—'}
+                </td>
+                <td className="px-4 py-3.5 text-center">{estadoBadge}</td>
             </tr>
             {/* Barra de progreso */}
             <tr>
-                <td colSpan={9} className="px-4 pb-1 pt-0">
+                <td colSpan={6} className="px-4 pb-1 pt-0">
                     <div className="h-1 bg-border rounded-full overflow-hidden">
                         <div className="h-full bg-success rounded-full transition-all" style={{ width: `${porcentaje}%` }} />
                     </div>
                 </td>
             </tr>
-            {/* Historial expandido */}
+
+            {/* Detalle expandido: préstamos individuales */}
             <AnimatePresence>
                 {expanded && (
                     <tr>
-                        <td colSpan={9} className="px-4 pb-4">
+                        <td colSpan={6} className="px-4 pb-4 pt-1">
                             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
                                 className="bg-background border border-border rounded-xl overflow-hidden">
-                                <div className="px-4 py-2 border-b border-border flex items-center justify-between">
-                                    <span className="text-xs font-black uppercase text-muted tracking-widest">Historial de pagos</span>
-                                    <div className="flex items-center gap-3">
-                                        {prestamo.metodo_origen && (
-                                            <span className="text-[10px] text-muted">Prestado desde: <strong>{prestamo.metodo_origen}</strong></span>
-                                        )}
-                                        {prestamo.notas && <span className="text-xs text-muted italic">"{prestamo.notas}"</span>}
-                                    </div>
+                                <div className="px-4 py-2.5 border-b border-border bg-background">
+                                    <span className="text-[10px] font-black uppercase text-muted tracking-widest">
+                                        Historial de préstamos — {deudor_nombre}
+                                    </span>
                                 </div>
                                 {loadingPagos ? (
-                                    <div className="p-4 text-xs text-muted text-center">Cargando...</div>
-                                ) : pagos && pagos.length === 0 ? (
-                                    <div className="p-4 text-xs text-muted text-center">Sin pagos registrados aún.</div>
+                                    <div className="p-6 text-center text-xs text-muted">Cargando...</div>
                                 ) : (
-                                    <table className="w-full text-xs">
-                                        <thead>
-                                            <tr className="text-muted border-b border-border">
-                                                <th className="text-left px-4 py-2 font-black uppercase tracking-widest">Fecha</th>
-                                                <th className="text-right px-4 py-2 font-black uppercase tracking-widest">Monto</th>
-                                                <th className="text-left px-4 py-2 font-black uppercase tracking-widest">Entró a</th>
-                                                <th className="text-left px-4 py-2 font-black uppercase tracking-widest">Nota</th>
-                                                <th className="px-4 py-2" />
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {pagos?.map(p => (
-                                                <tr key={p.id} className="border-b border-border/50 hover:bg-surface/50">
-                                                    <td className="px-4 py-2 text-muted">{new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-BO')}</td>
-                                                    <td className="px-4 py-2 text-right font-bold text-success">Bs {formatS(p.monto)}</td>
-                                                    <td className="px-4 py-2 text-muted">{p.metodo_pago || '—'}</td>
-                                                    <td className="px-4 py-2 text-muted italic">{p.nota || '—'}</td>
-                                                    <td className="px-4 py-2 text-right">
-                                                        <button onClick={() => handleDeletePago(p)} disabled={deletingPago === p.id}
-                                                            className="p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-colors disabled:opacity-40">
-                                                            <Trash2 size={12} />
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                    <div className="divide-y divide-border/50">
+                                        {prestamos.map(p => {
+                                            const pPagos = pagosMap[p.id] || [];
+                                            const pPagado = p.totalPagado || 0;
+                                            const pPendiente = Math.max(0, p.monto_original - pPagado);
+                                            const pPct = Math.min(100, p.monto_original > 0 ? (pPagado / p.monto_original) * 100 : 0);
+                                            const isVencido = p.estado === 'ACTIVO' && p.fecha_vencimiento && p.fecha_vencimiento < today();
+                                            const loanExpanded = expandedLoan === p.id;
+
+                                            return (
+                                                <div key={p.id} className="p-3">
+                                                    {/* Cabecera del préstamo individual */}
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className="text-xs font-black text-text">
+                                                                    {new Date(p.fecha_prestamo + 'T12:00:00').toLocaleDateString('es-BO')}
+                                                                </span>
+                                                                {p.concepto && <span className="text-xs text-muted truncate">— {p.concepto}</span>}
+                                                                {p.es_preexistente && (
+                                                                    <span className="text-[9px] font-black bg-border text-muted/70 px-1.5 rounded uppercase">Preexistente</span>
+                                                                )}
+                                                                {p.metodo_origen && (
+                                                                    <span className="text-[9px] text-muted">desde: {p.metodo_origen}</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-4 mt-1">
+                                                                <span className="text-xs text-muted">Prestado: <strong className="text-text">Bs {formatS(p.monto_original)}</strong></span>
+                                                                <span className="text-xs text-success">Pagado: <strong>Bs {formatS(pPagado)}</strong></span>
+                                                                {pPendiente > 0 && <span className="text-xs text-orange-500 font-black">Pendiente: Bs {formatS(pPendiente)}</span>}
+                                                            </div>
+                                                            <div className="h-1 bg-border rounded-full overflow-hidden mt-1.5 max-w-xs">
+                                                                <div className="h-full bg-success rounded-full" style={{ width: `${pPct}%` }} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-1 shrink-0">
+                                                            {/* Estado chip */}
+                                                            {p.estado === 'CERRADO'
+                                                                ? <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-success/10 text-success border border-success/20">CERRADO</span>
+                                                                : isVencido
+                                                                ? <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-error/10 text-error border border-error/20">VENCIDO</span>
+                                                                : <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-primary/10 text-primary border border-primary/20">ACTIVO</span>
+                                                            }
+                                                            {/* Ver pagos */}
+                                                            <button
+                                                                onClick={() => setExpandedLoan(loanExpanded ? null : p.id)}
+                                                                className="p-1.5 rounded-lg hover:bg-border text-muted hover:text-text transition-colors">
+                                                                {loanExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                                                            </button>
+                                                            {/* Registrar pago */}
+                                                            {p.estado === 'ACTIVO' && (
+                                                                <button onClick={() => onPago(p, pPendiente)}
+                                                                    className="px-2 py-1 rounded-lg bg-success/10 text-success text-[10px] font-black hover:bg-success/20 transition-colors flex items-center gap-1">
+                                                                    <Plus size={11} /> Pago
+                                                                </button>
+                                                            )}
+                                                            {/* Editar */}
+                                                            <button onClick={() => onEdit(p)}
+                                                                className="p-1.5 rounded-lg hover:bg-background text-muted hover:text-primary transition-colors">
+                                                                <Pencil size={13} />
+                                                            </button>
+                                                            {/* Eliminar */}
+                                                            <button onClick={() => onDelete(p)}
+                                                                className="p-1.5 rounded-lg hover:bg-error/10 text-muted hover:text-error transition-colors">
+                                                                <Trash2 size={13} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Historial de pagos del préstamo */}
+                                                    <AnimatePresence>
+                                                        {loanExpanded && (
+                                                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                                                                className="mt-2 border border-border/50 rounded-lg overflow-hidden">
+                                                                {pPagos.length === 0 ? (
+                                                                    <div className="px-4 py-3 text-xs text-muted text-center">Sin pagos registrados.</div>
+                                                                ) : (
+                                                                    <table className="w-full text-xs">
+                                                                        <thead>
+                                                                            <tr className="bg-surface/50 text-muted border-b border-border/50">
+                                                                                <th className="text-left px-3 py-1.5 font-black uppercase tracking-widest">Fecha</th>
+                                                                                <th className="text-right px-3 py-1.5 font-black uppercase tracking-widest">Monto</th>
+                                                                                <th className="text-left px-3 py-1.5 font-black uppercase tracking-widest">Cuenta</th>
+                                                                                <th className="text-left px-3 py-1.5 font-black uppercase tracking-widest">Nota</th>
+                                                                                <th className="px-3 py-1.5 w-8" />
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {pPagos.map(pg => (
+                                                                                <tr key={pg.id} className="border-b border-border/30 hover:bg-surface/50">
+                                                                                    <td className="px-3 py-1.5 text-muted">{new Date(pg.fecha + 'T12:00:00').toLocaleDateString('es-BO')}</td>
+                                                                                    <td className="px-3 py-1.5 text-right font-bold text-success">Bs {formatS(pg.monto)}</td>
+                                                                                    <td className="px-3 py-1.5 text-muted">{pg.metodo_pago || '—'}</td>
+                                                                                    <td className="px-3 py-1.5 text-muted italic">{pg.nota || '—'}</td>
+                                                                                    <td className="px-3 py-1.5 text-right">
+                                                                                        <button onClick={() => handleDeletePago(pg, p)} disabled={deletingPago === pg.id}
+                                                                                            className="p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-colors disabled:opacity-40">
+                                                                                            <Trash2 size={11} />
+                                                                                        </button>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                )}
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 )}
                             </motion.div>
                         </td>
@@ -497,22 +594,25 @@ export default function PrestamosView() {
 
     const handleDelete = async (prestamo) => {
         if (!confirm(`¿Eliminar el préstamo de ${prestamo.deudor_nombre}? Se eliminarán también sus pagos y movimientos contables.`)) return;
-        // Eliminar movimiento contable del préstamo si existe
         if (prestamo.caja_mov_id) {
             await supabase.from('caja_movimientos').delete().eq('id', prestamo.caja_mov_id);
         }
-        // Eliminar movimientos contables de todos los pagos
         const { data: pagos } = await supabase.from('prestamos_pagos').select('caja_mov_id').eq('prestamo_id', prestamo.id);
         const movIds = (pagos || []).map(p => p.caja_mov_id).filter(Boolean);
-        if (movIds.length > 0) {
-            await supabase.from('caja_movimientos').delete().in('id', movIds);
-        }
+        if (movIds.length > 0) await supabase.from('caja_movimientos').delete().in('id', movIds);
         const { error } = await supabase.from('prestamos').delete().eq('id', prestamo.id);
         if (error) { toast('Error al eliminar: ' + error.message, 'error'); return; }
         toast('Préstamo eliminado.');
         fetchPrestamos();
     };
 
+    // Lista única de deudores para autocomplete
+    const deudoresExistentes = useMemo(() => {
+        const nombres = [...new Set(prestamos.map(p => p.deudor_nombre.trim()))].sort();
+        return nombres;
+    }, [prestamos]);
+
+    // Filtrado plano
     const filtered = useMemo(() => prestamos.filter(p => {
         const matchBusqueda = !busqueda
             || p.deudor_nombre.toLowerCase().includes(busqueda.toLowerCase())
@@ -521,16 +621,36 @@ export default function PrestamosView() {
         return matchBusqueda && matchEstado;
     }), [prestamos, busqueda, filtroEstado]);
 
+    // Agrupado por deudor
+    const gruposPorDeudor = useMemo(() => {
+        const map = {};
+        filtered.forEach(p => {
+            const key = p.deudor_nombre.trim().toLowerCase();
+            if (!map[key]) map[key] = {
+                deudor_nombre: p.deudor_nombre.trim(),
+                prestamos: [],
+                totalPrestado: 0,
+                totalPagado: 0,
+                saldoPendiente: 0,
+            };
+            map[key].prestamos.push(p);
+            map[key].totalPrestado += p.monto_original;
+            map[key].totalPagado += p.totalPagado;
+            map[key].saldoPendiente += Math.max(0, p.monto_original - p.totalPagado);
+        });
+        return Object.values(map).sort((a, b) => b.saldoPendiente - a.saldoPendiente);
+    }, [filtered]);
+
     const totalPrestado = prestamos.reduce((s, p) => s + p.monto_original, 0);
     const totalRecuperado = prestamos.reduce((s, p) => s + p.totalPagado, 0);
     const saldoPendiente = Math.max(0, totalPrestado - totalRecuperado);
     const activos = prestamos.filter(p => p.estado === 'ACTIVO').length;
 
     const kpis = [
-        { label: 'Total Prestado', value: `Bs ${formatS(totalPrestado)}`, icon: TrendingUp, color: 'text-primary', bg: 'bg-primary/10' },
-        { label: 'Total Recuperado', value: `Bs ${formatS(totalRecuperado)}`, icon: TrendingDown, color: 'text-success', bg: 'bg-success/10' },
-        { label: 'Saldo Pendiente', value: `Bs ${formatS(saldoPendiente)}`, icon: Wallet, color: 'text-warning', bg: 'bg-warning/10' },
-        { label: 'Préstamos Activos', value: activos, icon: Clock, color: 'text-blue-500', bg: 'bg-blue-50' },
+        { label: 'Total Prestado',    value: `Bs ${formatS(totalPrestado)}`,    icon: TrendingUp,   color: 'text-primary',    bg: 'bg-primary/10' },
+        { label: 'Total Recuperado',  value: `Bs ${formatS(totalRecuperado)}`,  icon: TrendingDown, color: 'text-success',    bg: 'bg-success/10' },
+        { label: 'Saldo Pendiente',   value: `Bs ${formatS(saldoPendiente)}`,   icon: Wallet,       color: 'text-orange-500', bg: 'bg-orange-100' },
+        { label: 'Préstamos Activos', value: activos,                           icon: Clock,        color: 'text-blue-500',   bg: 'bg-blue-50' },
     ];
 
     return (
@@ -590,11 +710,11 @@ export default function PrestamosView() {
                 </div>
             </div>
 
-            {/* Tabla */}
+            {/* Tabla agrupada */}
             <div className="bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
                 {loading ? (
                     <div className="p-12 text-center text-muted text-sm">Cargando préstamos...</div>
-                ) : filtered.length === 0 ? (
+                ) : gruposPorDeudor.length === 0 ? (
                     <div className="p-12 text-center">
                         <HandCoins size={40} className="text-muted/30 mx-auto mb-3" />
                         <p className="text-muted text-sm font-bold">
@@ -608,20 +728,17 @@ export default function PrestamosView() {
                                 <tr className="border-b border-border bg-background">
                                     <th className="px-4 py-3 w-8" />
                                     <th className="px-4 py-3 text-left text-[10px] font-black uppercase text-muted tracking-widest">Deudor</th>
-                                    <th className="px-4 py-3 text-left text-[10px] font-black uppercase text-muted tracking-widest">Fecha</th>
-                                    <th className="px-4 py-3 text-right text-[10px] font-black uppercase text-muted tracking-widest">Prestado</th>
-                                    <th className="px-4 py-3 text-right text-[10px] font-black uppercase text-muted tracking-widest">Pagado</th>
+                                    <th className="px-4 py-3 text-right text-[10px] font-black uppercase text-muted tracking-widest">Total Prestado</th>
+                                    <th className="px-4 py-3 text-right text-[10px] font-black uppercase text-muted tracking-widest">Total Pagado</th>
                                     <th className="px-4 py-3 text-right text-[10px] font-black uppercase text-muted tracking-widest">Pendiente</th>
-                                    <th className="px-4 py-3 text-center text-[10px] font-black uppercase text-muted tracking-widest">Vencimiento</th>
                                     <th className="px-4 py-3 text-center text-[10px] font-black uppercase text-muted tracking-widest">Estado</th>
-                                    <th className="px-4 py-3 text-right text-[10px] font-black uppercase text-muted tracking-widest">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {filtered.map(p => (
-                                    <PrestamoRow
-                                        key={p.id}
-                                        prestamo={p}
+                                {gruposPorDeudor.map(grupo => (
+                                    <DeudorRow
+                                        key={grupo.deudor_nombre}
+                                        grupo={grupo}
                                         onPago={(pr, saldo) => setModalPago({ prestamo: pr, saldo })}
                                         onEdit={pr => setModalEditar(pr)}
                                         onDelete={handleDelete}
@@ -634,10 +751,10 @@ export default function PrestamosView() {
                 )}
             </div>
 
-            {/* Delete buttons in separate column outside table for cleaner UX */}
             <AnimatePresence>
                 {modalNuevo && (
                     <PrestamoModal
+                        deudoresExistentes={deudoresExistentes}
                         onClose={() => setModalNuevo(false)}
                         onDone={() => { fetchPrestamos(); toast('Préstamo creado.'); }}
                     />
@@ -645,6 +762,7 @@ export default function PrestamosView() {
                 {modalEditar && (
                     <PrestamoModal
                         prestamo={modalEditar}
+                        deudoresExistentes={deudoresExistentes}
                         onClose={() => setModalEditar(null)}
                         onDone={() => { fetchPrestamos(); toast('Préstamo actualizado.'); }}
                     />
