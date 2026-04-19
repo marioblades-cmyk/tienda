@@ -156,11 +156,12 @@ const CatalogUpdatedView = () => {
             
             // --- NEW: Load Integrated Stock Data ---
             const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false });
-            const [masters, receptions, allOrders, { data: floatingSummary }] = await Promise.all([
+            const [masters, receptions, allOrders, { data: floatingSummary }, clientItems] = await Promise.all([
                 supabase.from('master_confirmaciones').select('semana_id, datos_json'),
                 supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida'),
                 supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)'),
-                supabase.rpc('get_floating_stock_summary')
+                supabase.rpc('get_floating_stock_summary'),
+                supabase.from('cliente_items').select('semana_id, titulo, estado')
             ]);
 
             const weekStats = (weeks || []).map(w => {
@@ -168,6 +169,7 @@ const CatalogUpdatedView = () => {
                 const weekReceptions = (receptions.data || []).filter(r => r.semana_id === w.id);
                 const weekAllOrders = (allOrders.data || []).filter(o => o.pedido.semana_id === w.id);
                 const weekFloatingSummary = (floatingSummary || []).filter(c => c.semana_id === w.id);
+                const weekClientItems = (clientItems.data || []).filter(ci => ci.semana_id === w.id);
                 
                 const totalConfirmed = (master?.datos_json || []).reduce((sum, it) => sum + (it.cantidad || 0), 0);
                 const totalReceived = weekReceptions.reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
@@ -183,6 +185,7 @@ const CatalogUpdatedView = () => {
                     receptionData: weekReceptions,
                     allOrdersData: weekAllOrders,
                     floatingSummary: weekFloatingSummary,
+                    clientItemsData: weekClientItems,
                     isConfirmed: !!master,
                     floatingCount: master ? Math.max(0, totalConfirmed - totalReceived) : totalRequestedStore,
                     fechaArribo
@@ -224,13 +227,18 @@ const CatalogUpdatedView = () => {
                         // Clients (ADJUDICADO) take from vendor personal allocations, not from tienda copies.
                         qty = Math.max(0, (totalConfirmedForTitle - sellerRequestedQty) - received);
                     } else {
-                        // Not confirmed yet: Show full TIENDA request Baseline
+                        // Not confirmed yet: available = storeTotal minus store-assigned clients
                         const storeTotal = week.allOrdersData
                             .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'tienda')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
-
-                        // Clientes ADJUDICADO toman copias de vendedores, no de tienda — no restar aquí.
-                        qty = storeTotal;
+                        const personalTotal = week.allOrdersData
+                            .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'personal')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+                        const clientWaitlist = (week.clientItemsData || [])
+                            .filter(it => (it.titulo || '').toLowerCase().trim() === prodTitle && (it.estado || '').includes('PEDIDO'))
+                            .length;
+                        const storeClientWaitlist = Math.max(0, clientWaitlist - personalTotal);
+                        qty = Math.max(0, storeTotal - storeClientWaitlist);
                     }
                     if (qty > 0) floatingByWeek[week.id] = { qty, isConfirmed: week.isConfirmed };
                 });
