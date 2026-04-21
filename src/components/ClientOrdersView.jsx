@@ -199,13 +199,25 @@ export default function ClientOrdersView() {
 
             // Apply seller isolation
             if (!isAdmin && user?.id) {
-                itemsQuery = itemsQuery.eq('vendedor_id', user.id);
-                pagosQuery = pagosQuery.eq('vendedor_id', user.id);
-                // Detection query (only basics needed for coordination)
-                othersQuery = supabase.from('cliente_items')
-                    .select('id, cliente_id, vendedor_id, titulo, precio_venta, monto_pagado, estado, semana_id')
-                    .neq('vendedor_id', user.id)
-                    .neq('estado', 'ENTREGADO');
+                // Si el filtro es 'todos', permitimos ver ítems de otros socios
+                if (filterVendedor === 'todos') {
+                    // No filtramos por vendedor_id en itemsQuery para que la búsqueda sea global
+                } else {
+                    itemsQuery = itemsQuery.eq('vendedor_id', user.id);
+                }
+                
+                // IMPORTANTE: Pagos siempre deben ser globales para el cliente para calcular deuda real,
+                // pero por seguridad limitamos a los clientes que el vendedor puede ver.
+                // Sin embargo, para simplificar y asegurar consistencia, cargaremos pagos sin filtrar por vendedor_id.
+                // pagosQuery = siempre carga todos los abonos para que el saldo sea veraz.
+                
+                // Búsqueda de otros socios (para coordinación de envíos/entregas cuando no estamos en 'todos')
+                if (filterVendedor !== 'todos') {
+                    othersQuery = supabase.from('cliente_items')
+                        .select('id, cliente_id, vendedor_id, titulo, precio_venta, monto_pagado, estado, semana_id')
+                        .neq('vendedor_id', user.id)
+                        .neq('estado', 'ENTREGADO');
+                }
             }
 
             const [clientesRes, semanasRes, itemsRes, pagosRes, othersRes, vendedoresRes] = await Promise.all([
@@ -1251,6 +1263,32 @@ export default function ClientOrdersView() {
         }
     };
 
+    const handleEntregarAjeno = async (oit) => {
+        const myName = vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio';
+        const now = new Date().toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const auditNote = `[✔ Entregado por ${myName} el ${now}]`;
+        
+        if (!confirm(`¿Confirmas que estás entregando este pedido de otro socio?\nSe registrará: "${auditNote}"`)) return;
+
+        try {
+            setLoading(true);
+            const nuevaNota = oit.nota ? `${oit.nota} ${auditNote}` : auditNote;
+            const { error } = await supabase.from('cliente_items').update({ 
+                estado: 'ENTREGADO',
+                nota: nuevaNota
+            }).eq('id', oit.id);
+            
+            if (error) throw error;
+            await fetchData();
+            alert("✓ Entrega registrada con trazabilidad.");
+        } catch (e) {
+            console.error(e);
+            alert("Error al registrar entrega: " + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Filtros y KPIs
     const displayItems = useMemo(() => {
         return items.filter(it => {
@@ -1667,22 +1705,20 @@ export default function ClientOrdersView() {
                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
                             </div>
 
-                            {isAdmin && (
-                                <div className="relative group xl:w-44">
-                                    <select
-                                        value={filterVendedor}
-                                        onChange={e => setFilterVendedor(e.target.value)}
-                                        className="w-full bg-background border border-primary/30 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer text-primary"
-                                    >
-                                        <option value="mine">👤 MIS CLIENTES</option>
-                                        <option value="todos">👥 TODOS</option>
-                                        {vendedores.filter(v => v.id !== user?.id).map(v => (
-                                            <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
-                                        ))}
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-primary pointer-events-none" size={16} />
-                                </div>
-                            )}
+                            <div className="relative group xl:w-44">
+                                <select
+                                    value={filterVendedor}
+                                    onChange={e => setFilterVendedor(e.target.value)}
+                                    className={`w-full bg-background border pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer ${filterVendedor === 'mine' ? 'border-border/40 text-muted' : 'border-primary/30 text-primary'}`}
+                                >
+                                    <option value="mine">👤 MIS PEDIDOS</option>
+                                    <option value="todos">👥 BUSCAR EN TODOS</option>
+                                    {isAdmin && vendedores.filter(v => v.id !== user?.id).map(v => (
+                                        <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
+                                    ))}
+                                </select>
+                                <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterVendedor === 'mine' ? 'text-muted' : 'text-primary'}`} size={16} />
+                            </div>
 
                             {/* Toggle mostrar entregados — solo en vista clientes */}
                             {view === 'clientes' && (() => {
@@ -1956,9 +1992,16 @@ export default function ClientOrdersView() {
                                                                     />
                                                                 </td>
                                                                 <td className={`${rp} font-medium text-text`}>
-                                                                    <div className="flex items-center gap-1.5">
-                                                                        <Box size={isCompact ? 11 : 13} className="text-primary opacity-40 shrink-0" />
-                                                                        <span className={isCompact ? 'text-xs' : ''}>{it.titulo}</span>
+                                                                    <div className="flex flex-col">
+                                                                        <div className="flex items-center gap-1.5">
+                                                                            <Box size={isCompact ? 11 : 13} className="text-primary opacity-40 shrink-0" />
+                                                                            <span className={isCompact ? 'text-xs' : ''}>{it.titulo}</span>
+                                                                        </div>
+                                                                        {it.estado === 'ENTREGADO' && it.nota?.includes('✔ Entregado por') && (
+                                                                            <div className="flex items-center gap-1 text-[9px] font-black text-primary uppercase ml-4 mt-0.5">
+                                                                                <span>🤝</span> {it.nota.split('✔ ')[1]?.split(']')[0]}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 </td>
                                                                 <td className={`${rp} font-mono text-right whitespace-nowrap text-text ${isCompact ? 'text-[11px]' : 'text-xs'}`}>BS {formatS(it.precio_venta)}</td>
@@ -2033,25 +2076,41 @@ export default function ClientOrdersView() {
                                                             <tr className="bg-muted/5 border-t-2 border-primary/10">
                                                                 <td colSpan={7} className="p-3">
                                                                     <div className="flex items-center gap-2 text-[10px] font-black text-primary uppercase tracking-widest">
-                                                                        <RefreshCw size={12} className="animate-spin-slow" /> Pedidos de otros socios (Para envío conjunto)
+                                                                        <Layers size={12} className="animate-pulse" /> Pedidos de otros socios ({group.others.length})
                                                                     </div>
                                                                 </td>
                                                             </tr>
-                                                            {group.others.map(oit => (
-                                                                <tr key={oit.id} className="bg-muted/5 border-b border-border/20 opacity-70 align-top">
-                                                                    <td className="py-3 px-3"></td>
-                                                                    <td className="py-3 px-3 text-xs font-medium italic">{oit.titulo}</td>
-                                                                    <td className="py-3 px-3 text-xs font-mono text-right whitespace-nowrap">BS {formatS(oit.precio_venta)}</td>
-                                                                    <td className="py-3 px-3 text-xs font-mono text-right whitespace-nowrap text-success">BS {formatS(oit.monto_pagado)}</td>
-                                                                    <td className="py-3 px-3 text-xs font-mono text-right whitespace-nowrap text-error">BS {formatS(oit.precio_venta - oit.monto_pagado)}</td>
-                                                                    <td className="py-3 px-3">
-                                                                        {renderStatus(oit)}
+                                                            {group.others.map(oit => {
+                                                                const owner = vendedores.find(v => v.id === oit.vendedor_id);
+                                                                const ownerName = owner?.nombre || 'Otro Socio';
+                                                                return (
+                                                                <tr key={oit.id} className="bg-muted/5 border-b border-border/20 align-top hover:bg-primary/5 transition-colors group/others">
+                                                                    <td className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'}`}></td>
+                                                                    <td className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'} text-xs font-medium`}>
+                                                                        <div className="flex flex-col">
+                                                                            <span>{oit.titulo}</span>
+                                                                            <span className="text-[9px] font-black text-primary uppercase mt-0.5">Socio: {ownerName}</span>
+                                                                        </div>
                                                                     </td>
-                                                                    <td colSpan={2} className="py-3 px-3 text-[10px] text-muted italic">
-                                                                        Vendido por otro socio
+                                                                    <td className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'} text-xs font-mono text-right whitespace-nowrap`}>BS {formatS(oit.precio_venta)}</td>
+                                                                    <td className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'} text-xs font-mono text-right whitespace-nowrap text-success`}>BS {formatS(oit.monto_pagado)}</td>
+                                                                    <td className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'} text-xs font-mono text-right whitespace-nowrap text-error`}>BS {formatS(oit.precio_venta - oit.monto_pagado)}</td>
+                                                                    <td className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'}`}>
+                                                                        {renderStatus(oit, isCompact)}
+                                                                    </td>
+                                                                    <td colSpan={2} className={`${isCompact ? 'py-1 px-2' : 'py-3 px-3'}`}>
+                                                                        <div className="flex items-center justify-end">
+                                                                            <button 
+                                                                                onClick={() => handleEntregarAjeno(oit)}
+                                                                                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary text-[10px] font-black uppercase transition-all hover:text-white"
+                                                                            >
+                                                                                <CheckSquare size={13}/> Entregar
+                                                                            </button>
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </>
                                                     )}
                                                 </tbody>
@@ -2076,7 +2135,13 @@ export default function ClientOrdersView() {
                                                                     <span className="text-sm leading-none">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
                                                                     <div className="min-w-0">
                                                                         <div className="text-[10px] font-bold text-text truncate">{p.concepto || 'Abono'}</div>
-                                                                        <div className="text-[9px] text-muted">{p.metodo_pago || 'Efectivo'} · {new Date(p.fecha || p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: '2-digit' })}</div>
+                                                                        <div className="text-[9px] text-muted flex items-center gap-1">
+                                                                            <span>{p.metodo_pago || 'Efectivo'}</span>
+                                                                            <span>·</span>
+                                                                            <span>{new Date(p.fecha || p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' })}</span>
+                                                                            <span>·</span>
+                                                                            <span className="font-black text-primary uppercase">{vendedores.find(v => v.id === p.vendedor_id)?.nombre?.split(' ')[0] || 'Socio'}</span>
+                                                                        </div>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center gap-1 ml-2 shrink-0">
