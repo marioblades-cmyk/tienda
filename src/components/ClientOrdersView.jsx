@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock } from 'lucide-react';
+import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 export default function ClientOrdersView() {
@@ -27,6 +27,7 @@ export default function ClientOrdersView() {
     const [compactClients, setCompactClients] = useState(new Set()); // IDs en modo compacto
     const [selectedSemanaHoja, setSelectedSemanaHoja] = useState('');
     const [selectedItems, setSelectedItems] = useState(new Set()); // IDs de ítems seleccionados para acciones masivas
+    const [showEntregados, setShowEntregados] = useState(false); // Toggle para mostrar clientes totalmente entregados
 
     // Modales
     const [showAddModal, setShowAddModal] = useState(false);
@@ -1123,21 +1124,113 @@ export default function ClientOrdersView() {
     const handleDistribuirBalance = async () => {
         const entries = Object.entries(distribuirMontos).filter(([, amt]) => Number(amt) > 0);
         if (entries.length === 0) return;
+        const clienteId = showPayModal;
+        if (!clienteId) return;
+
         try {
             setLoading(true);
+            
+            // 1. Obtener los abonos generales actuales del cliente (ordenados por fecha más antigua)
+            const cliPagos = pagos
+                .filter(p => p.cliente_id === clienteId && Number(p.monto) > 0)
+                .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
             for (const [itemId, amt] of entries) {
                 const it = items.find(i => i.id === itemId);
                 if (!it) continue;
-                const nuevoMonto = Math.min(Number(it.precio_venta), Number(it.monto_pagado || 0) + Number(amt));
-                await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itemId);
+                
+                let montoADistribuir = Number(amt);
+                const appliedActual = Math.min(Number(it.precio_venta) - Number(it.monto_pagado || 0), montoADistribuir);
+                
+                if (appliedActual <= 0) continue;
+
+                // 2. Descontar de los registros de pagos (cliente_pagos)
+                let restanteXItem = appliedActual;
+                for (const p of cliPagos) {
+                    if (restanteXItem <= 0) break;
+                    const availableInPago = Number(p.monto);
+                    if (availableInPago <= 0) continue;
+
+                    const take = Math.min(availableInPago, restanteXItem);
+                    const newMonto = availableInPago - take;
+                    
+                    // Actualizar el abono original (Restar)
+                    const newConcepto = newMonto === 0 
+                        ? (p.concepto?.includes('Distribuido') ? p.concepto : `${p.concepto || 'Abono'} (Totalmente Distribuido)`)
+                        : p.concepto;
+                        
+                    await supabase.from('cliente_pagos').update({ 
+                        monto: newMonto,
+                        concepto: newConcepto
+                    }).eq('id', p.id);
+                    
+                    // Actualizar memoria local de cliPagos para la siguiente iteración de ítems
+                    p.monto = newMonto;
+
+                    // Crear el registro de "Dónder se fue el dinero" (Nuevo registro asignado)
+                    await supabase.from('cliente_pagos').insert([{
+                        cliente_id: clienteId,
+                        monto: take,
+                        concepto: `Asignado a: ${it.titulo}`,
+                        vendedor_id: user?.id,
+                        metodo_pago: p.metodo_pago,
+                        caja_mov_id: p.caja_mov_id, // Mantener vínculo para trazabilidad
+                        referencia: p.referencia 
+                    }]);
+
+                    restanteXItem -= take;
+                }
+
+                // 3. Actualizar el ítem
+                const nuevoMontoPagado = Number(it.monto_pagado || 0) + appliedActual;
+                await supabase.from('cliente_items').update({ monto_pagado: nuevoMontoPagado }).eq('id', itemId);
             }
+
             setShowPayModal(null);
             setDistribuirMontos({});
             setPayMode('items');
             await fetchData();
+            alert("✓ Balance distribuido correctamente.");
         } catch (e) {
             console.error(e);
             alert('Error al distribuir balance: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRevertirDistribucion = async (pago) => {
+        const prefix = 'Asignado a: ';
+        if (!pago.concepto?.startsWith(prefix)) return;
+        if (!confirm(`¿Deseas quitar la distribución de BS ${formatS(pago.monto)}?\nEl dinero volverá al saldo general del cliente.`)) return;
+
+        const titulo = pago.concepto.replace(prefix, '').trim();
+        const clienteId = pago.cliente_id;
+        
+        try {
+            setLoading(true);
+            // 1. Encontrar el ítem por título para este cliente
+            const it = items.find(i => i.cliente_id === clienteId && i.titulo === titulo);
+            if (!it) {
+                alert(`No se encontró el ítem "${titulo}" para revertir el abono.`);
+                return;
+            }
+
+            // 2. Restar el monto del ítem
+            const nuevoMonto = Math.max(0, Number(it.monto_pagado || 0) - Number(pago.monto));
+            await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', it.id);
+
+            // 3. Cambiar el registro de pago para que vuelva a contar como saldo disponible
+            // Lo marcamos como abono general nuevamente
+            await supabase.from('cliente_pagos').update({ 
+                concepto: `Saldo recuperado (de ${titulo})` 
+            }).eq('id', pago.id);
+
+            await fetchData();
+            alert("✓ Distribución revertida con éxito.");
+        } catch (e) {
+            console.error(e);
+            alert('Error al revertir distribución: ' + e.message);
         } finally {
             setLoading(false);
         }
@@ -1287,38 +1380,155 @@ export default function ClientOrdersView() {
                 pagos: pagos.filter(p => p.cliente_id === c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
-        
-        return Object.values(groups);
+
+        // Calcular completitud y ordenar grupos
+        const groupsArr = Object.values(groups).map(g => {
+            const nonDelivered = g.items.filter(i => i.estado !== 'ENTREGADO');
+            const inStore = g.items.filter(i => i.estado === 'EN TIENDA');
+            const allDelivered = g.items.length > 0 && g.items.every(i => i.estado === 'ENTREGADO');
+            const allInStore = nonDelivered.length > 0 && inStore.length === nonDelivered.length;
+            const completitud = nonDelivered.length > 0 ? inStore.length / nonDelivered.length : (allDelivered ? 1 : 0);
+            // readySince: fecha del ítem EN TIENDA más reciente (proxy de cuándo se completó)
+            const readySince = allInStore && inStore.length > 0
+                ? Math.max(...inStore.map(i => new Date(i.created_at).getTime()))
+                : null;
+            return { ...g, nonDelivered, inStore, allDelivered, allInStore, completitud, readySince };
+        });
+
+        // Ordenar: allInStore primero (más reciente completado arriba) → parciales por % desc → 0% → entregados al final
+        groupsArr.sort((a, b) => {
+            if (a.allDelivered && !b.allDelivered) return 1;
+            if (!a.allDelivered && b.allDelivered) return -1;
+            // Ambos allInStore: más recientemente completado primero (Opción B)
+            if (a.allInStore && b.allInStore) {
+                return (b.readySince || 0) - (a.readySince || 0);
+            }
+            if (a.allInStore && !b.allInStore) return -1;
+            if (!a.allInStore && b.allInStore) return 1;
+            return b.completitud - a.completitud;
+        });
+
+        return groupsArr;
     }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user, filterVendedor]);
 
     const sendWhatsApp = (client, type) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
-        const cliPagos = pagos.filter(p => p.cliente_id === client.id).reduce((s,p)=>s+Number(p.monto), 0);
-        const vTot = cliItems.reduce((s,i)=>s+Number(i.precio_venta), 0);
-        const pItm = cliItems.reduce((s,i)=>s+Number(i.monto_pagado), 0);
-        const deuda = vTot - (pItm + cliPagos);
+        const cliPagos = pagos.filter(p => p.cliente_id === client.id).reduce((s,p) => s + Number(p.monto), 0);
 
-        let msg = `Hola *${client.nombre}*, te escribimos de *MANGAS COMICS BOLIVIA*\n\n`;
+        // Helper de ordenamiento por serie + número de volumen
+        const sortByTitle = (arr) => [...arr].sort((a, b) => {
+            const extractVol = t => { const m = (t||'').match(/\d+\s*$/); return m ? parseInt(m[0]) : 0; };
+            const extractSeries = t => (t||'').replace(/\s*\d+\s*$/, '').trim().toLowerCase();
+            const sA = extractSeries(a.titulo), sB = extractSeries(b.titulo);
+            if (sA !== sB) return sA.localeCompare(sB, 'es');
+            return extractVol(a.titulo) - extractVol(b.titulo);
+        });
+
+        const activeItems = sortByTitle(cliItems.filter(i => i.estado !== 'ENTREGADO'));
+        const vTot = activeItems.reduce((s,i) => s + Number(i.precio_venta), 0);
+        // pItm es el total ASIGNADO a todos los ítems (incluyendo entregados para que el saldo general sea real)
+        const pItmTotal = cliItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
+        
+        // El verdadero abono general es lo que se recibió en caja menos lo que ya se asignó a ítems
+        const saldoGralSinAsignar = Math.max(0, cliPagos - pItmTotal);
+        // La deuda real es lo que suman los precios de lo activo menos (lo asignado activamente + lo que sobra en cuenta)
+        const pItmActivo = activeItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
+        const deuda = Math.max(0, vTot - (pItmActivo + saldoGralSinAsignar));
+        
+        // Ayuda visual para el mensaje: ¿cuánto del saldo de los ítems está cubierto por el saldo general?
+        const sumaSaldosItems = activeItems.reduce((s,i) => s + Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado)), 0);
+        const cubiertoPorGral = Math.min(saldoGralSinAsignar, sumaSaldosItems);
+
+        // Saludo inteligente
+        const hasRealName = client.nombre && !client.nombre.startsWith('Cliente ');
+        const saludo = hasRealName ? `Hola *${client.nombre}*,` : 'Hola,';
+        const TIENDA = 'MANGAS COMICS BOLIVIA STORE';
+        const SEP = '─────────────────';
+
+        // Fecha estimada de llegada para ítems en tránsito
+        const getEstDate = (it) => {
+            if (!it.semana_id) return null;
+            const week = semanas.find(s => s.id === it.semana_id);
+            if (!week) return null;
+            const d = week.fecha_estimada_llegada
+                ? new Date(week.fecha_estimada_llegada)
+                : new Date(new Date(week.created_at).getTime() + 22 * 24 * 60 * 60 * 1000);
+            return d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
+        };
+
+        // Estado legible
+        const getStatLabel = (it) => {
+            const e = it.estado;
+            if (e === 'EN TIENDA') return '✅ En tienda';
+            if (e.startsWith('PEDIDO') || e.startsWith('CONFIRMADO') || e === 'ADJUDICADO') return '⏳ En tránsito';
+            return e;
+        };
+
+        let msg = `${saludo} te escribimos de *${TIENDA}*\n\n`;
 
         if (type === 'entrega') {
-            const listos = cliItems.filter(i => i.estado === 'EN TIENDA');
-            if(listos.length === 0) return alert("No hay ítems 'EN TIENDA' para este cliente.");
-            msg += `¡Buenas noticias! Los siguientes ítems ya han llegado a tienda y están listos para recojo/envío:\n`;
-            listos.forEach(i => msg += `📦 ${i.titulo}\n`);
-            if (deuda > 0) msg += `\n*Saldo general adeudado:* BS ${formatS(deuda)}\n`;
-        } else if (type === 'pago') {
-            msg += `Queremos confirmarte que hemos registrado exitosamente tu pago/abono.\n\n`;
-            msg += `*Monto general en tu cuenta:* BS ${formatS(cliPagos)}\n*Monto abonado a ítems:* BS ${formatS(pItm)}\n*Ventas totales:* BS ${formatS(vTot)}\n---\n*Saldo actual adeudado:* BS ${formatS(deuda)}\n`;
-        } else {
-            msg += `Te compartimos el estado general de tus pedidos:\n\n`;
-            cliItems.forEach(i => {
-                let stat = i.estado;
-                if(stat.startsWith('PEDIDO') || stat.startsWith('CONFIRMADO') || stat === 'ADJUDICADO') stat = '⏳ En tránsito';
-                if(stat === 'EN TIENDA') stat = '✅ Listo para entrega';
-                msg += `🔸 ${i.titulo} (${stat}) - Precio: BS ${formatS(i.precio_venta)}\n`;
+            const listos = sortByTitle(cliItems.filter(i => i.estado === 'EN TIENDA'));
+            if (listos.length === 0) return alert("No hay ítems 'EN TIENDA' para este cliente.");
+            msg += `¡Buenas noticias! 🎉 Todos tus pedidos han llegado a tienda:\n\n`;
+            listos.forEach(i => {
+                const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
+                msg += `📦 *${i.titulo}*\n`;
+                msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)} ${saldoItem > 0 ? '⚠️' : '✅'}\n\n`;
             });
-            msg += `\n*Saldo total adeudado:* BS ${formatS(deuda)}\n`;
-            msg += `¡Gracias por tu preferencia!`;
+            msg += SEP + '\n';
+            if (saldoGralSinAsignar > 0) msg += `💳 Pagos generales en cuenta: +BS ${formatS(saldoGralSinAsignar)}\n`;
+            if (deuda > 0) {
+                msg += `*Saldo total pendiente: BS ${formatS(deuda)}*`;
+            } else if (cubiertoPorGral > 0) {
+                msg += `*¡Cuenta al día!* ✅\n_(Los pagos de tu cuenta cubren el saldo restante)_`;
+            } else {
+                msg += `*¡Cuenta al día!* ✅`;
+            }
+            msg += `\n\n¡Te esperamos para pasar a recoger o coordinar el envío! 😊`;
+
+        } else if (type === 'pago') {
+            msg += `¡Confirmamos el registro de tu pago/abono! 💳\n\n`;
+            msg += `📋 *Detalle de tus pedidos:*\n\n`;
+            activeItems.forEach(i => {
+                const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
+                const stat = getStatLabel(i);
+                const estDate = i.estado !== 'EN TIENDA' ? getEstDate(i) : null;
+                msg += `🔸 *${i.titulo}*\n`;
+                msg += `   Estado: ${stat}${estDate ? ` (Est. ~${estDate})` : ''}\n`;
+                msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
+            });
+            msg += SEP + '\n';
+            if (saldoGralSinAsignar > 0) msg += `💰 Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
+            msg += `📊 Total ventas activas: BS ${formatS(vTot)}\n`;
+            if (deuda > 0) {
+                msg += `*Saldo actual: BS ${formatS(deuda)}*`;
+            } else if (cubiertoPorGral > 0) {
+                msg += `*¡Cuenta al día!* ✅\n_(Los pagos de tu cuenta cubren el saldo restante)_`;
+            } else {
+                msg += `*¡Cuenta al día!* ✅`;
+            }
+            msg += `\n\n¡Gracias por tu preferencia! 😊`;
+
+        } else {
+            msg += `📋 Estado general de tus pedidos:\n\n`;
+            activeItems.forEach(i => {
+                const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
+                const stat = getStatLabel(i);
+                const estDate = i.estado !== 'EN TIENDA' ? getEstDate(i) : null;
+                const emoji = i.estado === 'EN TIENDA' ? '✅' : '⏳';
+                msg += `${emoji} *${i.titulo}*${estDate ? ` — Est. ~${estDate}` : ''}\n`;
+                msg += `   ${stat} | Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
+            });
+            msg += SEP + '\n';
+            if (saldoGralSinAsignar > 0) msg += `💰 Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
+            if (deuda > 0) {
+                msg += `*Saldo total adeudado: BS ${formatS(deuda)}*`;
+            } else if (cubiertoPorGral > 0) {
+                msg += `*¡Cuenta al día!* ✅\n_(Los pagos de tu cuenta (BS ${formatS(saldoGralSinAsignar)}) cubren el saldo pendiente por ítems)_`;
+            } else {
+                msg += `*¡Cuenta al día!* ✅`;
+            }
+            msg += `\n\n¡Gracias por tu preferencia! 😊`;
         }
 
         const url = `https://wa.me/591${client.celular.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`;
@@ -1447,6 +1657,20 @@ export default function ClientOrdersView() {
                                 </div>
                             )}
 
+                            {/* Toggle mostrar entregados — solo en vista clientes */}
+                            {view === 'clientes' && (() => {
+                                const hiddenCount = groupedData.filter(g => g.allDelivered).length;
+                                return hiddenCount > 0 ? (
+                                    <button
+                                        onClick={() => setShowEntregados(prev => !prev)}
+                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider shrink-0 ${showEntregados ? 'bg-muted/20 border-muted/40 text-muted' : 'bg-transparent border-dashed border-muted/30 text-muted/60 hover:border-muted/50 hover:text-muted'}`}
+                                    >
+                                        {showEntregados ? '🙈 Ocultar' : '👁'} Entregados
+                                        <span className="bg-black/10 px-2 py-0.5 rounded-full text-[9px]">{hiddenCount}</span>
+                                    </button>
+                                ) : null;
+                            })()}
+
                             <button onClick={() => setShowAddModal(true)} className="bg-primary text-background font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 hover:scale-105 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
                                 <Plus size={18} /> Nuevo Pedido
                             </button>
@@ -1461,7 +1685,9 @@ export default function ClientOrdersView() {
             ) : view === 'clientes' ? (
                 <div className="flex flex-col gap-4">
                     {groupedData.length === 0 && <div className="text-center py-10 text-muted">No se encontraron clientes o pedidos.</div>}
-                    {groupedData.map(group => {
+                    {groupedData
+                        .filter(g => showEntregados || !g.allDelivered)
+                        .map(group => {
                         const isExp = expandedCliente.has(group.client.id);
                         const isCompact = compactClients.has(group.client.id);
                         const toggleCompact = () => setCompactClients(prev => { const n = new Set(prev); isCompact ? n.delete(group.client.id) : n.add(group.client.id); return n; });
@@ -1476,7 +1702,12 @@ export default function ClientOrdersView() {
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
                         return (
-                            <div key={group.client.id} className="bg-surface border border-border rounded-xl shadow-sm overflow-visible relative">
+                            <div key={group.client.id} className={`bg-surface border rounded-xl shadow-sm overflow-visible relative transition-all ${
+                                group.allDelivered ? 'border-border/40 opacity-60' :
+                                group.allInStore ? 'border-success/40 shadow-success/10' :
+                                group.completitud > 0 ? 'border-primary/20' :
+                                'border-border'
+                            }`}>
                                 <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 cursor-pointer hover:bg-white/5 transition-colors" onClick={()=> {
                                     const next = new Set(expandedCliente);
                                     if(isExp) next.delete(group.client.id); else next.add(group.client.id);
@@ -1487,8 +1718,31 @@ export default function ClientOrdersView() {
                                             {group.client.nombre[0].toUpperCase()}
                                         </div>
                                         <div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <h3 className="font-bold text-text mb-0.5">{group.client.nombre}</h3>
+                                                {/* Badge de completitud del pedido */}
+                                                {group.allDelivered ? (
+                                                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full border bg-border/30 border-border text-muted uppercase tracking-wide">✔ Entregado</span>
+                                                ) : group.allInStore ? (
+                                                    <>
+                                                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full border bg-success/15 border-success/40 text-success uppercase tracking-wide animate-pulse">✅ Listo p/ entrega</span>
+                                                        {/* Badge "listo hace X días" */}
+                                                        {group.readySince && (() => {
+                                                            const days = Math.floor((Date.now() - group.readySince) / (1000 * 60 * 60 * 24));
+                                                            const label = days === 0 ? 'Listo hoy' : days === 1 ? 'Listo hace 1 día' : `Listo hace ${days} días`;
+                                                            const cls = days === 0
+                                                                ? 'bg-success/10 border-success/20 text-success'
+                                                                : days <= 3
+                                                                    ? 'bg-orange-400/10 border-orange-400/20 text-orange-400'
+                                                                    : 'bg-error/10 border-error/30 text-error animate-pulse';
+                                                            return <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wide ${cls}`}>🕐 {label}</span>;
+                                                        })()}
+                                                    </>
+                                                ) : group.completitud > 0 ? (
+                                                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full border bg-yellow-500/10 border-yellow-500/30 text-yellow-500 uppercase tracking-wide">📦 {group.inStore.length}/{group.nonDelivered.length} en tienda</span>
+                                                ) : (
+                                                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full border bg-muted/10 border-muted/20 text-muted uppercase tracking-wide">⏳ Esperando stock</span>
+                                                )}
                                                 <button
                                                     onClick={e => { e.stopPropagation(); setEditCliente({ id: group.client.id, nombre: group.client.nombre, celular: group.client.celular || '', ci: group.client.ci || '', ciudad: group.client.ciudad || '', sucursal: group.client.sucursal || '', direccion: group.client.direccion || '', notas_cliente: group.client.notas_cliente || '' }); }}
                                                     className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[11px] font-semibold"
@@ -1504,7 +1758,23 @@ export default function ClientOrdersView() {
                                                     <Trash2 size={11}/> Eliminar
                                                 </button>
                                             </div>
-                                            <div className="text-xs text-muted font-mono">{group.client.celular} • {group.items.length} ítems</div>
+                                            {/* Mini barra de progreso */}
+                                            {!group.allDelivered && group.items.length > 0 && (
+                                                <div className="mt-1 flex items-center gap-2">
+                                                    <div className="h-1 w-24 bg-border rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full transition-all duration-500 ${
+                                                                group.allInStore ? 'bg-success' :
+                                                                group.completitud > 0 ? 'bg-yellow-400' :
+                                                                'bg-muted/30'
+                                                            }`}
+                                                            style={{ width: `${Math.round(group.completitud * 100)}%` }}
+                                                        />
+                                                    </div>
+                                                    <span className="text-[9px] text-muted font-mono">{Math.round(group.completitud * 100)}%</span>
+                                                </div>
+                                            )}
+                                            <div className="text-xs text-muted font-mono mt-0.5">{group.client.celular} • {group.items.length} ítems</div>
                                         </div>
                                     </div>
 
@@ -1535,14 +1805,22 @@ export default function ClientOrdersView() {
                                                 </button>
                                                 
                                                 <div className="relative">
-                                                    <button onClick={()=>setShowWhatsAppMenu(showWhatsAppMenu===group.client.id ? null : group.client.id)} className="bg-[#25D366] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:brightness-110 shadow-md">
+                                                    <button onClick={() => setShowWhatsAppMenu(showWhatsAppMenu===group.client.id ? null : group.client.id)} className="bg-[#25D366] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:brightness-110 shadow-md">
                                                         <MessageCircle size={14} /> WhatsApp
                                                     </button>
                                                     {showWhatsAppMenu === group.client.id && (
-                                                        <div className="absolute top-full right-0 mt-2 w-48 bg-surface border border-border rounded-lg shadow-xl py-1 z-50">
-                                                            <button onClick={()=>sendWhatsApp(group.client, 'entrega')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📦 Aviso de Entrega</button>
-                                                            <button onClick={()=>sendWhatsApp(group.client, 'pago')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">💳 Confirmar Pago</button>
-                                                            <button onClick={()=>sendWhatsApp(group.client, 'estado')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📑 Estado General</button>
+                                                        <div className="absolute top-full right-0 mt-2 w-52 bg-surface border border-border rounded-lg shadow-xl py-1 z-50">
+                                                            {/* Aviso de Entrega: solo disponible si TODOS los ítems no-entregados están EN TIENDA */}
+                                                            {group.allInStore ? (
+                                                                <button onClick={() => sendWhatsApp(group.client, 'entrega')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📦 Aviso de Entrega</button>
+                                                            ) : (
+                                                                <div className="px-3 py-2 text-xs text-muted/50 cursor-not-allowed flex items-center gap-1" title={`Faltan ${group.nonDelivered.length - group.inStore.length} ítem(s) por llegar a tienda`}>
+                                                                    <span>📦 Aviso de Entrega</span>
+                                                                    <span className="text-[9px] bg-muted/10 px-1 rounded ml-auto">{group.inStore.length}/{group.nonDelivered.length} ✓</span>
+                                                                </div>
+                                                            )}
+                                                            <button onClick={() => sendWhatsApp(group.client, 'pago')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">💳 Confirmar Pago</button>
+                                                            <button onClick={() => sendWhatsApp(group.client, 'estado')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📑 Estado General</button>
                                                         </div>
                                                     )}
                                                 </div>
@@ -3028,6 +3306,12 @@ export default function ClientOrdersView() {
                                                             <span className="text-success font-black text-xs font-mono whitespace-nowrap">+BS {formatS(p.monto)}</span>
                                                             {isAdmin && (
                                                                 <>
+                                                                    {p.concepto?.startsWith('Asignado a: ') && (
+                                                                        <button onClick={() => handleRevertirDistribucion(p)} title="Quitar distribución (Devolver a saldo general)"
+                                                                            className="p-1 rounded hover:bg-orange-500/10 text-orange-500 transition-all">
+                                                                            <RotateCcw size={11} />
+                                                                        </button>
+                                                                    )}
                                                                     <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })} title="Editar abono"
                                                                         className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
                                                                         <Edit2 size={11} />
