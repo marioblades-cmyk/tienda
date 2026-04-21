@@ -1998,8 +1998,9 @@ export default function ClientOrdersView() {
                                                                             <span className={isCompact ? 'text-xs' : ''}>{it.titulo}</span>
                                                                         </div>
                                                                         {it.estado === 'ENTREGADO' && it.nota?.includes('✔ Entregado por') && (
-                                                                            <div className="flex items-center gap-1 text-[9px] font-black text-primary uppercase ml-4 mt-0.5">
-                                                                                <span>🤝</span> {it.nota.split('✔ ')[1]?.split(']')[0]}
+                                                                            <div className="flex flex-wrap items-center gap-1 text-[10px] font-black text-primary bg-primary/5 px-2 py-0.5 rounded-md mt-1 w-fit border border-primary/10">
+                                                                                <span>🤝</span> 
+                                                                                <span className="uppercase tracking-tighter">{it.nota.split('✔ ')[1]?.split(']')[0]}</span>
                                                                             </div>
                                                                         )}
                                                                     </div>
