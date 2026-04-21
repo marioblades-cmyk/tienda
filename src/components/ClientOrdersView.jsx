@@ -1415,6 +1415,10 @@ export default function ClientOrdersView() {
             const allMyItems = items.filter(i => i.cliente_id === c.id);
             const othersRaw = otherSellersItems.filter(i => i.cliente_id === c.id);
 
+            const clientMatchesSearch = searchLower && (
+                c.nombre.toLowerCase().includes(searchLower) || (c.celular || '').includes(searchLower)
+            );
+
             // Filtro dinámico de ítems (Aplica búsqueda por título y estado)
             const filterItemLogic = (i) => {
                 // 1. Si hay búsqueda por título, filtrar los que NO coincidan
