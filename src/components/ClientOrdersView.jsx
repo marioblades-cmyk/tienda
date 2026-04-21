@@ -861,7 +861,13 @@ export default function ClientOrdersView() {
                         const { data: activeTurnoArr } = await supabase
                             .from('turnos_caja').select('id').eq('estado', 'ABIERTO')
                             .order('abierto_at', { ascending: false }).limit(1);
-                        turnoId = activeTurnoArr?.[0]?.id || null;
+                        
+                        if (!activeTurnoArr || activeTurnoArr.length === 0) {
+                            alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
+                            setLoading(false);
+                            return;
+                        }
+                        turnoId = activeTurnoArr[0].id;
                     }
                     const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
                         turno_id: turnoId,
@@ -924,6 +930,12 @@ export default function ClientOrdersView() {
                     .eq('estado', 'ABIERTO')
                     .order('abierto_at', { ascending: false })
                     .limit(1);
+                
+                if (!sinContabilidad && (!activeTurnoArr || activeTurnoArr.length === 0)) {
+                    alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
+                    setLoading(false);
+                    return;
+                }
                 turnoId = activeTurnoArr?.[0]?.id || null;
             }
 
