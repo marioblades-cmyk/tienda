@@ -178,7 +178,7 @@ export default function ClientOrdersView() {
     useEffect(() => {
         fetchData();
         fetchCatalog();
-    }, []);
+    }, [filterVendedor]);
 
     const fetchCatalog = async () => {
         try {
@@ -1313,27 +1313,27 @@ export default function ClientOrdersView() {
                 if (!matchCliente && !matchTitulo) return false;
             }
 
-            // Filtro por vendedor — no-admin siempre ve solo los suyos, admin puede elegir
-            if (!isAdmin && it.vendedor_id !== user?.id) return false;
-            if (isAdmin) {
-                const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
-                if (activeVId && it.vendedor_id !== activeVId) return false;
-            }
+            // Filtro por vendedor
+            const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
+            if (activeVId && it.vendedor_id !== activeVId) return false;
 
             return true;
         });
     }, [items, filterEstado, filterSemana, search, isAdmin, user, filterVendedor]);
 
     const totalPedidos = items.filter(i => {
-        if (!isAdmin && i.vendedor_id !== user?.id) return false;
+        const activeVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
+        if (activeVId && i.vendedor_id !== activeVId) return false;
         return i.estado !== 'ENTREGADO';
     }).length;
 
-    const ventasTotales = items.filter(i => isAdmin || i.vendedor_id === user?.id)
+    const activeKPIVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
+
+    const ventasTotales = items.filter(i => !activeKPIVId || i.vendedor_id === activeKPIVId)
         .reduce((acc, i) => acc + (Number(i.precio_venta)||0), 0);
-    const pagadoItems = items.filter(i => isAdmin || i.vendedor_id === user?.id)
+    const pagadoItems = items.filter(i => !activeKPIVId || i.vendedor_id === activeKPIVId)
         .reduce((acc, i) => acc + (Number(i.monto_pagado)||0), 0);
-    const pagadoGral = pagos.filter(p => isAdmin || p.vendedor_id === user?.id)
+    const pagadoGral = pagos.filter(p => !activeKPIVId || p.vendedor_id === activeKPIVId)
         .reduce((acc, p) => acc + (Number(p.monto)||0), 0);
     const totalCobrado = pagadoItems + pagadoGral;
     const saldoPendiente = ventasTotales - totalCobrado;
