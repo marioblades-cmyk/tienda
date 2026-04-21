@@ -1040,6 +1040,187 @@ function CategoriasModal({ onClose, onRefresh }) {
     );
 }
 
+// ─────────────────────────────────────────────
+// TAB: INGRESOS (Manuales / Otros)
+// ─────────────────────────────────────────────
+function IngresosTab() {
+    const [categoria, setCategoria] = useState('Otro ingreso');
+    const [monto, setMonto] = useState('');
+    const [metodo, setMetodo] = useState('Efectivo');
+    const [concepto, setConcepto] = useState('');
+    const [fecha, setFecha] = useState(today());
+    const [saving, setSaving] = useState(false);
+    const [recientes, setRecientes] = useState([]);
+    const [toast, setToast] = useState(null);
+
+    const showMsg = (msg, type = 'success') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+    };
+
+    useEffect(() => {
+        fetchRecientes();
+    }, []);
+
+    const fetchRecientes = async () => {
+        const { data } = await supabase
+            .from('caja_movimientos')
+            .select('*')
+            .eq('tipo', 'INGRESO')
+            .in('categoria', ['Otro ingreso', 'Transferencia recibida'])
+            .order('created_at', { ascending: false })
+            .limit(10);
+        setRecientes(data || []);
+    };
+
+    const handleRegistrar = async () => {
+        const amt = parseFloat(monto);
+        if (!amt || amt <= 0) return showMsg('Ingresa un monto válido.', 'error');
+        setSaving(true);
+        try {
+            const { error } = await supabase.from('caja_movimientos').insert([{
+                turno_id: null,
+                tipo: 'INGRESO',
+                categoria,
+                concepto: concepto || categoria,
+                monto: amt,
+                metodo_pago: metodo,
+                origen: 'Tienda',
+            }]);
+            if (error) throw error;
+            showMsg('Ingreso registrado correctamente.');
+            setMonto('');
+            setConcepto('');
+            setFecha(today());
+            fetchRecientes();
+        } catch (e) {
+            showMsg('Error: ' + e.message, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = async (mov) => {
+        if (!window.confirm(`¿Eliminar este ingreso?\n${mov.concepto || mov.categoria} — BS ${formatS(mov.monto)}`)) return;
+        try {
+            const { error } = await supabase.from('caja_movimientos').delete().eq('id', mov.id);
+            if (error) throw error;
+            showMsg('Ingreso eliminado.');
+            fetchRecientes();
+        } catch (e) {
+            showMsg('Error: ' + e.message, 'error');
+        }
+    };
+
+    const incomeCategories = [
+        { nombre: 'Otro ingreso', icono: '💰' },
+        { nombre: 'Transferencia recibida', icono: '🏦' }
+    ];
+
+    return (
+        <div className="flex flex-col gap-6">
+            <AnimatePresence>
+                {toast && (
+                    <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                        className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl font-bold text-sm text-white ${toast.type === 'error' ? 'bg-error' : 'bg-success'}`}>
+                        {toast.msg}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Formulario */}
+                <div className="bg-surface border border-border rounded-xl p-5 shadow-sm space-y-4">
+                    <h3 className="text-sm font-black text-text flex items-center gap-2">
+                        <TrendingUp size={16} className="text-success" /> Registrar Otros Ingresos
+                    </h3>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-muted tracking-widest">Categoría</label>
+                        <div className="flex flex-wrap gap-2">
+                            {incomeCategories.map(c => (
+                                <button key={c.nombre} onClick={() => setCategoria(c.nombre)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black border transition-all ${categoria === c.nombre ? 'bg-success/10 border-success/40 text-success ring-2 ring-offset-1 ring-success/20' : 'bg-background border-border text-muted hover:border-success/40'}`}>
+                                    <span>{c.icono}</span> {c.nombre}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase text-muted tracking-widest">Monto (BS)</label>
+                            <input type="number" value={monto} onChange={e => setMonto(e.target.value)}
+                                placeholder="0.00" autoFocus
+                                className="w-full bg-background border-2 border-border focus:border-success px-3 py-2.5 rounded-xl text-lg text-center font-black font-mono outline-none shadow-inner" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase text-muted tracking-widest">Fecha</label>
+                            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+                                className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-sm font-bold outline-none focus:border-primary" />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-muted tracking-widest">Recibido en</label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {METODOS.map(m => (
+                                <button key={m} onClick={() => setMetodo(m)}
+                                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition-all ${metodo === m ? 'bg-success border-success text-white shadow' : 'bg-background border-border text-muted hover:border-success/40'}`}>
+                                    <span>{METHOD_ICON[m]}</span>
+                                    <span>{m === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-muted tracking-widest">Detalle (opcional)</label>
+                        <input type="text" value={concepto} onChange={e => setConcepto(e.target.value)}
+                            placeholder={`Ej: ${categoria} — Concepto adicional`}
+                            className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary" />
+                    </div>
+
+                    <button onClick={handleRegistrar} disabled={saving || !monto}
+                        className={`w-full py-3 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all ${monto ? 'bg-success text-white hover:brightness-105 shadow-lg' : 'bg-muted/20 text-muted cursor-not-allowed'}`}>
+                        <Plus size={16} /> {saving ? 'Registrando...' : `Registrar Ingreso · BS ${parseFloat(monto || 0).toLocaleString('es-BO', { minimumFractionDigits: 2 })}`}
+                    </button>
+                </div>
+
+                {/* Recientes */}
+                <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden min-h-[400px]">
+                    <div className="p-4 border-b border-border bg-background">
+                        <span className="text-[11px] font-black uppercase text-muted tracking-widest">Ingresos Recientes (Manuales)</span>
+                    </div>
+                    <div className="divide-y divide-border/30">
+                        {recientes.length === 0
+                            ? <div className="py-10 text-center text-muted text-xs uppercase font-black tracking-widest">Sin ingresos registrados</div>
+                            : recientes.map(m => (
+                                <div key={m.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50/50 transition-colors group">
+                                    <span className="text-xl shrink-0">{m.categoria === 'Otro ingreso' ? '💰' : '🏦'}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-xs font-bold text-text truncate">{m.concepto || m.categoria}</div>
+                                        <div className="text-[10px] text-muted flex items-center gap-2">
+                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-black ${METHOD_COLOR[m.metodo_pago || 'Efectivo'] || METHOD_COLOR['Otros']}`}>
+                                                {METHOD_ICON[m.metodo_pago || 'Efectivo']} {m.metodo_pago === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.metodo_pago}
+                                            </span>
+                                            <span>{new Date(m.created_at).toLocaleDateString('es-BO')}</span>
+                                        </div>
+                                    </div>
+                                    <span className="text-success font-black font-mono text-sm shrink-0">+ BS {formatS(m.monto)}</span>
+                                    <button onClick={() => handleDelete(m)} className="p-1.5 rounded-lg hover:bg-error/10 text-muted hover:text-error transition-colors opacity-0 group-hover:opacity-100">
+                                        <Trash2 size={13} />
+                                    </button>
+                                </div>
+                            ))
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function EgresosTab() {
     const [categorias, setCategorias] = useState([]);
     const [categoria, setCategoria] = useState('');
@@ -1388,10 +1569,13 @@ export default function ContabilidadView() {
     return (
         <div className="flex flex-col gap-6 max-w-7xl mx-auto animate-fade-in">
             {/* Tabs */}
-            <div className="flex bg-background rounded-xl p-1 border border-border w-fit shadow-sm">
                 <button onClick={() => setTab('movimientos')}
                     className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${tab === 'movimientos' ? 'bg-surface text-primary shadow-sm ring-1 ring-border/50' : 'text-muted hover:text-text'}`}>
                     <ListFilter size={14} /> Movimientos
+                </button>
+                <button onClick={() => setTab('ingresos')}
+                    className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${tab === 'ingresos' ? 'bg-surface text-success shadow-sm ring-1 ring-border/50' : 'text-muted hover:text-text'}`}>
+                    <TrendingUp size={14} /> Ingresos
                 </button>
                 <button onClick={() => setTab('egresos')}
                     className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${tab === 'egresos' ? 'bg-surface text-error shadow-sm ring-1 ring-border/50' : 'text-muted hover:text-text'}`}>
@@ -1406,6 +1590,7 @@ export default function ContabilidadView() {
             <AnimatePresence mode="wait">
                 <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
                     {tab === 'movimientos' ? <MovimientosTab /> :
+                     tab === 'ingresos' ? <IngresosTab /> :
                      tab === 'egresos' ? <EgresosTab /> :
                      <ConciliacionTab />}
                 </motion.div>

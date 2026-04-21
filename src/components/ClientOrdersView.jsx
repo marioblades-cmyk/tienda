@@ -346,6 +346,12 @@ export default function ClientOrdersView() {
 
     const formatS = (num) => Number(num || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    const getAuditNote = () => {
+        const myName = vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio';
+        const now = new Date().toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        return `[✔ Entregado por ${myName} el ${now}]`;
+    };
+
     const renderStatus = (it, compact = false) => {
         const week = semanas.find(s => s.id === it.semana_id);
         const isAdjudicado = it.estado === 'ADJUDICADO';
@@ -1110,18 +1116,25 @@ export default function ClientOrdersView() {
         if (!editItem) return;
         try {
             setLoading(true);
+            const itOriginal = items.find(i => i.id === editItem.id);
             // Calcular estado final: si estado base es PEDIDO o CONFIRMADO, concatenar nombre de semana
             let estadoFinal = editItem.estado;
             const semNombre = semanas.find(s => s.id === editItem.semana_id)?.nombre || '';
             if (editItem.estado === 'PEDIDO' && editItem.semana_id && semNombre) estadoFinal = `PEDIDO ${semNombre}`;
             else if (editItem.estado === 'CONFIRMADO' && editItem.semana_id && semNombre) estadoFinal = `CONFIRMADO ${semNombre}`;
 
+            let finalNota = editItem.nota || null;
+            if (estadoFinal === 'ENTREGADO' && itOriginal?.vendedor_id !== user?.id) {
+                const auditNote = getAuditNote();
+                finalNota = finalNota ? `${finalNota} ${auditNote}` : auditNote;
+            }
+
             await supabase.from('cliente_items').update({
                 titulo: editItem.titulo,
                 precio_venta: Number(editItem.precio_venta) || 0,
                 estado: estadoFinal,
                 semana_id: editItem.semana_id || null,
-                nota: editItem.nota || null,
+                nota: finalNota,
             }).eq('id', editItem.id);
             setEditItem(null);
             await fetchData();
@@ -1253,7 +1266,23 @@ export default function ClientOrdersView() {
         const estado = bulkEstadoTarget === 'CONFIRMADO' ? 'ADJUDICADO' : bulkEstadoTarget;
         try {
             setLoading(true);
-            await supabase.from('cliente_items').update({ estado }).in('id', [...itemIds]);
+            
+            if (estado === 'ENTREGADO') {
+                // Si marcamos como entregado, debemos añadir auditoría a los que no son nuestros
+                const auditNote = getAuditNote();
+                const itemsToUpdate = items.filter(i => itemIds.has(i.id));
+                
+                for (const it of itemsToUpdate) {
+                    let finalNota = it.nota;
+                    if (it.vendedor_id !== user?.id) {
+                        finalNota = it.nota ? `${it.nota} ${auditNote}` : auditNote;
+                    }
+                    await supabase.from('cliente_items').update({ estado, nota: finalNota }).eq('id', it.id);
+                }
+            } else {
+                await supabase.from('cliente_items').update({ estado }).in('id', [...itemIds]);
+            }
+            
             setSelectedItems(new Set());
             await fetchData();
         } catch (e) {
@@ -1264,9 +1293,7 @@ export default function ClientOrdersView() {
     };
 
     const handleEntregarAjeno = async (oit) => {
-        const myName = vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio';
-        const now = new Date().toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-        const auditNote = `[✔ Entregado por ${myName} el ${now}]`;
+        const auditNote = getAuditNote();
         
         if (!confirm(`¿Confirmas que estás entregando este pedido de otro socio?\nSe registrará: "${auditNote}"`)) return;
 
@@ -2016,7 +2043,13 @@ export default function ClientOrdersView() {
                                                                             defaultValue={it.estado}
                                                                             onKeyDown={async(e)=>{
                                                                                 if(e.key === 'Enter') {
-                                                                                    await supabase.from('cliente_items').update({estado: e.target.value.toUpperCase()}).eq('id', it.id);
+                                                                                    const nextEstado = e.target.value.toUpperCase();
+                                                                                    let finalNota = it.nota;
+                                                                                    if (nextEstado === 'ENTREGADO' && it.vendedor_id !== user?.id) {
+                                                                                        const auditNote = getAuditNote();
+                                                                                        finalNota = it.nota ? `${it.nota} ${auditNote}` : auditNote;
+                                                                                    }
+                                                                                    await supabase.from('cliente_items').update({estado: nextEstado, nota: finalNota}).eq('id', it.id);
                                                                                     setEditingState(null);
                                                                                     fetchData();
                                                                                 } else if (e.key === 'Escape') setEditingState(null);
@@ -2031,7 +2064,7 @@ export default function ClientOrdersView() {
                                                                 {!isCompact && <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>}
                                                                 <td className={`${isCompact ? 'py-1 px-1' : 'py-2 px-2'} text-right`}>
                                                                     <div className="flex items-center justify-end gap-0.5">
-                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '' })}
+                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
                                                                         className="text-muted hover:text-primary p-1 transition-colors opacity-0 group-hover:opacity-100">
                                                                         <Edit2 size={isCompact ? 12 : 14}/>
                                                                     </button>
