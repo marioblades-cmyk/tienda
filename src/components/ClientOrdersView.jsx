@@ -1413,16 +1413,32 @@ export default function ClientOrdersView() {
 
         visibleClients.forEach(c => {
             const allMyItems = items.filter(i => i.cliente_id === c.id);
-            const others = otherSellersItems.filter(i => i.cliente_id === c.id);
+            const othersRaw = otherSellersItems.filter(i => i.cliente_id === c.id);
 
-            // When searching by title, show only matching items
-            // (but if client name/celular matched, show all their items)
-            const clientMatchesSearch = searchLower && (
-                c.nombre.toLowerCase().includes(searchLower) || c.celular.includes(searchLower)
-            );
-            const myItems = (searchLower && !clientMatchesSearch)
-                ? allMyItems.filter(i => (i.titulo || '').toLowerCase().includes(searchLower))
-                : allMyItems;
+            // Filtro dinámico de ítems (Aplica búsqueda por título y estado)
+            const filterItemLogic = (i) => {
+                // 1. Si hay búsqueda por título, filtrar los que NO coincidan
+                if (searchLower && !clientMatchesSearch) {
+                    if (!(i.titulo || '').toLowerCase().includes(searchLower)) return false;
+                }
+                
+                // 2. Si el filtro de estado no es 'todos', aplicar filtro de estado
+                if (filterEstado !== 'todos') {
+                    if (filterEstado === 'PEDIDO') {
+                        // Pendientes = CONFIRMADO + PEDIDO + EN TIENDA. Solo ocultar ENTREGADO.
+                        if (i.estado === 'ENTREGADO') return false;
+                    } else {
+                        if (!i.estado.startsWith(filterEstado)) return false;
+                    }
+                } else if (!showEntregados) {
+                    // Si estamos en 'todos' pero el toggle 'Ocultar Entregados' está activo
+                    if (i.estado === 'ENTREGADO') return false;
+                }
+                return true;
+            };
+
+            const myItems = allMyItems.filter(filterItemLogic);
+            const others = othersRaw.filter(filterItemLogic);
 
             if (!isAdmin && myItems.length === 0 && !search) return;
 
@@ -1661,111 +1677,127 @@ export default function ClientOrdersView() {
                 <div className="text-[10px] font-black text-muted uppercase tracking-widest hidden md:block">Gestión de Cartera de Clientes</div>
             </div>
                 
-            {/* BARRA DE FILTROS MAESTROS */}
-            <div className="bg-surface border border-primary/20 p-4 rounded-2xl shadow-sm flex flex-col xl:flex-row gap-4 items-center">
-                <div className="relative flex-1 w-full xl:max-w-md group">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted group-focus-within:text-primary transition-colors" size={18} />
-                    <input 
-                        type="text" 
-                        placeholder="Buscar cliente, celular o título..." 
-                        className="w-full bg-background border border-border/40 pl-12 pr-4 py-3 rounded-xl text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all shadow-inner"
-                        value={search} onChange={e=>setSearch(e.target.value)}
-                    />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 justify-center">
-                    {[
-                        { id: 'todos', label: 'TODOS', icon: Layers, color: 'text-text bg-muted/10 border-muted/20' },
-                        { id: 'PEDIDO', label: 'PENDIENTES', icon: Calendar, color: 'text-primary bg-primary/10 border-primary/20' },
-                        { id: 'EN TIENDA', label: 'EN TIENDA', icon: Box, color: 'text-success bg-success/10 border-success/20' },
-                        { id: 'ENTREGADO', label: 'ENTREGADOS', icon: CheckSquare, color: 'text-muted bg-muted/5 border-border' },
-                    ].map(btn => {
-                        const count = btn.id === 'todos' ? items.length : items.filter(i => {
-                            if (btn.id === 'PEDIDO') return i.estado.includes('PEDIDO') || i.estado.includes('CONFIRMADO');
-                            return i.estado.startsWith(btn.id);
-                        }).length;
-
-                        return (
+            {/* BARRA DE FILTROS MAESTROS - REDISEÑADA */}
+            <div className="bg-surface border border-border p-6 rounded-2xl shadow-sm flex flex-col gap-6">
+                {/* NIVEL 1: Búsqueda y Botón de Acción Principal */}
+                <div className="flex flex-col md:flex-row gap-4 items-center">
+                    <div className="relative flex-1 w-full group">
+                        <Search className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${search ? 'text-primary' : 'text-muted/60'}`} size={20} />
+                        <input 
+                            type="text" 
+                            placeholder="Buscar cliente, celular o título del tomo..." 
+                            className="w-full bg-background border border-border/60 pl-12 pr-12 py-3.5 rounded-xl text-sm font-medium outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all shadow-inner placeholder:text-muted/40"
+                            value={search} onChange={e=>setSearch(e.target.value)}
+                        />
+                        {search && (
                             <button 
-                                key={btn.id}
-                                onClick={() => setFilterEstado(btn.id)}
-                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider ${
-                                    filterEstado === btn.id ? btn.color + ' ring-4 ring-offset-2 ring-primary/10' : 'bg-transparent border-transparent text-muted hover:bg-muted/10'
-                                }`}
-                            >
-                                <btn.icon size={14} />
-                                {btn.label}
-                                <span className="ml-2 bg-black/10 px-2 py-0.5 rounded-full text-[9px] opacity-70">{count}</span>
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div className="flex items-center gap-3 w-full xl:w-auto">
-                    {selectedItems.size > 0 ? (
-                        <div className="flex items-center gap-3 bg-error/10 border border-error/20 px-4 py-2 rounded-xl animate-in zoom-in-95">
-                            <span className="text-[10px] font-black text-error uppercase whitespace-nowrap">{selectedItems.size} SELECCIONADOS</span>
-                            <button 
-                                onClick={handleBulkDelete}
-                                className="bg-error text-white px-4 py-2 rounded-lg text-xs font-black uppercase hover:bg-error/80 transition-all flex items-center gap-2"
-                            >
-                                <Trash2 size={14} /> Eliminar Lote
-                            </button>
-                            <button 
-                                onClick={() => setSelectedItems(new Set())}
-                                className="text-muted hover:text-text p-2"
+                                onClick={() => setSearch('')}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 hover:bg-muted/10 rounded-full text-muted transition-colors"
+                                title="Limpiar búsqueda"
                             >
                                 <X size={16} />
                             </button>
-                        </div>
-                    ) : (
-                        <>
-                            <div className="relative group flex-1 xl:w-48">
-                                <select
-                                    value={filterSemana}
-                                    onChange={e=>setFilterSemana(e.target.value)}
-                                    className="w-full bg-background border border-border/40 pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer"
-                                >
-                                    <option value="todos">📦 TODAS LAS SEMANAS</option>
-                                    {semanas.map(s => <option key={s.id} value={s.id}>Semana: {s.nombre}</option>)}
-                                </select>
-                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
-                            </div>
+                        )}
+                    </div>
+                    
+                    <button onClick={() => setShowAddModal(true)} className="w-full md:w-auto bg-primary text-background font-black px-8 py-3.5 rounded-xl text-xs flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
+                        <Plus size={18} /> Nuevo Pedido
+                    </button>
+                </div>
 
-                            <div className="relative group xl:w-44">
-                                <select
-                                    value={filterVendedor}
-                                    onChange={e => setFilterVendedor(e.target.value)}
-                                    className={`w-full bg-background border pl-4 pr-10 py-3 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer ${filterVendedor === 'mine' ? 'border-border/40 text-muted' : 'border-primary/30 text-primary'}`}
-                                >
-                                    <option value="mine">👤 MIS PEDIDOS</option>
-                                    <option value="todos">👥 BUSCAR EN TODOS</option>
-                                    {isAdmin && vendedores.filter(v => v.id !== user?.id).map(v => (
-                                        <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
-                                    ))}
-                                </select>
-                                <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterVendedor === 'mine' ? 'text-muted' : 'text-primary'}`} size={16} />
-                            </div>
+                {/* NIVEL 2: Filtros de Estado y Selectores */}
+                <div className="flex flex-col xl:flex-row justify-between items-center gap-4 pt-4 border-t border-border/40">
+                    <div className="flex flex-wrap items-center gap-2 justify-center lg:justify-start">
+                        {[
+                            { id: 'todos', label: 'TODOS', icon: Layers, color: 'text-text bg-muted/10 border-muted/20' },
+                            { id: 'PEDIDO', label: 'PENDIENTES', icon: Calendar, color: 'text-primary bg-primary/10 border-primary/20' },
+                            { id: 'EN TIENDA', label: 'EN TIENDA', icon: Box, color: 'text-success bg-success/10 border-success/20' },
+                            { id: 'ENTREGADO', label: 'ENTREGADOS', icon: CheckSquare, color: 'text-muted bg-muted/5 border-border' },
+                        ].map(btn => {
+                            const count = btn.id === 'todos' ? items.length : items.filter(i => {
+                                if (btn.id === 'PEDIDO') return i.estado.includes('PEDIDO') || i.estado.includes('CONFIRMADO');
+                                return i.estado.startsWith(btn.id);
+                            }).length;
 
-                            {/* Toggle mostrar entregados — solo en vista clientes */}
-                            {view === 'clientes' && (() => {
-                                const hiddenCount = groupedData.filter(g => g.allDelivered).length;
-                                return hiddenCount > 0 ? (
-                                    <button
-                                        onClick={() => setShowEntregados(prev => !prev)}
-                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider shrink-0 ${showEntregados ? 'bg-muted/20 border-muted/40 text-muted' : 'bg-transparent border-dashed border-muted/30 text-muted/60 hover:border-muted/50 hover:text-muted'}`}
+                            const isActive = filterEstado === btn.id;
+                            return (
+                                <button 
+                                    key={btn.id}
+                                    onClick={() => setFilterEstado(btn.id)}
+                                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider ${
+                                        isActive ? btn.color + ' ring-4 ring-offset-2 ring-primary/5 border-current' : 'bg-transparent border-transparent text-muted hover:bg-muted/10'
+                                    }`}
+                                >
+                                    <btn.icon size={14} />
+                                    {btn.label}
+                                    <span className={`ml-2 px-2 py-0.5 rounded-full text-[9px] ${isActive ? 'bg-black/10' : 'bg-muted/10'} opacity-70`}>{count}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-center lg:justify-end">
+                        {selectedItems.size > 0 ? (
+                            <div className="flex items-center gap-3 bg-error/10 border border-error/20 px-4 py-2 rounded-xl animate-in zoom-in-95">
+                                <span className="text-[10px] font-black text-error uppercase whitespace-nowrap">{selectedItems.size} SELECCIONADOS</span>
+                                <button 
+                                    onClick={handleBulkDelete}
+                                    className="bg-error text-white px-4 py-2 rounded-lg text-xs font-black uppercase hover:bg-error/80 transition-all flex items-center gap-2"
+                                >
+                                    <Trash2 size={14} /> Eliminar Lote
+                                </button>
+                                <button 
+                                    onClick={() => setSelectedItems(new Set())}
+                                    className="text-muted hover:text-text p-2"
+                                >
+                                    <X size={16} />
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="relative group w-full sm:w-48">
+                                    <select
+                                        value={filterSemana}
+                                        onChange={e=>setFilterSemana(e.target.value)}
+                                        className="w-full bg-background border border-border/60 pl-4 pr-10 py-2.5 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer"
                                     >
-                                        {showEntregados ? '🙈 Ocultar' : '👁'} Entregados
-                                        <span className="bg-black/10 px-2 py-0.5 rounded-full text-[9px]">{hiddenCount}</span>
-                                    </button>
-                                ) : null;
-                            })()}
+                                        <option value="todos">📦 TODAS LAS SEMANAS</option>
+                                        {semanas.map(s => <option key={s.id} value={s.id}>Semana: {s.nombre}</option>)}
+                                    </select>
+                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none group-focus-within:text-primary transition-colors" size={16} />
+                                </div>
 
-                            <button onClick={() => setShowAddModal(true)} className="bg-primary text-background font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 hover:scale-105 transition-all shadow-xl shadow-primary/20 uppercase tracking-widest shrink-0">
-                                <Plus size={18} /> Nuevo Pedido
-                            </button>
-                        </>
-                    )}
+                                <div className="relative group w-full sm:w-44">
+                                    <select
+                                        value={filterVendedor}
+                                        onChange={e => setFilterVendedor(e.target.value)}
+                                        className={`w-full bg-background border pl-4 pr-10 py-2.5 rounded-xl text-xs font-bold uppercase outline-none focus:border-primary transition-all appearance-none cursor-pointer ${filterVendedor === 'mine' ? 'border-border/60 text-muted' : 'border-primary/30 text-primary'}`}
+                                    >
+                                        <option value="mine">👤 MIS PEDIDOS</option>
+                                        <option value="todos">👥 BUSCAR EN TODOS</option>
+                                        {isAdmin && vendedores.filter(v => v.id !== user?.id).map(v => (
+                                            <option key={v.id} value={v.id}>{v.nombre || v.email}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterVendedor === 'mine' ? 'text-muted' : 'text-primary'}`} size={16} />
+                                </div>
+
+                                {/* Toggle mostrar entregados */}
+                                {view === 'clientes' && (() => {
+                                    const hiddenCount = groupedData.filter(g => g.allDelivered).length;
+                                    return (
+                                        <button
+                                            onClick={() => setShowEntregados(prev => !prev)}
+                                            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider shrink-0 ${showEntregados ? 'bg-muted/20 border-muted/40 text-muted' : 'bg-transparent border-dashed border-muted/30 text-muted/60 hover:border-muted/50 hover:text-muted'}`}
+                                        >
+                                            {showEntregados ? '🙈 Ocultar' : '👁'} Entregados
+                                            {hiddenCount > 0 && <span className="bg-black/10 px-2 py-0.5 rounded-full text-[9px]">{hiddenCount}</span>}
+                                        </button>
+                                    );
+                                })()}
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
