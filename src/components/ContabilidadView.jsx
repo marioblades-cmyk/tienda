@@ -1569,6 +1569,7 @@ export default function ContabilidadView() {
     return (
         <div className="flex flex-col gap-6 max-w-7xl mx-auto animate-fade-in">
             {/* Tabs */}
+            <div className="flex bg-background rounded-xl p-1 border border-border w-fit shadow-sm">
                 <button onClick={() => setTab('movimientos')}
                     className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${tab === 'movimientos' ? 'bg-surface text-primary shadow-sm ring-1 ring-border/50' : 'text-muted hover:text-text'}`}>
                     <ListFilter size={14} /> Movimientos
