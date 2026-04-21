@@ -1446,8 +1446,11 @@ export default function ClientOrdersView() {
 
             if (!isAdmin && myItems.length === 0 && !search) return;
 
-            // Ordenar ítems: primero por estado (EN TIENDA > CONFIRMADO > PEDIDO > ENTREGADO),
-            // luego por serie alfabética, luego por número de volumen ascendente
+            // KPIs SIEMPRE basados en el total del pedido (no filtrados por vista)
+            const cVentas = allMyItems.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
+            const cPagItems = allMyItems.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
+
+            // Ordenar ítems de visualización
             const sortedItems = [...myItems].sort((a, b) => {
                 const eA = estadoOrder(a), eB = estadoOrder(b);
                 if (eA !== eB) return eA - eB;
@@ -1462,15 +1465,18 @@ export default function ClientOrdersView() {
                 client: c,
                 items: sortedItems,
                 others: others,
+                fullItems: allMyItems,
+                totalVentas: cVentas,
+                totalPagadoItems: cPagItems,
                 pagos: pagos.filter(p => p.cliente_id === c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
 
         // Calcular completitud y ordenar grupos
         const groupsArr = Object.values(groups).map(g => {
-            const nonDelivered = g.items.filter(i => i.estado !== 'ENTREGADO');
-            const inStore = g.items.filter(i => i.estado === 'EN TIENDA');
-            const allDelivered = g.items.length > 0 && g.items.every(i => i.estado === 'ENTREGADO');
+            const nonDelivered = g.fullItems.filter(i => i.estado !== 'ENTREGADO');
+            const inStore = g.fullItems.filter(i => i.estado === 'EN TIENDA');
+            const allDelivered = g.fullItems.length > 0 && g.fullItems.every(i => i.estado === 'ENTREGADO');
             const allInStore = nonDelivered.length > 0 && inStore.length === nonDelivered.length;
             const completitud = nonDelivered.length > 0 ? inStore.length / nonDelivered.length : (allDelivered ? 1 : 0);
             // readySince: fecha del ítem EN TIENDA más reciente (proxy de cuándo se completó)
@@ -1494,7 +1500,7 @@ export default function ClientOrdersView() {
         });
 
         return groupsArr;
-    }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user, filterVendedor]);
+    }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user, filterVendedor, filterSemana, showEntregados]);
 
     const sendWhatsApp = (client, type, manualItems = null) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
@@ -1794,7 +1800,7 @@ export default function ClientOrdersView() {
                                             onClick={() => setShowEntregados(prev => !prev)}
                                             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-wider shrink-0 ${showEntregados ? 'bg-muted/20 border-muted/40 text-muted' : 'bg-transparent border-dashed border-muted/30 text-muted/60 hover:border-muted/50 hover:text-muted'}`}
                                         >
-                                            {showEntregados ? '🙈 Ocultar' : '👁'} Entregados
+                                            {showEntregados ? '🙈 Ocultar' : '👁 Mostrar'} Entregados
                                             {hiddenCount > 0 && <span className="bg-black/10 px-2 py-0.5 rounded-full text-[9px]">{hiddenCount}</span>}
                                         </button>
                                     );
@@ -1817,12 +1823,12 @@ export default function ClientOrdersView() {
                         const isExp = expandedCliente.has(group.client.id);
                         const isCompact = compactClients.has(group.client.id);
                         const toggleCompact = () => setCompactClients(prev => { const n = new Set(prev); isCompact ? n.delete(group.client.id) : n.add(group.client.id); return n; });
-                        const estadoCount = group.items.reduce((acc, it) => {
+                        const estadoCount = group.fullItems.reduce((acc, it) => {
                             const key = it.estado === 'ADJUDICADO' ? 'CONFIRMADO' : it.estado === 'EN TIENDA' ? 'EN TIENDA' : it.estado === 'ENTREGADO' ? 'ENTREGADO' : 'PEDIDO';
                             acc[key] = (acc[key] || 0) + 1; return acc;
                         }, {});
-                        const cVentas = group.items.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
-                        const cPagItems = group.items.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
+                        const cVentas = group.totalVentas;
+                        const cPagItems = group.totalPagadoItems;
                         const totalPagado = group.pagos > 0 ? group.pagos : cPagItems;
                         const balanceDisponible = Math.max(0, group.pagos - cPagItems);
                         const cDeuda = Math.max(0, cVentas - totalPagado);
@@ -1900,7 +1906,12 @@ export default function ClientOrdersView() {
                                                     <span className="text-[9px] text-muted font-mono">{Math.round(group.completitud * 100)}%</span>
                                                 </div>
                                             )}
-                                            <div className="text-xs text-muted font-mono mt-0.5">{group.client.celular} • {group.items.length} ítems</div>
+                                            <div className="text-xs text-muted font-mono mt-0.5">
+                                                {group.client.celular} • {group.fullItems.length} ítems
+                                                {group.items.length < group.fullItems.length && (
+                                                    <span className="ml-1 text-[10px] text-primary">(Viendo {group.items.length})</span>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
 
