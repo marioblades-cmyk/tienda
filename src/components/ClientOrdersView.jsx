@@ -1411,7 +1411,7 @@ export default function ClientOrdersView() {
         return groupsArr;
     }, [clientes, items, otherSellersItems, pagos, filterEstado, search, isAdmin, user, filterVendedor]);
 
-    const sendWhatsApp = (client, type) => {
+    const sendWhatsApp = (client, type, manualItems = null) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
         const cliPagos = pagos.filter(p => p.cliente_id === client.id).reduce((s,p) => s + Number(p.monto), 0);
 
@@ -1424,20 +1424,40 @@ export default function ClientOrdersView() {
             return extractVol(a.titulo) - extractVol(b.titulo);
         });
 
-        const activeItems = sortByTitle(cliItems.filter(i => i.estado !== 'ENTREGADO'));
+        const allActive = sortByTitle(cliItems.filter(i => i.estado !== 'ENTREGADO'));
+        // Determinar qué ítems mostrar
+        let activeItems;
+        if (manualItems && (type === 'seleccion' || type === 'manual')) {
+            activeItems = sortByTitle(manualItems);
+        } else if (type === 'entrega') {
+            activeItems = sortByTitle(cliItems.filter(i => i.estado === 'EN TIENDA'));
+        } else {
+            activeItems = allActive;
+        }
+
         const vTot = activeItems.reduce((s,i) => s + Number(i.precio_venta), 0);
-        // pItm es el total ASIGNADO a todos los ítems (incluyendo entregados para que el saldo general sea real)
-        const pItmTotal = cliItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
+        // pItmActivo es el abono aplicado a los ítems que vamos a mostrar
+        const pItmAsignadoSet = activeItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
         
-        // El verdadero abono general es lo que se recibió en caja menos lo que ya se asignó a ítems
-        const saldoGralSinAsignar = Math.max(0, cliPagos - pItmTotal);
-        // La deuda real es lo que suman los precios de lo activo menos (lo asignado activamente + lo que sobra en cuenta)
-        const pItmActivo = activeItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
-        const deuda = Math.max(0, vTot - (pItmActivo + saldoGralSinAsignar));
+        // El verdadero abono general es lo que se recibió en caja menos lo que ya se asignó a TODOS los ítems
+        const pItmTotalGlobal = cliItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
+        const saldoGralSinAsignar = Math.max(0, cliPagos - pItmTotalGlobal);
+
+        // Cálculos de deuda según el tipo de mensaje
+        let deuda;
+        if (type === 'seleccion' || type === 'manual') {
+            // En selección manual, mostramos sub-totales de esos ítems (el saldo general se asume 0 por restricción UI)
+            deuda = Math.max(0, vTot - pItmAsignadoSet);
+        } else {
+            // En reportes globales (pago, entrega, estado), calculamos la deuda total real
+            const vTotGlobal = allActive.reduce((s,i) => s + Number(i.precio_venta), 0);
+            const pItmAsignadoGlobal = allActive.reduce((s,i) => s + Number(i.monto_pagado), 0);
+            deuda = Math.max(0, vTotGlobal - (pItmAsignadoGlobal + saldoGralSinAsignar));
+        }
         
-        // Ayuda visual para el mensaje: ¿cuánto del saldo de los ítems está cubierto por el saldo general?
-        const sumaSaldosItems = activeItems.reduce((s,i) => s + Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado)), 0);
-        const cubiertoPorGral = Math.min(saldoGralSinAsignar, sumaSaldosItems);
+        // Ayuda visual: cuánto de la deuda de los ítems a mostrar está cubierto por saldo general?
+        const sumaSaldosItemsSet = activeItems.reduce((s,i) => s + Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado)), 0);
+        const cubiertoPorGral = (type === 'seleccion' || type === 'manual') ? 0 : Math.min(saldoGralSinAsignar, sumaSaldosItemsSet);
 
         // Saludo inteligente
         const hasRealName = client.nombre && !client.nombre.startsWith('Cliente ');
@@ -1467,10 +1487,9 @@ export default function ClientOrdersView() {
         let msg = `${saludo} te escribimos de *${TIENDA}*\n\n`;
 
         if (type === 'entrega') {
-            const listos = sortByTitle(cliItems.filter(i => i.estado === 'EN TIENDA'));
-            if (listos.length === 0) return alert("No hay ítems 'EN TIENDA' para este cliente.");
-            msg += `¡Buenas noticias! 🎉 Todos tus pedidos han llegado a tienda:\n\n`;
-            listos.forEach(i => {
+            if (activeItems.length === 0) return alert("No hay ítems 'EN TIENDA' para este cliente.");
+            msg += `¡Buenas noticias! 🎉 Los siguientes pedidos ya están listos en tienda:\n\n`;
+            activeItems.forEach(i => {
                 const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
                 msg += `📦 *${i.titulo}*\n`;
                 msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)} ${saldoItem > 0 ? '⚠️' : '✅'}\n\n`;
@@ -1479,10 +1498,8 @@ export default function ClientOrdersView() {
             if (saldoGralSinAsignar > 0) msg += `💳 Pagos generales en cuenta: +BS ${formatS(saldoGralSinAsignar)}\n`;
             if (deuda > 0) {
                 msg += `*Saldo total pendiente: BS ${formatS(deuda)}*`;
-            } else if (cubiertoPorGral > 0) {
-                msg += `*¡Cuenta al día!* ✅\n_(Los pagos de tu cuenta cubren el saldo restante)_`;
             } else {
-                msg += `*¡Cuenta al día!* ✅`;
+                msg += `*¡Cuenta al día!* ✅${cubiertoPorGral > 0 ? '\n_(Cubierto por tu saldo en cuenta)_' : ''}`;
             }
             msg += `\n\n¡Te esperamos para pasar a recoger o coordinar el envío! 😊`;
 
@@ -1502,12 +1519,24 @@ export default function ClientOrdersView() {
             msg += `📊 Total ventas activas: BS ${formatS(vTot)}\n`;
             if (deuda > 0) {
                 msg += `*Saldo actual: BS ${formatS(deuda)}*`;
-            } else if (cubiertoPorGral > 0) {
-                msg += `*¡Cuenta al día!* ✅\n_(Los pagos de tu cuenta cubren el saldo restante)_`;
             } else {
-                msg += `*¡Cuenta al día!* ✅`;
+                msg += `*¡Cuenta al día!* ✅${cubiertoPorGral > 0 ? '\n_(Cubierto por tu saldo en cuenta)_' : ''}`;
             }
             msg += `\n\n¡Gracias por tu preferencia! 😊`;
+
+        } else if (type === 'seleccion' || type === 'manual') {
+            msg += `Te compartimos el detalle de los pedidos seleccionados: 📑\n\n`;
+            activeItems.forEach(i => {
+                const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
+                const stat = getStatLabel(i);
+                const estDate = i.estado !== 'EN TIENDA' ? getEstDate(i) : null;
+                msg += `📖 *${i.titulo}*\n`;
+                msg += `   ${stat}${estDate ? ` (Est. ~${estDate})` : ''}\n`;
+                msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
+            });
+            msg += SEP + '\n';
+            msg += `*Saldo pendiente de estos ítems: BS ${formatS(deuda)}*`;
+            msg += `\n\n¡Quedamos atentos a cualquier duda! 😊`;
 
         } else {
             msg += `📋 Estado general de tus pedidos:\n\n`;
@@ -1523,10 +1552,8 @@ export default function ClientOrdersView() {
             if (saldoGralSinAsignar > 0) msg += `💰 Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
             if (deuda > 0) {
                 msg += `*Saldo total adeudado: BS ${formatS(deuda)}*`;
-            } else if (cubiertoPorGral > 0) {
-                msg += `*¡Cuenta al día!* ✅\n_(Los pagos de tu cuenta (BS ${formatS(saldoGralSinAsignar)}) cubren el saldo pendiente por ítems)_`;
             } else {
-                msg += `*¡Cuenta al día!* ✅`;
+                msg += `*¡Cuenta al día!* ✅${cubiertoPorGral > 0 ? '\n_(Tu saldo en cuenta cubre los ítems pendientes)_' : ''}`;
             }
             msg += `\n\n¡Gracias por tu preferencia! 😊`;
         }
@@ -1821,6 +1848,20 @@ export default function ClientOrdersView() {
                                                             )}
                                                             <button onClick={() => sendWhatsApp(group.client, 'pago')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">💳 Confirmar Pago</button>
                                                             <button onClick={() => sendWhatsApp(group.client, 'estado')} className="w-full text-left px-3 py-2 text-xs hover:bg-background text-text">📑 Estado General</button>
+                                                            {(() => {
+                                                                const selectedForThisCli = group.items.filter(it => selectedItems.has(it.id));
+                                                                if (selectedForThisCli.length > 0 && balanceDisponible === 0) {
+                                                                    return (
+                                                                        <button 
+                                                                            onClick={() => sendWhatsApp(group.client, 'seleccion', selectedForThisCli)}
+                                                                            className="w-full text-left px-3 py-2 text-xs hover:bg-background text-secondary font-black border-t border-border/50 mt-1 pt-1"
+                                                                        >
+                                                                            📲 Reporte seleccionado ({selectedForThisCli.length})
+                                                                        </button>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
                                                         </div>
                                                     )}
                                                 </div>
