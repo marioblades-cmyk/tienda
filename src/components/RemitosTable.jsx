@@ -144,14 +144,14 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [showAddPedido, setShowAddPedido] = useState(false);
     const [showAddPago, setShowAddPago] = useState(false);
     const [newPedido, setNewPedido] = useState({ nombre: '', monto: '' });
-    const [newPago, setNewPago] = useState({ fecha: '', monto: '', tc: '', metodo: 'Efectivo' });
+    const [newPago, setNewPago] = useState({ fecha: '', monto: '', tc: '', metodo: 'Efectivo', montoBS: '' });
 
     // Inline Edit & Ajustes States
     const [editingPedidoIdx, setEditingPedidoIdx] = useState(null);
     const [editPedidoData, setEditPedidoData] = useState({ nombre: '', monto: '' });
 
     const [editingPagoIdx, setEditingPagoIdx] = useState(null);
-    const [editPagoData, setEditPagoData] = useState({ fecha: '', monto: '', tc: '' });
+    const [editPagoData, setEditPagoData] = useState({ fecha: '', monto: '', tc: '', montoBS: '' });
 
     const [isEditingSaldo, setIsEditingSaldo] = useState(false);
     const [editSaldoMonto, setEditSaldoMonto] = useState('');
@@ -778,22 +778,47 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
     const startEditPago = (idx, pago) => {
         setEditingPagoIdx(idx);
-        setEditPagoData({ fecha: pago.fecha || '', monto: pago.monto || '', tc: pago.tc || '' });
+        const mBS = (parseFloat(pago.monto) || 0) * (parseFloat(pago.tc) || 0);
+        setEditPagoData({
+            fecha: pago.fecha || '',
+            monto: pago.monto || '',
+            tc: pago.tc || '',
+            montoBS: mBS > 0 ? mBS.toFixed(2) : ''
+        });
     };
 
     const saveEditPago = async (idx) => {
+        const monto = parseFloat(editPagoData.monto) || 0;
+        const tc = parseFloat(editPagoData.tc) || 0;
+        const montoBS = parseFloat(editPagoData.montoBS) || (monto * tc);
+
         const updated = [...dist.pagos];
+        const oldPago = updated[idx];
         updated[idx] = {
-            ...updated[idx],
-            monto: parseFloat(editPagoData.monto) || 0,
-            tc: parseFloat(editPagoData.tc) || 0,
+            ...oldPago,
+            monto: monto,
+            tc: tc,
             fecha: editPagoData.fecha
         };
+
+        // Actualizar en contabilidad si tiene caja_id
+        if (oldPago.caja_id) {
+            try {
+                await supabase.from('caja_movimientos').update({
+                    monto: montoBS,
+                    concepto: `Pago distribuidor${editPagoData.fecha ? ' · ' + editPagoData.fecha : ''} · ARS ${monto.toLocaleString()}${tc > 0 ? ' (TC ' + tc + ')' : ''}`,
+                }).eq('id', oldPago.caja_id);
+            } catch (err) {
+                console.error("Error actualizando caja desde editPago:", err);
+            }
+        }
+
         const newDist = { ...dist, pagos: updated };
         setDist(newDist);
         await saveDist(newDist);
         await syncDistToRows(newDist);
         setEditingPagoIdx(null);
+        showToast('Pago actualizado y sincronizado.', 'success');
     };
 
     const cancelEditPago = () => setEditingPagoIdx(null);
@@ -1529,7 +1554,15 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                     </div>
                                                     <div style={{ gridColumn: '1 / -1' }}>
                                                         <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 'bold', color: '#666', marginBottom: '2px', textTransform: 'uppercase' }}>TC del Día</label>
-                                                        <input type="number" step="0.0001" value={editPagoData.tc} onChange={e => setEditPagoData({ ...editPagoData, tc: e.target.value })} style={{ width: '100%', padding: '6px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem' }} />
+                                                        <input type="number" step="0.0001" value={editPagoData.tc} onChange={e => {
+                                                             const val = e.target.value;
+                                                             const mBS = (parseFloat(editPagoData.monto) || 0) * (parseFloat(val) || 0);
+                                                             setEditPagoData({ ...editPagoData, tc: val, montoBS: mBS > 0 ? mBS.toFixed(2) : '' });
+                                                         }} style={{ width: '100%', padding: '6px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem' }} />
+                                                     </div>
+                                                     <div style={{ gridColumn: '1 / -1' }}>
+                                                         <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 'bold', color: '#666', marginBottom: '2px', textTransform: 'uppercase' }}>Monto Final (BS)</label>
+                                                         <input type="number" step="0.01" value={editPagoData.montoBS} onChange={e => setEditPagoData({ ...editPagoData, montoBS: e.target.value })} style={{ width: '100%', padding: '6px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 'bold' }} />
                                                     </div>
                                                 </div>
                                                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
@@ -1714,11 +1747,23 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         <h3 style={{ margin: '0 0 16px 0', color: 'var(--navy)' }}>Nuevo Pago (Crédito)</h3>
                                         <div style={{ marginBottom: '12px' }}>
                                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Monto (ARS)</label>
-                                            <input type="number" value={newPago.monto} onChange={e => setNewPago({ ...newPago, monto: e.target.value })} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }} placeholder="Ej: 50000" />
+                                            <input type="number" value={newPago.monto} onChange={e => {
+                                                const val = e.target.value;
+                                                const mBS = (parseFloat(val) || 0) * (parseFloat(newPago.tc) || 0);
+                                                setNewPago({ ...newPago, monto: val, montoBS: mBS > 0 ? mBS.toFixed(2) : '' });
+                                            }} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }} placeholder="Ej: 50000" />
                                         </div>
                                         <div style={{ marginBottom: '12px' }}>
                                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Tasa de Cambio (TC)</label>
-                                            <input type="number" step="0.0001" value={newPago.tc} onChange={e => setNewPago({ ...newPago, tc: e.target.value })} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }} placeholder="Ej: 0.1250" />
+                                            <input type="number" step="0.0001" value={newPago.tc} onChange={e => {
+                                                const val = e.target.value;
+                                                const mBS = (parseFloat(newPago.monto) || 0) * (parseFloat(val) || 0);
+                                                setNewPago({ ...newPago, tc: val, montoBS: mBS > 0 ? mBS.toFixed(2) : '' });
+                                            }} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }} placeholder="Ej: 0.1250" />
+                                        </div>
+                                        <div style={{ marginBottom: '12px' }}>
+                                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Monto Final (BS)</label>
+                                            <input type="number" step="0.01" value={newPago.montoBS} onChange={e => setNewPago({ ...newPago, montoBS: e.target.value })} style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--accent)', fontWeight: 'bold' }} placeholder="Ej: 11000" />
                                         </div>
                                         <div style={{ marginBottom: '12px' }}>
                                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Fecha</label>
@@ -1739,7 +1784,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 const tc = parseFloat(newPago.tc) || 0;
                                                 if (!monto) { showToast('Ingresa un monto válido.', 'error'); return; }
                                                 // Registrar en contabilidad como EGRESO y obtener el ID generado
-                                                const montoBS = tc > 0 ? monto * tc : monto;
+                                                const montoBS = parseFloat(newPago.montoBS) || (monto * tc);
                                                 const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
                                                     turno_id: null,
                                                     tipo: 'EGRESO',
@@ -1754,7 +1799,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                 setDist(newDist);
                                                 await saveDist(newDist);
                                                 setShowAddPago(false);
-                                                setNewPago({ fecha: '', monto: '', tc: '', metodo: 'Efectivo' });
+                                                setNewPago({ fecha: '', monto: '', tc: '', metodo: 'Efectivo', montoBS: '' });
                                                 showToast('Pago guardado y contabilizado como egreso.', 'success');
                                             }} style={{ flex: 1, padding: '10px', background: 'var(--ok)', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>Guardar Pago</button>
                                         </div>
