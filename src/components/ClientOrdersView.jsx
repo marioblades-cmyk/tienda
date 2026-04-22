@@ -1579,11 +1579,10 @@ export default function ClientOrdersView() {
             return d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
         };
 
-        // Estado legible
         const getStatLabel = (it) => {
             const e = it.estado;
-            if (e === 'EN TIENDA') return '[EN TIENDA]';
-            if (e.startsWith('PEDIDO') || e.startsWith('CONFIRMADO') || e === 'ADJUDICADO') return '[EN TRANSITO]';
+            if (e === 'EN TIENDA') return 'LISTO EN TIENDA';
+            if (e.startsWith('PEDIDO') || e.startsWith('CONFIRMADO') || e === 'ADJUDICADO') return 'EN CAMINO';
             return e;
         };
 
@@ -1591,74 +1590,70 @@ export default function ClientOrdersView() {
 
         if (type === 'entrega') {
             if (activeItems.length === 0) return alert("No hay ítems 'EN TIENDA' para este cliente.");
-            msg += `¡Buenas noticias! Los siguientes pedidos ya están listos en tienda:\n\n`;
+            msg += `¡Buenas noticias! 🎉 Los siguientes pedidos ya están listos en tienda:\n\n`;
             activeItems.forEach(i => {
                 const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
-                msg += `*${i.titulo}*\n`;
-                msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
+                msg += `📦 *${i.titulo}*\n`;
+                msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)} ${saldoItem > 0 ? '⚠️' : '✅'}\n\n`;
             });
             msg += SEP + '\n';
-            if (saldoGralSinAsignar > 0) msg += `Pagos generales en cuenta: +BS ${formatS(saldoGralSinAsignar)}\n`;
-            if (deuda > 0) {
-                msg += `*Saldo total pendiente: BS ${formatS(deuda)}*`;
-            } else {
-                msg += `*¡Cuenta al día!* (Sin deudas)${cubiertoPorGral > 0 ? '\n_(Cubierto por tu saldo en cuenta)_' : ''}`;
+            if (saldoGralSinAsignar > 0) msg += `💳 Pagos generales en cuenta: +BS ${formatS(saldoGralSinAsignar)}\n`;
+            msg += `*Saldo total pendiente: BS ${formatS(deuda)}*\n`;
+            if (deuda <= 0) {
+                msg += `*¡Cuenta al día!* ✅${cubiertoPorGral > 0 ? '\n_(Cubierto por tu saldo en cuenta)_' : ''}`;
             }
-            msg += `\n\n¡Te esperamos para pasar a recoger o coordinar el envío!`;
+            msg += `\n\n¡Te esperamos para pasar a recoger o coordinar el envío! 😊`;
 
         } else if (type === 'pago') {
-            msg += `¡Confirmamos el registro de tu pago/abono!\n\n`;
-            msg += `*Detalle de tus pedidos:*\n\n`;
+            msg += `¡Confirmamos el registro de tu pago/abono! 💳\n\n`;
+            msg += `📋 *Detalle de tus pedidos:*\n\n`;
             activeItems.forEach(i => {
                 const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
                 const stat = getStatLabel(i);
                 const estDate = i.estado !== 'EN TIENDA' ? getEstDate(i) : null;
-                msg += `*${i.titulo}*\n`;
+                msg += `🔸 *${i.titulo}*\n`;
                 msg += `   Estado: ${stat}${estDate ? ` (Est. ~${estDate})` : ''}\n`;
                 msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
             });
             msg += SEP + '\n';
-            if (saldoGralSinAsignar > 0) msg += `Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
-            msg += `Total ventas activas: BS ${formatS(vTot)}\n`;
-            if (deuda > 0) {
-                msg += `*Saldo actual: BS ${formatS(deuda)}*`;
-            } else {
-                msg += `*¡Cuenta al día!* (Sin deudas)${cubiertoPorGral > 0 ? '\n_(Cubierto por tu saldo en cuenta)_' : ''}`;
+            if (saldoGralSinAsignar > 0) msg += `💰 Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
+            msg += `📊 Total ventas activas: BS ${formatS(vTot)}\n`;
+            msg += `*Saldo actual: BS ${formatS(deuda)}*\n`;
+            if (deuda <= 0) {
+                msg += `*¡Cuenta al día!* ✅${cubiertoPorGral > 0 ? '\n_(Cubierto por tu saldo en cuenta)_' : ''}`;
             }
-            msg += `\n\n¡Gracias por tu preferencia!`;
+            msg += `\n\n¡Gracias por tu preferencia! 😊`;
 
         } else if (type === 'seleccion' || type === 'manual') {
-            msg += `Te compartimos el detalle de los pedidos seleccionados:\n\n`;
+            msg += `Te compartimos el detalle de los pedidos seleccionados: 📑\n\n`;
             activeItems.forEach(i => {
                 const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
                 const stat = getStatLabel(i);
                 const estDate = i.estado !== 'EN TIENDA' ? getEstDate(i) : null;
-                msg += `*${i.titulo}*\n`;
+                msg += `📖 *${i.titulo}*\n`;
                 msg += `   ${stat}${estDate ? ` (Est. ~${estDate})` : ''}\n`;
                 msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
             });
             msg += SEP + '\n';
             msg += `*Saldo pendiente de estos ítems: BS ${formatS(deuda)}*`;
-            msg += `\n\n¡Quedamos atentos a cualquier duda!`;
+            msg += `\n\n¡Quedamos atentos a cualquier duda! 😊`;
 
         } else {
-            msg += `ESTADO GENERAL DE TUS PEDIDOS:\n\n`;
+            msg += `📋 Estado general de tus pedidos:\n\n`;
             activeItems.forEach(i => {
                 const saldoItem = Math.max(0, Number(i.precio_venta) - Number(i.monto_pagado));
                 const stat = getStatLabel(i);
                 const estDate = i.estado !== 'EN TIENDA' ? getEstDate(i) : null;
-                const prefix = i.estado === 'EN TIENDA' ? '[LISTO]' : '[TRANSITO]';
-                msg += `${prefix} *${i.titulo}*${estDate ? ` (Est. ~${estDate})` : ''}\n`;
-                msg += `   ${stat} | Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
+                msg += `[${stat}] *${i.titulo}*${estDate ? ` (Est. ~${estDate})` : ''}\n`;
+                msg += `   Precio: BS ${formatS(i.precio_venta)} | Abonado: BS ${formatS(i.monto_pagado)} | Saldo: BS ${formatS(saldoItem)}\n\n`;
             });
             msg += SEP + '\n';
-            if (saldoGralSinAsignar > 0) msg += `Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
-            if (deuda > 0) {
-                msg += `*Saldo total adeudado: BS ${formatS(deuda)}*`;
-            } else {
-                msg += `*¡Cuenta al día!* (Sin deudas)${cubiertoPorGral > 0 ? '\n_(Tu saldo en cuenta cubre los ítems pendientes)_' : ''}`;
+            if (saldoGralSinAsignar > 0) msg += `💰 Pagos generales en cuenta: BS ${formatS(saldoGralSinAsignar)}\n`;
+            msg += `*Saldo total adeudado: BS ${formatS(deuda)}*\n`;
+            if (deuda <= 0) {
+                msg += `*¡Cuenta al día!* ✅${cubiertoPorGral > 0 ? '\n_(Tu saldo en cuenta cubre los ítems pendientes)_' : ''}`;
             }
-            msg += `\n\n¡Gracias por tu preferencia!`;
+            msg += `\n\n¡Gracias por tu preferencia! 😊`;
         }
 
         const url = `https://wa.me/591${client.celular.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`;
