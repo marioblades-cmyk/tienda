@@ -103,7 +103,7 @@ export default function FlujoCajaView({ user, profile }) {
             .ilike('titulo', `%${val.trim()}%`)
             .order('stock_fisico', { ascending: false })
             .order('titulo', { ascending: true })
-            .limit(10);
+            .limit(50);
             
         if (data) setVentaResults(data);
     };
@@ -912,7 +912,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                                                 )}
                                                                             </div>
                                                                             <div className="flex-1 min-w-0">
-                                                                                <div className="font-black text-navy text-sm uppercase truncate group-hover/item:text-primary transition-colors">{p.titulo}</div>
+                                                                                <div className="font-black text-navy text-sm uppercase group-hover/item:text-primary transition-colors leading-tight">{p.titulo}</div>
                                                                                 <div className="text-[10px] font-bold text-muted uppercase mt-0.5">{p.editorial} • Bs {p.precio_venta_bs?.toLocaleString()}</div>
                                                                             </div>
                                                                             <div className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${stockDisponible > 0 ? 'bg-navy text-white' : 'bg-error/10 text-error'}`}>

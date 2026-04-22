@@ -419,7 +419,7 @@ export default function ClientOrdersView() {
         setAddForm({ ...addForm, titulo: val });
         if (val.length > 2) {
             const lower = val.toLowerCase();
-            const matches = catalog.filter(c => c.titulo.toLowerCase().includes(lower)).slice(0, 8);
+            const matches = catalog.filter(c => c.titulo.toLowerCase().includes(lower)).slice(0, 50);
             setCatalogSuggestions(matches);
             setShowSuggestions(true);
         } else {
@@ -2755,7 +2755,7 @@ export default function ClientOrdersView() {
                                                         placeholder="Eje: Berserk 01..."
                                                     />
                                                     {showSuggestions && catalogSuggestions.length > 0 && (
-                                                        <div className="absolute top-full left-0 w-full mt-2 bg-surface border border-border rounded-xl shadow-2xl z-[200] max-h-48 overflow-y-auto p-1 animate-in slide-in-from-top-2">
+                                                        <div className="absolute top-full left-0 w-full mt-2 bg-surface border border-border rounded-xl shadow-2xl z-[200] max-h-80 overflow-y-auto p-1 animate-in slide-in-from-top-2">
                                                             {catalogSuggestions.map(item => (
                                                                 <div key={item.id} onClick={()=>selectSuggestion(item)} className="p-2.5 rounded-lg hover:bg-primary/5 cursor-pointer border border-transparent hover:border-primary/20 transition-all flex justify-between items-center group">
                                                                     <div className="flex flex-col">
@@ -3325,7 +3325,7 @@ export default function ClientOrdersView() {
                                                             className="w-4 h-4 accent-primary shrink-0"
                                                         />
                                                         <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
-                                                            <div className="text-sm font-bold truncate text-text">{it.titulo}</div>
+                                                            <div className="text-sm font-bold text-text leading-tight">{it.titulo}</div>
                                                             <div className={`text-xs font-black font-mono shrink-0 ${checked ? 'text-primary' : 'text-error'}`}>BS {formatS(deuda)}</div>
                                                         </div>
                                                     </label>
