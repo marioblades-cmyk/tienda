@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
-import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle, RefreshCw, FileUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [semanas, setSemanas] = useState([]);
@@ -14,6 +15,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [masterConf, setMasterConf] = useState(null);
     const [masterData, setMasterData] = useState(null);
     const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
+    const [isExportingWithFormat, setIsExportingWithFormat] = useState(false);
 
 
     const EDITORIAL_DTOS = {
@@ -44,7 +46,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     }, [selectedSemana]);
 
     const fetchSemanas = async () => {
-        const { data } = await supabase.from('semanas').select('id, nombre').order('created_at', { ascending: false });
+        const { data } = await supabase.from('semanas').select('id, nombre, archivo_url, archivo_nombre').order('created_at', { ascending: false });
         if (data?.length) {
             setSemanas(data);
             setSelectedSemana(data[0].id);
@@ -315,6 +317,311 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         XLSX.writeFile(wb, `Consolidado_${semanas.find(s => s.id === selectedSemana)?.nombre}.xlsx`);
     };
 
+    const exportWithFormat = async () => {
+        const semana = semanas.find(s => s.id === selectedSemana);
+        if (!semana?.archivo_url) {
+            alert("No hay un archivo base cargado para esta semana. Súbelo en la pestaña 'Semanas' primero.");
+            return;
+        }
+
+        setIsExportingWithFormat(true);
+        try {
+            console.log("Iniciando exportación con formato...");
+            const response = await fetch(semana.archivo_url);
+            const arrayBuffer = await response.arrayBuffer();
+            
+            // Verificar si es .xls (legacy) o .xlsx
+            const isLegacy = semana.archivo_nombre?.toLowerCase().endsWith('.xls') || 
+                             semana.archivo_url.toLowerCase().includes('.xls?');
+            
+            if (isLegacy) {
+                alert("Atención: El archivo base es formato .xls (antiguo). ExcelJS solo soporta .xlsx (moderno). La preservación exacta de formato podría fallar o el archivo podría requerir reparación.");
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(arrayBuffer);
+            
+            // BUSCAR TODAS LAS HOJAS QUE PAREZCAN DE PRODUCTOS
+            const productSheets = [];
+
+            console.log("Analizando todas las hojas del libro (" + workbook.worksheets.length + ")...");
+
+            // ======= DIAGNÓSTICO COMPLETO =======
+            console.log("=== INVENTARIO COMPLETO DEL EXCEL ===");
+            workbook.worksheets.forEach((ws, idx) => {
+                const firstRow = ws.getRow(1);
+                const cells = [];
+                firstRow.eachCell((cell, col) => cells.push(`Col${col}="${cell.value}"`));
+                console.log(`Hoja ${idx + 1}: NOMBRE EXACTO="${ws.name}" | Primera fila: ${cells.join(', ')}`);
+            });
+            console.log("=====================================");
+
+            for (const ws of workbook.worksheets) {
+                let foundTitle = -1;
+                let foundQty = -1;
+                let foundIsbn = -1;
+
+                console.log(`Analizando hoja: "${ws.name}"...`);
+
+                // Escanear las primeras 50 filas
+                for (let i = 1; i <= Math.min(50, ws.rowCount); i++) {
+                    const row = ws.getRow(i);
+                    row.eachCell((cell, colNumber) => {
+                        const val = String(cell.value || '').toLowerCase();
+                        
+                        // Buscar Título
+                        if (foundTitle === -1 && (
+                            val === 'título' || val === 'titulo' || val.includes('titulo') ||
+                            val.includes('producto') || val.includes('detalle') || 
+                            val === 'articulo' || val === 'artículo' || val.includes('articulo') ||
+                            val === 'nombre' || val === 'tãtulo' || val.includes('descrip') ||
+                            val === 'ejemplar' || val === 'item' || val === 'manga'
+                        )) {
+                            foundTitle = colNumber - 1;
+                        }
+
+                        // Buscar Cantidad (excluir "páginas" y columnas de páginas)
+                        if (foundQty === -1 && (
+                            val.includes('cantidad') || val.includes('cant') || 
+                            val.includes('unidades') || val.includes('pedido') ||
+                            val === 'q' || val === 'qty'
+                        ) && !val.includes('pag') && !val.includes('p\u00e1g')) {
+                            if (colNumber - 1 !== foundTitle) {
+                                foundQty = colNumber - 1;
+                            }
+                        }
+
+                        // Buscar ISBN
+                        if (foundIsbn === -1 && (
+                            val.includes('isbn') || val.includes('ean') || 
+                            val.includes('código') || val.includes('codigo') || 
+                            val.includes('barra') || val.includes('ean13')
+                        )) {
+                            foundIsbn = colNumber - 1;
+                        }
+                    });
+
+                    if (foundTitle !== -1 && foundQty !== -1 && foundTitle !== foundQty) {
+                        const headers = [];
+                        row.eachCell(c => headers.push(String(c.value || '')));
+                        console.log(`[HEADERS ${ws.name}] Fila ${i}:`, headers.join(' | '));
+                        break;
+                    }
+                }
+
+                // REGLA DE ORO: Si son iguales o falta cantidad, intentar rescate
+                if (foundTitle !== -1 && (foundQty === -1 || foundQty === foundTitle)) {
+                    console.log(`⚠️ Cantidad no clara en "${ws.name}". Re-escaneando...`);
+                    foundQty = -1;
+                    for (let j = 1; j <= Math.min(50, ws.rowCount); j++) {
+                        const r = ws.getRow(j);
+                        r.eachCell((cell, colNumber) => {
+                            const v = String(cell.value || '').toLowerCase();
+                            if (foundQty === -1 && (v.includes('cant') || v.includes('pedido') || v.includes('unid') || v === 'q' || v === 'qty')) {
+                                if (colNumber - 1 !== foundTitle) {
+                                    foundQty = colNumber - 1;
+                                    console.log(`   ✅ Columna de cantidad rescatada para "${ws.name}": Columna ${colNumber}`);
+                                }
+                            }
+                        });
+                        if (foundQty !== -1) break;
+                    }
+                }
+
+                if (foundTitle !== -1 && foundQty !== -1) {
+                    productSheets.push({
+                        ws,
+                        titleColIndex: foundTitle,
+                        qtyColIndex: foundQty,
+                        isbnColIndex: foundIsbn
+                    });
+                    console.log(`✅ Hoja "${ws.name}" lista: Título=${foundTitle}, Cant=${foundQty}`);
+                } else if (foundTitle !== -1 && foundQty === -1) {
+                    // FALLBACK ESPECÍFICO: Si conocemos la hoja pero no detectamos cantidad, usar columna por nombre de hoja
+                    const wsNameLower = ws.name.toLowerCase().replace(/\s/g, '');
+                    let fallbackQty = -1;
+                    if (wsNameLower.includes('ovni')) fallbackQty = 4; // Columna E
+                    
+                    if (fallbackQty !== -1) {
+                        console.log(`🔧 Fallback aplicado para "${ws.name}": columna de cantidad = ${fallbackQty + 1}`);
+                        productSheets.push({
+                            ws,
+                            titleColIndex: foundTitle,
+                            qtyColIndex: fallbackQty,
+                            isbnColIndex: foundIsbn
+                        });
+                    } else {
+                        console.log(`❌ Hoja "${ws.name}" descartada: no se encontró columna de cantidad.`);
+                    }
+                }
+            }
+
+            if (productSheets.length === 0) {
+                alert("No se encontró ninguna hoja con columnas de 'Título' y 'Cantidad'.");
+                setIsExportingWithFormat(false);
+                return;
+            }
+
+            // Consolidar todos los productos en un mapa plano para búsqueda rápida
+            const flatProducts = {};
+            const isbnProducts = {};
+
+            Object.values(detailData).forEach(products => {
+                Object.values(products).forEach(p => {
+                    const normTitle = String(p.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const normIsbn = String(p.ean || '').replace(/[^0-9]/g, '');
+                    if (normTitle) flatProducts[normTitle] = { qty: p.totalQty, original: p.titulo };
+                    if (normIsbn && normIsbn.length > 5) isbnProducts[normIsbn] = p.totalQty;
+                });
+            });
+
+            console.log("Muestra de títulos normalizados en DB:", Object.keys(flatProducts).slice(0, 10));
+            console.log("Mapa de productos consolidado:", Object.keys(flatProducts).length, "títulos.");
+
+            let matchedCount = 0;
+            let totalQtyInDB = 0;
+            let totalQtyFilledInExcel = 0;
+
+            const filledProducts = new Set(); // Para evitar duplicados (reimpresiones)
+
+            // Calcular total teórico del sistema
+            Object.values(detailData).forEach(products => {
+                Object.values(products).forEach(p => {
+                    totalQtyInDB += p.totalQty;
+                });
+            });
+            
+            console.log("Total consolidado en sistema:", totalQtyInDB);
+
+            // Procesar cada hoja identificada
+            productSheets.forEach(({ ws, titleColIndex, qtyColIndex, isbnColIndex }) => {
+                console.log(`\n>>> Procesando hoja: "${ws.name}" | TitleCol=${titleColIndex+1}, QtyCol=${qtyColIndex+1} <<<`);
+                
+                // DUMP de las primeras 15 filas para diagnóstico
+                console.log(`--- DUMP de primeras 15 filas de "${ws.name}" ---`);
+                for (let dbgRow = 1; dbgRow <= Math.min(15, ws.rowCount); dbgRow++) {
+                    const r = ws.getRow(dbgRow);
+                    const rowDump = [];
+                    r.eachCell((cell, col) => rowDump.push(`C${col}:"${cell.value}"`));
+                    console.log(`  Fila ${dbgRow}: ${rowDump.join(' | ')}`);
+                }
+                console.log(`--- FIN DUMP ---`);
+
+                let sheetMatchCount = 0;
+                let samplesPrinted = 0;
+
+                ws.eachRow((row, rowNumber) => {
+                    // Saltar encabezados
+                    if (rowNumber <= 5) {
+                        const val = String(row.getCell(titleColIndex + 1).value || '').toLowerCase();
+                        if (val.includes('título') || val.includes('detalle') || val.includes('editorial')) return;
+                    }
+
+                    const cellTitle = row.getCell(titleColIndex + 1).value;
+                    const cellIsbn = isbnColIndex !== -1 ? String(row.getCell(isbnColIndex + 1).value || '').replace(/[^0-9]/g, '') : null;
+                    
+                    if (!cellTitle && !cellIsbn) return;
+
+                    // Imprimir muestra de los primeros 5 títulos para diagnóstico
+                    if (samplesPrinted < 5 && cellTitle) {
+                        console.log(`  [Muestra ${ws.name}] Fila ${rowNumber} - Título: "${cellTitle}" | ISBN: "${cellIsbn || 'N/A'}"`);
+                        samplesPrinted++;
+                    }
+
+                    let matchedQty = undefined;
+                    let productKey = null;
+
+                    // 1. Intentar por ISBN
+                    if (cellIsbn && isbnProducts[cellIsbn] !== undefined) {
+                        matchedQty = isbnProducts[cellIsbn];
+                        productKey = `isbn:${cellIsbn}`;
+                    } 
+                    // 2. Intentar por Título
+                    else if (cellTitle) {
+                        const normCellTitle = String(cellTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (flatProducts[normCellTitle] !== undefined) {
+                            matchedQty = flatProducts[normCellTitle].qty;
+                            productKey = `title:${normCellTitle}`;
+                        }
+                    }
+
+                    // SOLO RELLENAR SI NO SE HA RELLENADO ANTES (Evita duplicar pedidos en reimpresiones)
+                    if (matchedQty !== undefined && !filledProducts.has(productKey)) {
+                        console.log(`  [DEBUG ${ws.name}] Fila ${rowNumber}: Escribiendo ${matchedQty} en columna ${qtyColIndex + 1} (${cellTitle})`);
+                        row.getCell(qtyColIndex + 1).value = matchedQty;
+                        matchedCount++;
+                        sheetMatchCount++;
+                        totalQtyFilledInExcel += matchedQty;
+                        filledProducts.add(productKey);
+                    } else if (matchedQty !== undefined) {
+                        row.getCell(qtyColIndex + 1).value = 0;
+                    }
+                });
+            });
+
+            console.log("Coincidencias totales encontradas:", matchedCount);
+
+            if (matchedCount === 0) {
+                alert("No se encontraron coincidencias entre el Excel del distribuidor y los pedidos de la semana.");
+            }
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `PEDIDO_CONSOLIDADO_${semana.nombre}_${semana.archivo_nombre || 'distribuidor.xlsx'}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            if (matchedCount > 0) {
+                // VERIFICACIÓN: Sumar F13:F22 manualmente en la hoja Totales
+                // (ExcelJS no recalcula fórmulas, hay que hacerlo a mano)
+                let excelTotalSum = 0;
+                let excelTotalFormatted = 'No encontrada';
+                const totalsSheet = workbook.getWorksheet('Totales') || workbook.getWorksheet('TOTALES') || workbook.getWorksheet('totales');
+                if (totalsSheet) {
+                    for (let row = 13; row <= 22; row++) {
+                        const cellVal = totalsSheet.getCell(`F${row}`).value;
+                        let numVal = 0;
+                        if (typeof cellVal === 'number') {
+                            numVal = cellVal;
+                        } else if (typeof cellVal === 'object' && cellVal !== null && typeof cellVal.result === 'number') {
+                            numVal = cellVal.result;
+                        }
+                        excelTotalSum += numVal;
+                    }
+                    excelTotalFormatted = `$${Math.round(excelTotalSum).toLocaleString('es-AR')}`;
+                    console.log(`[VERIFICACIÓN F13:F22] Suma manual: ${excelTotalSum} | Sistema: ${grandTotal}`);
+                }
+
+                const diff = totalQtyInDB - totalQtyFilledInExcel;
+                let msg = `¡Éxito! Se actualizaron ${matchedCount} títulos.\n\n`;
+                msg += `Unidades en Sistema: ${totalQtyInDB}\n`;
+                msg += `Unidades en Excel: ${totalQtyFilledInExcel}\n`;
+                if (totalsSheet) {
+                    msg += `\nTotal $ Excel (F13:F22): ${excelTotalFormatted}\n`;
+                    msg += `Total $ Sistema: $${Math.round(grandTotal).toLocaleString('es-AR')}\n`;
+                }
+                
+                if (diff > 0) {
+                    msg += `\n⚠️ ATENCIÓN: Faltan ${diff} unidades.`;
+                } else {
+                    msg += `\n✅ ¡Unidades coinciden perfectamente!`;
+                }
+                alert(msg);
+            }
+
+        } catch (err) {
+            console.error("Error al exportar con formato:", err);
+            alert("Error al procesar el Excel: " + err.message);
+        } finally {
+            setIsExportingWithFormat(false);
+        }
+    };
+
     const toggleEditorial = (ed) => {
         setExpandedEditoriales(prev => ({ ...prev, [ed]: !prev[ed] }));
     };
@@ -421,6 +728,21 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                     className="w-full flex items-center justify-center gap-2 bg-text text-white p-3 rounded-xl text-xs font-bold hover:bg-black transition-all shadow-lg active:scale-95"
                                 >
                                     <Download size={16} className="text-primary" /> EXPORTAR CONSOLIDADO
+                                </button>
+                            )}
+                            
+                            {!sellerIdFilter && semanas.find(s => s.id === selectedSemana)?.archivo_url && (
+                                <button
+                                    onClick={exportWithFormat}
+                                    disabled={isExportingWithFormat}
+                                    className="w-full flex items-center justify-center gap-2 bg-primary text-navy p-3 rounded-xl text-xs font-black hover:bg-primary/80 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                                >
+                                    {isExportingWithFormat ? (
+                                        <RefreshCw size={16} className="animate-spin" />
+                                    ) : (
+                                        <FileUp size={16} />
+                                    )}
+                                    EXPORTAR CON FORMATO DISTRIBUIDOR
                                 </button>
                             )}
                         </div>

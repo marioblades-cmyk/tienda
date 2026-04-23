@@ -441,7 +441,8 @@ export default function FlujoCajaView({ user, profile }) {
         if (!monto || monto <= 0 || !turnoActivo) return;
         setRetiroSaving(true);
         try {
-            const { data, error } = await supabase.from('caja_movimientos').insert([{
+            // 1. Registrar EGRESO de efectivo (sale del cajón)
+            const { data: egresoData, error: egresoError } = await supabase.from('caja_movimientos').insert([{
                 turno_id: turnoActivo.id,
                 tipo: 'EGRESO',
                 categoria: 'Retiro a Digital',
@@ -451,11 +452,25 @@ export default function FlujoCajaView({ user, profile }) {
                 metodo_pago: 'Efectivo',
                 origen: 'Tienda',
             }]).select().single();
-            if (error) throw error;
-            setMovimientos(prev => [data, ...prev]);
+            if (egresoError) throw egresoError;
+
+            // 2. Registrar INGRESO en la cuenta destino (entra al digital)
+            const { data: ingresoData, error: ingresoError } = await supabase.from('caja_movimientos').insert([{
+                turno_id: turnoActivo.id,
+                tipo: 'INGRESO',
+                categoria: 'Retiro a Digital',
+                concepto: `Ingreso desde Efectivo → ${retiroForm.destino}`,
+                monto,
+                vendedor_id: user?.id,
+                metodo_pago: retiroForm.destino,
+                origen: 'Tienda',
+            }]).select().single();
+            if (ingresoError) throw ingresoError;
+
+            setMovimientos(prev => [ingresoData, egresoData, ...prev]);
             setShowRetiroModal(false);
             setRetiroForm({ monto: '', destino: 'Yasta (QR)' });
-            showToast(`Retiro de Bs ${monto.toLocaleString()} registrado`, 'success');
+            showToast(`Retiro de Bs ${monto.toLocaleString()} → ${retiroForm.destino} registrado`, 'success');
         } catch (e) {
             alert('Error al registrar retiro: ' + e.message);
         } finally {
