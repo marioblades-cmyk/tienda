@@ -1488,6 +1488,7 @@ export default function ClientOrdersView() {
         const groupsArr = Object.values(groups).map(g => {
             const nonDelivered = g.fullItems.filter(i => i.estado !== 'ENTREGADO');
             const inStore = g.fullItems.filter(i => i.estado === 'EN TIENDA');
+            const hasRecortado = g.fullItems.some(i => i.estado === 'RECORTADO');
             const allDelivered = g.fullItems.length > 0 && g.fullItems.every(i => i.estado === 'ENTREGADO');
             const allInStore = nonDelivered.length > 0 && inStore.length === nonDelivered.length;
             const completitud = nonDelivered.length > 0 ? inStore.length / nonDelivered.length : (allDelivered ? 1 : 0);
@@ -1495,11 +1496,14 @@ export default function ClientOrdersView() {
             const readySince = allInStore && inStore.length > 0
                 ? Math.max(...inStore.map(i => new Date(i.created_at).getTime()))
                 : null;
-            return { ...g, nonDelivered, inStore, allDelivered, allInStore, completitud, readySince };
+            return { ...g, nonDelivered, inStore, allDelivered, allInStore, completitud, readySince, hasRecortado };
         });
 
-        // Ordenar: allInStore primero (más reciente completado arriba) → parciales por % desc → 0% → entregados al final
+        // Ordenar: hasRecortado primero -> allInStore primero (más reciente completado arriba) → parciales por % desc → 0% → entregados al final
         groupsArr.sort((a, b) => {
+            if (a.hasRecortado && !b.hasRecortado) return -1;
+            if (!a.hasRecortado && b.hasRecortado) return 1;
+            
             if (a.allDelivered && !b.allDelivered) return 1;
             if (!a.allDelivered && b.allDelivered) return -1;
             // Ambos allInStore: más recientemente completado primero (Opción B)
@@ -1841,12 +1845,18 @@ export default function ClientOrdersView() {
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
                         return (
-                            <div key={group.client.id} className={`bg-surface border rounded-xl shadow-sm overflow-visible relative transition-all ${
+                            <div key={group.client.id} className={`bg-surface border rounded-xl shadow-sm overflow-visible relative transition-all ${group.hasRecortado ? 'mt-3' : ''} ${
+                                group.hasRecortado ? 'border-red-400 shadow-md shadow-red-500/10' :
                                 group.allDelivered ? 'border-border/40 opacity-60' :
                                 group.allInStore ? 'border-success/40 shadow-success/10' :
                                 group.completitud > 0 ? 'border-primary/20' :
                                 'border-border'
                             }`}>
+                                {group.hasRecortado && (
+                                    <div className="absolute -top-2.5 left-4 bg-red-500 text-white text-[9px] font-black uppercase px-3 py-0.5 rounded-full shadow-sm z-10 flex items-center gap-1 animate-pulse">
+                                        <AlertCircle size={10} /> Necesitas acciones inmediatas por favor (Recorte)
+                                    </div>
+                                )}
                                 <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 cursor-pointer hover:bg-white/5 transition-colors" onClick={()=> {
                                     const next = new Set(expandedCliente);
                                     if(isExp) next.delete(group.client.id); else next.add(group.client.id);
