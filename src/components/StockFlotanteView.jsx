@@ -4,7 +4,7 @@ import { supabase } from '../services/supabase';
 import { 
     Truck, Package, Calendar, Clock, ChevronRight, 
     ChevronDown, AlertCircle, TrendingUp, ArrowUpRight,
-    Info, Activity, Check
+    Info, Activity, Check, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
