@@ -193,8 +193,10 @@ export default function AdminMasterView() {
             if (itemsError) throw itemsError;
             if (!clientItems || clientItems.length === 0) return;
 
-            // 2. Map master titles for faster lookup - USAR SET PARA VELOCIDAD
-            const masterTitles = new Set(masterItems.map(it => (it.titulo || '').toLowerCase().trim()));
+            // 2. Map master titles for faster lookup - SOLO LOS QUE TIENEN CANTIDAD > 0
+            const masterTitles = new Set(
+                masterItems.filter(it => it.cantidad > 0).map(it => (it.titulo || '').toLowerCase().trim())
+            );
             
             let confirmedCount = 0;
             let cutCount = 0;

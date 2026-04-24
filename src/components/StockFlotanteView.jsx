@@ -195,13 +195,23 @@ export default function ConfirmationInfoView() {
             if (toAutoAdjudicate.length > 0) {
                 // Actualizar en lotes de 100
                 for (let i = 0; i < toAutoAdjudicate.length; i += 100) {
-                    await supabase.from('cliente_items')
+                    const { error } = await supabase.from('cliente_items')
                         .update({ estado: 'ADJUDICADO' })
                         .in('id', toAutoAdjudicate.slice(i, i + 100));
+                    if (error) console.error("Error en auto-adjudicación:", error);
                 }
                 // Refrescar cItems con el nuevo estado para que la UI quede correcta
                 for (const ci of cItems) {
                     if (toAutoAdjudicate.includes(ci.id)) ci.estado = 'ADJUDICADO';
+                }
+                
+                // Recalcular el reparto en details para que la interfaz se actualice inmediatamente
+                for (const week of details) {
+                    for (const t of week.titleDetails) {
+                        const titleCItems = cItems.filter(ci => ci.semana_id === week.id && (ci.titulo || '').toLowerCase().trim() === (t.titulo || '').toLowerCase().trim());
+                        t.allocated = titleCItems.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA').length;
+                        t.needsAllocation = t.confirmado > t.allocated && titleCItems.length > t.allocated;
+                    }
                 }
             }
 
