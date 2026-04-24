@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 
 export default function PreSaleGenerator() {
     const { user, profile, isAdmin } = useAuth();
+    const skipTemplateDateRef = React.useRef(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingProjects, setIsLoadingProjects] = useState(true);
     const [dbError, setDbError] = useState(null);
@@ -391,14 +392,27 @@ export default function PreSaleGenerator() {
     // AUTO-LOAD TEMPLATE WHEN SELECTED
     useEffect(() => {
         if (selectedTemplateId && userTemplates[selectedTemplateId]) {
-            const tpl = userTemplates[selectedTemplateId].config;
-            setConfig(prev => ({...prev, ...tpl}));
+            const tpl = userTemplates[selectedTemplateId].config || {};
             
-            const mult = (100 - tpl.discountPercent) / 100;
+            setConfig(prev => {
+                const newConfig = { ...prev, ...tpl };
+                // Si la selección de plantilla fue provocada por la Automatización, 
+                // mantenemos la fecha calculada automáticamente y evitamos que la plantilla la sobreescriba.
+                if (skipTemplateDateRef.current) {
+                    newConfig.deadlineDate = prev.deadlineDate;
+                    newConfig.deadlineTime = prev.deadlineTime;
+                }
+                return newConfig;
+            });
+            
+            const mult = (100 - (tpl.discountPercent !== undefined ? tpl.discountPercent : 20)) / 100;
             setSelectedItems(items => items.map(it => ({
                 ...it,
                 customPreventa: it.customPvp * mult
             })));
+
+            // Resetear el bloqueo tras haber consumido la acción
+            skipTemplateDateRef.current = false;
         }
     }, [selectedTemplateId, userTemplates]);
 
@@ -486,7 +500,7 @@ export default function PreSaleGenerator() {
 
         setSelectedItems(prev => [...prev, {
             ...item,
-            id: crypto.randomUUID(),
+            id: String(Date.now() + Math.random()),
             customImageUrl: item.imagen_url || '',
             customPvp: pvp,
             customPreventa: preventa,
@@ -594,6 +608,100 @@ export default function PreSaleGenerator() {
         } finally {
             setIsExporting(false);
         }
+    };
+
+    const handleAutoLoad = (type) => { // type = 'NOVEDADES' | 'REIMPRESIONES'
+        const isReimpresion = type === 'REIMPRESIONES';
+        
+        // 1. Filtrar catálogo
+        const filteredItems = catalogData.filter(item => {
+            const ed = (item.editorial || '').toUpperCase();
+            const cat = (item.categoria || '').toUpperCase();
+            if (!ed.includes('IVREA')) return false;
+            
+            if (isReimpresion) {
+                return cat.includes('REIMPRESI') || item.es_reimpresion === true;
+            } else {
+                return cat.includes('NOVEDAD');
+            }
+        });
+
+        if (filteredItems.length === 0) {
+            alert(`No se encontraron ${type.toLowerCase()} de Ivrea en el catálogo actual.`);
+            return;
+        }
+
+        // 2. Calcular próximo sábado
+        const today = new Date();
+        const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
+        let daysToAdd = (6 - dayOfWeek + 7) % 7;
+        if (daysToAdd === 0) daysToAdd = 7; 
+        
+        const nextSaturday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysToAdd);
+        const monthNames = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+        const formattedDate = `${nextSaturday.getDate()} / ${monthNames[nextSaturday.getMonth()]}`;
+
+        // 3. Buscar plantilla
+        let targetTplId = null;
+        if (isReimpresion) {
+            targetTplId = Object.keys(userTemplates).find(id => userTemplates[id].name.toUpperCase().includes('REIMPRESI'));
+        }
+        
+        if (!targetTplId) {
+             targetTplId = Object.keys(userTemplates).find(id => userTemplates[id].isDefault) || Object.keys(userTemplates)[0];
+        }
+
+        let tplConfig = {};
+        let tplDiscount = isReimpresion ? 10 : 20;
+
+        if (targetTplId && userTemplates[targetTplId]) {
+            tplConfig = userTemplates[targetTplId].config || {};
+            if (tplConfig.discountPercent !== undefined) {
+                tplDiscount = parseFloat(tplConfig.discountPercent) || 0;
+            }
+        } else if (isReimpresion) {
+            // Fallback manual si no hay plantilla de reimpresión guardada
+            tplConfig = {
+                discountPercent: 10,
+                headerTag: 'REIMPRESIONES',
+                headerSubtitle: 'APROVECHA EL DESCUENTO DEL 10%',
+                dividerText: '★ STOCK LIMITADO • ENVÍO A TODA BOLIVIA ★'
+            };
+        }
+
+        // 4. Preparar items
+        const discountMult = (100 - tplDiscount) / 100;
+        const newSelectedItems = filteredItems.map(item => {
+            const pvp = parseFloat(item.precio_venta_bs) || 0;
+            const preventa = pvp * discountMult;
+            return {
+                ...item,
+                id: String(Date.now() + Math.random()),
+                customImageUrl: item.imagen_url || '',
+                customPvp: pvp,
+                customPreventa: preventa,
+                overrideText: '',
+                customVol: ''
+            };
+        });
+
+        // 5. Aplicar estados
+        if (targetTplId) {
+            skipTemplateDateRef.current = true; // Activar el bloqueo para el useEffect
+            setSelectedTemplateId(targetTplId);
+        }
+        
+        setSelectedItems(newSelectedItems);
+        
+        // 6. Aplicar la configuración y fijar la fecha automática
+        setConfig(prev => ({ 
+            ...prev, 
+            ...tplConfig,
+            deadlineDate: formattedDate 
+        }));
+
+        setStatusMessage(`⚡ ¡Cargadas ${filteredItems.length} ${type.toLowerCase()} de Ivrea!`);
+        setTimeout(() => setStatusMessage(""), 4000);
     };
 
     const [statusMessage, setStatusMessage] = useState("");
@@ -786,6 +894,27 @@ export default function PreSaleGenerator() {
                             </div>
                         </div>
                     )}
+
+                    {/* BOTONES DE CARGA RÁPIDA IVREA */}
+                    <div className="mb-4 bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm flex flex-col gap-2">
+                         <p className="text-[10px] font-bold uppercase tracking-widest text-blue-700 mb-1 text-center">Automatización Ivrea</p>
+                         <div className="flex gap-2">
+                             <button 
+                                 onClick={() => handleAutoLoad('NOVEDADES')}
+                                 className="flex-1 bg-[#1b3a57] hover:bg-[#132a41] text-[#f5a800] py-2 rounded-lg font-black text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md"
+                             >
+                                 <Zap size={14} className="fill-[#f5a800]" />
+                                 NOVEDADES
+                             </button>
+                             <button 
+                                 onClick={() => handleAutoLoad('REIMPRESIONES')}
+                                 className="flex-1 bg-[#f5a800] hover:bg-[#e69d00] text-[#1b3a57] py-2 rounded-lg font-black text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md"
+                             >
+                                 <Book size={14} />
+                                 REIMPRESIONES
+                             </button>
+                         </div>
+                    </div>
                     
                     <div className="space-y-4">
                         {/* SECCIÓN DE PROYECTOS */}

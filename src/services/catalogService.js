@@ -600,7 +600,7 @@ export const catalogService = {
                         ean_interno: item.ean_interno,
                         editorial: item.editorial || edName,
                         categoria: item.categoria_principal,
-                        precio_tapa: item.precio_tapa,
+                        precio_tapa: item.precio_tapa || 0,
                         es_reimpresion: esReimpresion || false,
                         // Precios inteligentes
                         precio_venta_bs: calculated?.retail || 0,
@@ -948,6 +948,11 @@ export const catalogService = {
                 } catch (e) { continue; }
 
                 if (processedUrls.has(finalUrl)) continue;
+
+                // MAGIA PARA WHAKOOM: Cambiar /small/ por /large/ para obtener alta resolución y saltar el filtro
+                if (finalUrl.includes('whakoom.com/small/')) {
+                    finalUrl = finalUrl.replace('/small/', '/large/');
+                }
 
                 // Filtro de miniaturas e iconos
                 const lowSrc = finalUrl.toLowerCase();

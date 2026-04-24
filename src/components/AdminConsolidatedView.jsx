@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
-import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle, RefreshCw, FileUp } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle, RefreshCw, FileUp, ShoppingBag } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
+import { catalogService } from '../services/catalogService';
 
 export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [semanas, setSemanas] = useState([]);
@@ -622,6 +623,264 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         }
     };
 
+    const exportWholesaleCatalog = async () => {
+        const semana = semanas.find(s => s.id === selectedSemana);
+        if (!semana || !semana.archivo_url) return;
+
+        setIsExportingWithFormat(true);
+        try {
+            // 1. Obtener configuraciones de precios (Dólar, Flete, Márgenes por Editorial)
+            const settings = await catalogService.fetchPricingSettings();
+            if (!settings) throw new Error("No se pudo cargar la configuración de precios.");
+
+            const DEFAULTS = { flete: 6, tcf: 0.014, tca: 0.0068, dtoNiveles: [5, 10, 15], margen_venta: 0.40, margen_mayoreo: 0.30 };
+            const EDITORIAL_DTOS_DEFAULT = {
+                'Ivrea': 35, 'Ovnipress': 30, 'Panini-Utopia': 20,
+                'Penguin': 35, 'Planeta': 35, 'Deux-PopFiction': 40,
+                'Hotel de las Ideas': 40, 'V&R': 35, 'Otras': 35, 'Merchandising': 0
+            };
+
+            // 2. Cargar el Excel original
+            const response = await fetch(semana.archivo_url);
+            const arrayBuffer = await response.arrayBuffer();
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(arrayBuffer);
+
+            console.log("Transformando catálogo con fórmulas de Análisis de Precios...");
+
+            workbook.eachSheet((ws) => {
+                // --- DESVINCULAR FÓRMULAS COMPARTIDAS (ANTI-CRASH) ---
+                // Convierte todas las fórmulas compartidas en fórmulas individuales.
+                // Esto es la cura definitiva para el error "Shared Formula master must exist..."
+                ws.eachRow(row => {
+                    row.eachCell(cell => {
+                        if (cell.type === ExcelJS.ValueType.Formula) {
+                            const f = cell.formula;
+                            const r = cell.result;
+                            if (f) {
+                                cell.value = { formula: f, result: r };
+                            }
+                        }
+                    });
+                });
+
+                // 1. Eliminar Merchandising si existe la pestaña
+                if (ws.name.toLowerCase().includes('merchandising')) {
+                    workbook.removeWorksheet(ws.id);
+                    return;
+                }
+
+                // 2. Manejo de la pestaña Totales / Subtotales
+                if (['Totales', 'TOTALES', 'totales', 'subtotales', 'Resumen'].includes(ws.name)) {
+                    // Mover la imagen lejos para que no se vea
+                    try {
+                        const images = ws.getImages();
+                        if (images && images.length > 0) {
+                            images.forEach(img => {
+                                if (img.range) {
+                                    img.range.tl = { col: 50, row: 1000 };
+                                    img.range.br = { col: 51, row: 1001 };
+                                }
+                            });
+                        }
+                        ws._media = [];
+                        ws._figures = [];
+                    } catch (e) {}
+
+                    // ELIMINACIÓN FÍSICA de filas (de abajo hacia arriba para mantener índices)
+                    ws.spliceRows(22, 1);
+                    ws.spliceRows(11, 1);
+                    ws.spliceRows(1, 7); // Eliminar filas del 1 al 7
+
+                    // Eliminar Merchandising
+                    for (let i = ws.rowCount; i >= 1; i--) {
+                        const val = String(ws.getRow(i).getCell(1).value || '').toLowerCase();
+                        if (val.includes('merchandising')) {
+                            ws.spliceRows(i, 1);
+                        }
+                    }
+
+                    // ELIMINACIÓN FÍSICA de columnas C, E, F (derecha a izquierda)
+                    ws.spliceColumns(6, 1); // F
+                    ws.spliceColumns(5, 1); // E
+                    ws.spliceColumns(3, 1); // C
+                    
+                    const cellF11 = ws.getCell('F11');
+                    if (cellF11.value) cellF11.value = "TOTAL PEDIDO (Bs)";
+
+                    // FORMATO Y SUMATORIA EN LA NUEVA COLUMNA C (Filas 5 a 14)
+                    for (let r = 5; r <= 14; r++) {
+                        const cellC = ws.getCell(`C${r}`);
+                        cellC.numFmt = '#,##0.00';
+                    }
+                    // Forzar que la C14 sea la suma de C5 a C13
+                    ws.getCell('C14').value = { formula: 'SUM(C5:C13)' };
+
+                    return;
+                }
+
+                // --- PROCESAMIENTO DE HOJAS DE EDITORIALES ---
+                const edName = ws.name.trim();
+                const isVR = edName.toUpperCase().includes('V&R') || edName.toUpperCase().includes('V Y R');
+                const isIvrea = edName.toLowerCase().includes('ivrea');
+                const edConf = settings.pricing.editoriales[edName] || {};
+                const global = settings.pricing.global || DEFAULTS;
+
+                // MODO ESPÍA PARA V&R: Imprime las primeras 15 filas en consola
+                if (isVR) {
+                    console.log(`=== MODO DEBUG: PESTAÑA V&R (${ws.name}) ===`);
+                    for (let r = 1; r <= 15; r++) {
+                        const rowVals = [];
+                        ws.getRow(r).eachCell((cell, colNumber) => {
+                            rowVals.push(`[Col${colNumber}: ${cell.value}]`);
+                        });
+                        if (rowVals.length > 0) {
+                            console.log(`Fila ${r}:`, rowVals.join(' '));
+                        }
+                    }
+                    console.log(`=========================================`);
+                }
+
+                const dto = (edConf.descuento_proveedor != null ? edConf.descuento_proveedor : (EDITORIAL_DTOS_DEFAULT[edName] ?? 35)) / 100;
+                const mmayo = edConf.margen_mayoreo ?? DEFAULTS.margen_mayoreo;
+                const tca = global.tca ?? DEFAULTS.tca;
+                const flete = global.flete ?? DEFAULTS.flete;
+
+                let colTitle = -1;
+                let colIsbn = -1;
+                let colPrice = -1;
+                let colSubtotal = -1;
+
+                const titleKeywords = ['título', 'titulo', 'item', 'ejemplar', 'nombre', 'descripción', 'descripcion', 'producto', 'coleccion'];
+                const isbnKeywords = ['isbn', 'ean', 'código', 'codigo', 'code', 'barras'];
+                const priceKeywords = ['precio', 'ars', 'p.p.p', 'tapa', 'pvp', 'p.v.p', 'lista', 'público', 'publico', 'actual'];
+                const subtotalKeywords = ['subtotal', 'total $', 'importe', 'monto'];
+
+                for (let i = 1; i <= Math.min(50, ws.rowCount); i++) {
+                    const row = ws.getRow(i);
+                    row.eachCell((cell, colNumber) => {
+                        const val = String(cell.value || '').toLowerCase().trim();
+                        if (val === 'novedades' || val === 'reimpresiones') return;
+
+                        if (colTitle === -1 && titleKeywords.some(k => val.includes(k))) colTitle = colNumber;
+                        if (colIsbn === -1 && isbnKeywords.some(k => val.includes(k))) colIsbn = colNumber;
+                        if (colPrice === -1 && priceKeywords.some(k => val.includes(k))) colPrice = colNumber;
+                        if (colSubtotal === -1 && subtotalKeywords.some(k => val.includes(k))) colSubtotal = colNumber;
+                    });
+                }
+
+                // FIX ESPECÍFICO V&R y IVREA
+                if (isVR) {
+                    // V&R no tiene encabezados, la Fila 1 dice "NOVEDADES" y la Fila 2 ya son datos.
+                    colTitle = 2;
+                    colIsbn = 3;
+                    colPrice = 4;
+                    colSubtotal = 6;
+                } else if (isIvrea) {
+                    if (colTitle === -1) colTitle = 2; // Asumir Columna B
+                    // Si no encuentra precio en Ivrea, buscar la primera columna con valores numéricos grandes (precios)
+                    if (colPrice === -1) {
+                        for (let r = 10; r <= Math.min(30, ws.rowCount); r++) {
+                            let found = false;
+                            ws.getRow(r).eachCell((cell, colNum) => {
+                                if (colNum > 2 && typeof cell.value === 'number' && cell.value > 10) {
+                                    colPrice = colNum;
+                                    found = true;
+                                }
+                            });
+                            if (found) break;
+                        }
+                    }
+                }
+
+                if (colTitle === -1 || colPrice === -1) return;
+
+                // DETECCIÓN PRECISA DE LA FILA DE ENCABEZADOS
+                let headerRowNum = 1;
+                if (isVR) {
+                    headerRowNum = 1; // Para V&R, la fila 1 es el falso encabezado ("NOVEDADES")
+                } else {
+                    // Buscar la fila exacta que contiene la palabra "TITULO" o similar
+                    let foundHeader = false;
+                    for (let i = 1; i <= Math.min(40, ws.rowCount); i++) {
+                        const val = String(ws.getRow(i).getCell(colTitle).value || '').toLowerCase().trim();
+                        if (titleKeywords.some(k => val === k || val.includes(k))) {
+                            headerRowNum = i;
+                            foundHeader = true;
+                            break;
+                        }
+                    }
+                    // Fallback si no encontró palabra clave
+                    if (!foundHeader) {
+                        for(let i=1; i<=40; i++) {
+                            const val = ws.getRow(i).getCell(colTitle).value;
+                            if (val && typeof val === 'string' && val.length > 3 && !val.includes('NOVEDADES')) { headerRowNum = i; break; }
+                        }
+                    }
+                }
+
+                // INSERCIÓN DE COLUMNA A LA DERECHA EXACTAMENTE DESPUÉS DEL SUBTOTAL
+                const colSugerido = colSubtotal !== -1 ? colSubtotal + 1 : Math.max(colTitle, colIsbn, colPrice, 6) + 1;
+
+                ws.getRow(headerRowNum).getCell(colPrice).value = "P. MAYOR";
+                ws.getRow(headerRowNum).getCell(colSugerido).value = "PRECIO SUGERIDO";
+                if (colSubtotal !== -1) {
+                    ws.getRow(headerRowNum).getCell(colSubtotal).value = "TOTAL (Bs)";
+                }
+
+                // Procesar cada fila de datos
+                ws.eachRow((row, rowNumber) => {
+                    if (rowNumber <= headerRowNum) return;
+
+                    const cellPrice = row.getCell(colPrice);
+                    const ars = parseFloat(cellPrice.value);
+
+                    if (!isNaN(ars) && ars > 0) {
+                        const costoReal = (ars * (1 - dto) * tca) + flete;
+                        const pMayor = costoReal * (1 + mmayo);
+                        const D = (ars * (1 - dto) * (global.tcf || 0.014) + flete) * (1 + (edConf.margen_venta || 0.40));
+                        const E = Math.round(D / 5) * 5;
+                        const pRetail = Math.round((E * 0.65) / 5) * 5;
+                        const pSugerido = pRetail * 0.90;
+
+                        cellPrice.value = Number(pMayor.toFixed(2));
+                        cellPrice.numFmt = '#,##0.00';
+
+                        row.getCell(colSugerido).value = Number(pSugerido.toFixed(2));
+                        row.getCell(colSugerido).numFmt = '#,##0.00';
+                    }
+
+                    if (colSubtotal !== -1) {
+                        const cellSub = row.getCell(colSubtotal);
+                        cellSub.numFmt = '#,##0.00';
+                    }
+                });
+            });
+
+            // 3. Descargar el nuevo Excel
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `CATALOGO_MAYORISTA_BS_${semana.nombre}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            alert(`¡Catálogo Mayorista generado! Se aplicaron márgenes específicos por editorial detectada.`);
+
+        } catch (err) {
+            console.error("Error al generar catálogo mayorista:", err);
+            alert("Error: " + err.message);
+        } finally {
+            setIsExportingWithFormat(false);
+        }
+    };
+
+
+
     const toggleEditorial = (ed) => {
         setExpandedEditoriales(prev => ({ ...prev, [ed]: !prev[ed] }));
     };
@@ -732,18 +991,29 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             )}
                             
                             {!sellerIdFilter && semanas.find(s => s.id === selectedSemana)?.archivo_url && (
-                                <button
-                                    onClick={exportWithFormat}
-                                    disabled={isExportingWithFormat}
-                                    className="w-full flex items-center justify-center gap-2 bg-primary text-navy p-3 rounded-xl text-xs font-black hover:bg-primary/80 transition-all shadow-lg active:scale-95 disabled:opacity-50"
-                                >
-                                    {isExportingWithFormat ? (
-                                        <RefreshCw size={16} className="animate-spin" />
-                                    ) : (
-                                        <FileUp size={16} />
-                                    )}
-                                    EXPORTAR CON FORMATO DISTRIBUIDOR
-                                </button>
+                                <>
+                                    <button
+                                        onClick={exportWithFormat}
+                                        disabled={isExportingWithFormat}
+                                        className="w-full flex items-center justify-center gap-2 bg-primary text-navy p-3 rounded-xl text-xs font-black hover:bg-primary/80 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                                    >
+                                        {isExportingWithFormat ? (
+                                            <RefreshCw size={16} className="animate-spin" />
+                                        ) : (
+                                            <FileUp size={16} />
+                                        )}
+                                        EXPORTAR CON FORMATO DISTRIBUIDOR
+                                    </button>
+
+                                    <button
+                                        onClick={() => exportWholesaleCatalog()}
+                                        disabled={isExportingWithFormat}
+                                        className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white p-3 rounded-xl text-xs font-black hover:bg-emerald-700 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                                    >
+                                        <ShoppingBag size={16} />
+                                        GENERAR CATÁLOGO MAYORISTA (Bs)
+                                    </button>
+                                </>
                             )}
                         </div>
                     </div>

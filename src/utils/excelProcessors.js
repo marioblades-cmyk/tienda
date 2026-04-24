@@ -697,7 +697,7 @@ export function processVR(rows) {
         if (row[0] && String(row[0]).trim().toUpperCase() === 'AUTOR') continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
-        if (!titulo) continue;
+        if (!titulo || titulo.toUpperCase() === 'NOVEDADES') continue;
 
         const autor = row[0] ? String(row[0]).trim() : null;
         const isbnRaw = row[2] ?? null;
