@@ -552,6 +552,7 @@ export default function ConfirmationInfoView() {
                                                                                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                                                                                 {titleOrders.map(ci => {
                                                                                                     const isAdjudicado = ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA';
+                                                                                                    const isRecortado = ci.estado === 'RECORTADO';
                                                                                                     const canAdjudicate = allocatedCount < t.confirmado || isAdjudicado;
                                                                                                     const vendedorNombre = ci.vendedores?.nombre || 'Sin vendedor';
 
@@ -569,15 +570,16 @@ export default function ConfirmationInfoView() {
                                                                                                                 } catch (err) { alert(err.message); }
                                                                                                                 finally { setSaving(false); }
                                                                                                             }}
-                                                                                                            className={`p-3 rounded-lg border flex items-center justify-between gap-2 transition-all ${isAdmin ? 'cursor-pointer' : ''} ${isAdjudicado ? 'border-secondary bg-secondary/5' : (canAdjudicate ? 'border-border/40 hover:border-secondary/30' : 'opacity-40 grayscale pointer-events-none')}`}
+                                                                                                            className={`p-3 rounded-lg border flex items-center justify-between gap-2 transition-all ${isAdmin ? 'cursor-pointer' : ''} ${isAdjudicado ? 'border-secondary bg-secondary/5' : (isRecortado ? 'border-red-200 bg-red-50/50 opacity-60' : (canAdjudicate ? 'border-border/40 hover:border-secondary/30' : 'opacity-40 grayscale pointer-events-none'))}`}
                                                                                                         >
                                                                                                             <div className="flex flex-col min-w-0">
-                                                                                                                <span className="text-[12px] font-black text-navy truncate">{ci.clientes?.nombre || 'Cliente desconocido'}</span>
+                                                                                                                <span className={`text-[12px] font-black truncate ${isRecortado ? 'text-red-900/60 line-through' : 'text-navy'}`}>{ci.clientes?.nombre || 'Cliente desconocido'}</span>
                                                                                                                 <span className="text-[9px] text-muted truncate">{ci.clientes?.celular || ''}{vendedorNombre !== 'Sin vendedor' ? ` · ${vendedorNombre}` : ''}</span>
-                                                                                                                <span className={`text-[8px] font-black uppercase mt-0.5 ${isAdjudicado ? 'text-secondary' : 'text-orange-500'}`}>{isAdjudicado ? '✓ ADJUDICADO' : '⏳ PENDIENTE'}</span>
+                                                                                                                <span className={`text-[8px] font-black uppercase mt-0.5 ${isAdjudicado ? 'text-secondary' : (isRecortado ? 'text-red-500' : 'text-orange-500')}`}>{isAdjudicado ? '✓ ADJUDICADO' : (isRecortado ? '✂️ RECORTADO' : '⏳ PENDIENTE')}</span>
                                                                                                             </div>
-                                                                                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isAdjudicado ? 'bg-secondary border-secondary text-white' : 'border-border'}`}>
+                                                                                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isAdjudicado ? 'bg-secondary border-secondary text-white' : (isRecortado ? 'border-red-300 text-red-400' : 'border-border')}`}>
                                                                                                                 {isAdjudicado && <Check size={11} />}
+                                                                                                                {isRecortado && <X size={11} />}
                                                                                                             </div>
                                                                                                         </div>
                                                                                                     );
@@ -585,14 +587,14 @@ export default function ConfirmationInfoView() {
                                                                                                 {titleOrders.length === 0 && <div className="col-span-full py-2 text-center text-[10px] text-muted italic">No hay pedidos de clientes registrados para este título.</div>}
                                                                                             </div>
                                                                                             
-                                                                                            {isAdmin && t.isCut && titleOrders.some(ci => ci.estado !== 'ADJUDICADO' && ci.estado !== 'EN TIENDA') && (
+                                                                                            {isAdmin && t.isCut && titleOrders.some(ci => ci.estado !== 'ADJUDICADO' && ci.estado !== 'EN TIENDA' && ci.estado !== 'RECORTADO') && (
                                                                                                 <div className="mt-2 pt-2 border-t border-border/10">
                                                                                                     <button 
                                                                                                         onClick={async () => {
                                                                                                             if (!confirm("¿Deseas marcar los pedidos no adjudicados como RECORTADOS?")) return;
                                                                                                             setSaving(true);
                                                                                                             try {
-                                                                                                                const unallocatedIds = titleOrders.filter(ci => ci.estado !== 'ADJUDICADO' && ci.estado !== 'EN TIENDA').map(ci => ci.id);
+                                                                                                                const unallocatedIds = titleOrders.filter(ci => ci.estado !== 'ADJUDICADO' && ci.estado !== 'EN TIENDA' && ci.estado !== 'RECORTADO').map(ci => ci.id);
                                                                                                                 const { error } = await supabase.from('cliente_items').update({ estado: 'RECORTADO' }).in('id', unallocatedIds);
                                                                                                                 if (error) throw error;
                                                                                                                 await fetchDashboardData();
