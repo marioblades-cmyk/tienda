@@ -3829,18 +3829,18 @@ export default function ClientOrdersView() {
                                 {damageStockAnalysis?.flotantes.length > 0 && (
                                     <div className="mt-4 pt-4 border-t border-border space-y-2">
                                         <span className="text-[9px] font-bold text-muted uppercase tracking-tighter block mb-1">Próximos Arribos:</span>
-                                        <div className="flex flex-wrap gap-2">
+                                        <div className="grid grid-cols-1 gap-2">
                                             {damageStockAnalysis.flotantes.map((f, i) => (
-                                                <div key={i} className="bg-white border border-border p-2 rounded-xl flex items-center gap-3 shadow-sm">
+                                                <div key={i} className="bg-white border border-border p-3 rounded-2xl flex items-center gap-4 shadow-sm hover:border-navy/20 transition-colors">
                                                     <div className="text-center shrink-0">
-                                                        <div className={`text-[10px] font-black px-1.5 py-0.5 rounded ${f.isConfirmed ? 'bg-orange-500 text-white' : 'bg-muted/20 text-muted'}`}>
+                                                        <div className={`text-xs font-black px-2 py-1 rounded-lg ${f.isConfirmed ? 'bg-orange-500 text-white shadow-sm shadow-orange-200' : 'bg-muted/20 text-muted'}`}>
                                                             +{f.qty}
                                                         </div>
-                                                        <div className="text-[7px] font-bold mt-0.5 uppercase">{f.isConfirmed ? 'CONF' : 'PEND'}</div>
+                                                        <div className="text-[7px] font-black mt-1 uppercase tracking-tighter">{f.isConfirmed ? 'CONFIRMADO' : 'PENDIENTE'}</div>
                                                     </div>
-                                                    <div className="overflow-hidden">
-                                                        <div className="text-[8px] font-black uppercase text-navy truncate w-24">{f.nombre}</div>
-                                                        <div className="text-[8px] text-muted font-bold">~{f.fechaArribo.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' })}</div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-[10px] font-black uppercase text-navy leading-none mb-1">{f.nombre}</div>
+                                                        <div className="text-[9px] text-muted font-bold italic">Arribo estimado: {f.fechaArribo.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' })}</div>
                                                     </div>
                                                 </div>
                                             ))}
