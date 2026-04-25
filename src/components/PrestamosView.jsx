@@ -93,6 +93,16 @@ function PrestamoModal({ prestamo, deudoresExistentes, onClose, onDone }) {
             if (isEdit) {
                 const { error } = await supabase.from('prestamos').update(payload).eq('id', prestamo.id);
                 if (error) throw error;
+
+                // Sincronizar con el movimiento en contabilidad si existe
+                if (prestamo.caja_mov_id && !form.es_preexistente) {
+                    const conceptoMov = `Préstamo otorgado a ${form.deudor_nombre.trim()}${form.concepto.trim() ? ' — ' + form.concepto.trim() : ''}`;
+                    await supabase.from('caja_movimientos').update({
+                        concepto: conceptoMov,
+                        monto: monto,
+                        metodo_pago: form.metodo_origen
+                    }).eq('id', prestamo.caja_mov_id);
+                }
             } else {
                 let caja_mov_id = null;
                 if (!form.es_preexistente) {
