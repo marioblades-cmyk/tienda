@@ -88,6 +88,7 @@ export default function ClientOrdersView() {
     const [deleteCliente, setDeleteCliente] = useState(null); // { id, nombre } para confirmación
     const [showDamageModal, setShowDamageModal] = useState(false);
     const [damageTarget, setDamageTarget] = useState(null); // { item, client }
+    const [damageStockAnalysis, setDamageStockAnalysis] = useState(null);
     const [resolvingDamage, setResolvingDamage] = useState(false);
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
@@ -507,11 +508,14 @@ export default function ClientOrdersView() {
                     </span>
                     {!compact && (it.estado === 'ENTREGADO' || it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (
                         <button 
-                            onClick={(e) => {
+                            onClick={async (e) => {
                                 e.stopPropagation();
                                 const client = clientes.find(c => c.id === it.cliente_id);
                                 setDamageTarget({ item: it, client });
                                 setShowDamageModal(true);
+                                setDamageStockAnalysis(null);
+                                const analysis = await analyzeStockForItem(it.titulo);
+                                setDamageStockAnalysis(analysis);
                             }}
                             className="p-1 text-orange-400 hover:text-orange-600 hover:bg-orange-500/10 rounded transition-colors"
                             title="Reportar daño / Cambio"
@@ -3797,6 +3801,31 @@ export default function ClientOrdersView() {
                                 <br/><br/>
                                 <span className="text-xs italic text-muted/60">El ítem actual se marcará como 'DAÑADO' y se creará una reposición.</span>
                             </p>
+
+                            <div className="bg-background/50 p-4 rounded-2xl mb-6 text-left border border-border">
+                                <h4 className="text-[10px] font-black uppercase text-muted mb-2 tracking-widest">Disponibilidad de Stock</h4>
+                                {damageStockAnalysis ? (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-muted uppercase">Físico</span>
+                                            <span className={`text-sm font-black ${damageStockAnalysis.fisico > 0 ? 'text-success' : 'text-error'}`}>
+                                                {damageStockAnalysis.fisico} unidades
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-muted uppercase">Flotante</span>
+                                            <span className="text-sm font-black text-navy">
+                                                {damageStockAnalysis.flotantes.reduce((acc, f) => acc + f.qty, 0)} unidades
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 animate-pulse">
+                                        <div className="w-2 h-2 bg-muted/20 rounded-full animate-bounce"></div>
+                                        <span className="text-[10px] font-bold text-muted/40 uppercase">Consultando inventario...</span>
+                                    </div>
+                                )}
+                            </div>
 
                             <div className="space-y-3">
                                 <button
