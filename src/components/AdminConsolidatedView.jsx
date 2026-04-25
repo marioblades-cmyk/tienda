@@ -487,7 +487,13 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 Object.values(products).forEach(p => {
                     const normTitle = String(p.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                     const normIsbn = String(p.ean || '').replace(/[^0-9]/g, '');
-                    const pInfo = { qty: p.totalQty, original: p.titulo, precio: p.precio, editorial: p.editorial };
+                    const pInfo = { 
+                        qty: p.totalQty, 
+                        original: p.titulo, 
+                        precio: p.precio, 
+                        editorial: p.editorial,
+                        normTitle: normTitle // Guardamos el título normalizado para el productKey
+                    };
                     if (normTitle) flatProducts[normTitle] = pInfo;
                     
                     if (normIsbn && normIsbn.length > 5) {
@@ -571,8 +577,22 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     // 2. SEGUNDO INTENTO: Por ISBN (Si el título no coincidió y el ISBN no es ambiguo)
                     if (matchedQty === undefined && cellIsbn && isbnProducts[cellIsbn] !== undefined && isbnProducts[cellIsbn] !== 'DUPLICATE') {
                         const pInfo = isbnProducts[cellIsbn];
-                        matchedQty = pInfo.qty;
-                        productKey = `isbn:${cellIsbn}`;
+                        
+                        // VERIFICACIÓN DE SEGURIDAD: ¿El título del Excel se parece al menos un poco al del sistema?
+                        const excelT = String(cellTitle || '').toLowerCase();
+                        const dbT = String(pInfo.original || '').toLowerCase();
+                        
+                        // Si el título del Excel no contiene al menos una palabra clave del título del sistema, descartamos el match por ISBN
+                        // Excluimos palabras cortas como "del", "las", "vol", etc.
+                        const keywords = dbT.split(/[^a-z0-9]/).filter(w => w.length > 3);
+                        const isPlausible = keywords.length === 0 || keywords.some(k => excelT.includes(k));
+                        
+                        if (isPlausible) {
+                            matchedQty = pInfo.qty;
+                            productKey = `title:${pInfo.normTitle}`; // Usamos el título del sistema como clave única
+                        } else {
+                            console.log(`⚠️ Match por ISBN ${cellIsbn} RECHAZADO por diferencia total de títulos: "${excelT}" vs "${dbT}"`);
+                        }
                     }
 
                     // SOLO RELLENAR SI NO SE HA RELLENADO ANTES (Evita duplicar pedidos en reimpresiones)
