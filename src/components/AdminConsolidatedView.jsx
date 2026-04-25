@@ -549,20 +549,21 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     let matchedQty = undefined;
                     let productKey = null;
 
-                    // 1. Intentar por ISBN
-                    if (cellIsbn && isbnProducts[cellIsbn] !== undefined) {
-                        const pInfo = isbnProducts[cellIsbn];
-                        matchedQty = pInfo.qty;
-                        productKey = `isbn:${cellIsbn}`;
-                    } 
-                    // 2. Intentar por Título
-                    else if (cellTitle) {
+                    // 1. PRIORIDAD: Intentar por Título (Más específico si hay ISBNs duplicados)
+                    if (cellTitle) {
                         const normCellTitle = String(cellTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
                         if (flatProducts[normCellTitle] !== undefined) {
                             const pInfo = flatProducts[normCellTitle];
                             matchedQty = pInfo.qty;
                             productKey = `title:${normCellTitle}`;
                         }
+                    }
+
+                    // 2. SEGUNDO INTENTO: Por ISBN (Si el título no coincidió)
+                    if (matchedQty === undefined && cellIsbn && isbnProducts[cellIsbn] !== undefined) {
+                        const pInfo = isbnProducts[cellIsbn];
+                        matchedQty = pInfo.qty;
+                        productKey = `isbn:${cellIsbn}`;
                     }
 
                     // SOLO RELLENAR SI NO SE HA RELLENADO ANTES (Evita duplicar pedidos en reimpresiones)
