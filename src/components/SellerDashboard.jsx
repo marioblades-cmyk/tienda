@@ -462,12 +462,47 @@ export default function SellerDashboard({ isAdmin }) {
                 fileInfo: { name: file.name, size: file.size }
             });
 
+            // Si es pedido de tienda, saltar la verificación y cargar directo
+            if (tipo === 'tienda') {
+                await performCommit(excelItems, tipo, file.name, currentVendorId);
+            }
+
         } catch (err) {
             console.error(err);
             alert('Error: ' + translateError(err));
         } finally {
             setUploading(false);
         }
+    };
+
+    const performCommit = async (items, tipo, fileName, vendorId) => {
+        const finalVendorName = (isAdmin && simulatedVendorName) ? simulatedVendorName : (profile?.nombre || user?.user_metadata?.nombre);
+
+        const { data: pedido, error: pedidoError } = await supabase
+            .from('pedidos')
+            .upsert({
+                semana_id: semanaActual.id,
+                vendedor_id: vendorId,
+                vendedor_nombre: finalVendorName,
+                archivo_nombre: fileName,
+                tipo: tipo
+            }, { onConflict: 'semana_id, vendedor_id, tipo' })
+            .select()
+            .maybeSingle();
+
+        if (pedidoError) throw pedidoError;
+
+        await supabase.from('pedido_items').delete().eq('pedido_id', pedido.id);
+
+        const { error: itemsError } = await supabase
+            .from('pedido_items')
+            .insert(items.map(i => ({ ...i, pedido_id: pedido.id })));
+
+        if (itemsError) throw itemsError;
+
+        alert(`Pedido de tipo ${tipo.toUpperCase()} cargado con éxito (${items.length} items).`);
+        setValidationResult(null);
+        fetchSemanaYPedidos();
     };
 
     const commitUpload = async () => {
@@ -477,33 +512,7 @@ export default function SellerDashboard({ isAdmin }) {
 
         try {
             const finalVendorId = (isAdmin && simulatedVendorId) ? simulatedVendorId : user.id;
-            const finalVendorName = (isAdmin && simulatedVendorName) ? simulatedVendorName : (profile.nombre || user.user_metadata?.nombre);
-
-            const { data: pedido, error: pedidoError } = await supabase
-                .from('pedidos')
-                .upsert({
-                    semana_id: semanaActual.id,
-                    vendedor_id: finalVendorId,
-                    vendedor_nombre: finalVendorName,
-                    archivo_nombre: fileInfo.name,
-                    tipo: tipo
-                }, { onConflict: 'semana_id, vendedor_id, tipo' })
-                .select()
-                .maybeSingle();
-
-            if (pedidoError) throw pedidoError;
-
-            await supabase.from('pedido_items').delete().eq('pedido_id', pedido.id);
-
-            const { error: itemsError } = await supabase
-                .from('pedido_items')
-                .insert(items.map(i => ({ ...i, pedido_id: pedido.id })));
-
-            if (itemsError) throw itemsError;
-
-            alert(`Pedido de tipo ${tipo.toUpperCase()} cargado con éxito (${items.length} items).`);
-            setValidationResult(null);
-            fetchSemanaYPedidos();
+            await performCommit(items, tipo, fileInfo.name, finalVendorId);
         } catch (err) {
             console.error(err);
             alert('Error: ' + translateError(err));
