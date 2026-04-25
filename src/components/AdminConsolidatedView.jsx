@@ -483,7 +483,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             let matchedCount = 0;
             let totalQtyInDB = 0;
             let totalQtyFilledInExcel = 0;
-            let excelTotalSumManual = 0;
+            const excelSubtotalsByEditorial = {}; // Para calcular el total exacto como en el sistema
 
             const filledProducts = new Set(); // Para evitar duplicados (reimpresiones)
 
@@ -558,10 +558,10 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         sheetMatchCount++;
                         totalQtyFilledInExcel += matchedQty;
                         
-                        // Sumar al total manual de Excel (con descuento)
+                        // Acumular subtotal por editorial para el cálculo final
                         const pInfo = productKey.startsWith('isbn:') ? isbnProducts[productKey.split(':')[1]] : flatProducts[productKey.split(':')[1]];
-                        const dto = EDITORIAL_DTOS[pInfo.editorial] || 35;
-                        excelTotalSumManual += (pInfo.precio * matchedQty) * (1 - (dto / 100));
+                        const ed = pInfo.editorial || 'Otras';
+                        excelSubtotalsByEditorial[ed] = (excelSubtotalsByEditorial[ed] || 0) + (pInfo.precio * matchedQty);
 
                         filledProducts.add(productKey);
                     } else if (matchedQty !== undefined) {
@@ -589,7 +589,15 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             
             if (matchedCount > 0) {
                 const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
-                const excelTotalFormatted = `$${Math.round(excelTotalSumManual).toLocaleString('es-AR')}`;
+                
+                // Calcular total manual de Excel aplicando descuentos por editorial (igual que el sistema)
+                let finalExcelTotal = 0;
+                Object.entries(excelSubtotalsByEditorial).forEach(([ed, subtotal]) => {
+                    const dto = EDITORIAL_DTOS[ed] || 35;
+                    finalExcelTotal += Math.round(subtotal * (1 - (dto / 100)));
+                });
+
+                const excelTotalFormatted = `$${finalExcelTotal.toLocaleString('es-AR')}`;
 
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
                 let msg = `¡Éxito! Se actualizaron ${matchedCount} títulos.\n\n`;
