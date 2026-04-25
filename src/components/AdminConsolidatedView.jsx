@@ -471,8 +471,9 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 Object.values(products).forEach(p => {
                     const normTitle = String(p.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                     const normIsbn = String(p.ean || '').replace(/[^0-9]/g, '');
-                    if (normTitle) flatProducts[normTitle] = { qty: p.totalQty, original: p.titulo };
-                    if (normIsbn && normIsbn.length > 5) isbnProducts[normIsbn] = p.totalQty;
+                    const pInfo = { qty: p.totalQty, original: p.titulo, precio: p.precio, editorial: p.editorial };
+                    if (normTitle) flatProducts[normTitle] = pInfo;
+                    if (normIsbn && normIsbn.length > 5) isbnProducts[normIsbn] = pInfo;
                 });
             });
 
@@ -482,6 +483,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             let matchedCount = 0;
             let totalQtyInDB = 0;
             let totalQtyFilledInExcel = 0;
+            let excelTotalSumManual = 0;
 
             const filledProducts = new Set(); // Para evitar duplicados (reimpresiones)
 
@@ -534,14 +536,16 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
                     // 1. Intentar por ISBN
                     if (cellIsbn && isbnProducts[cellIsbn] !== undefined) {
-                        matchedQty = isbnProducts[cellIsbn];
+                        const pInfo = isbnProducts[cellIsbn];
+                        matchedQty = pInfo.qty;
                         productKey = `isbn:${cellIsbn}`;
                     } 
                     // 2. Intentar por Título
                     else if (cellTitle) {
                         const normCellTitle = String(cellTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
                         if (flatProducts[normCellTitle] !== undefined) {
-                            matchedQty = flatProducts[normCellTitle].qty;
+                            const pInfo = flatProducts[normCellTitle];
+                            matchedQty = pInfo.qty;
                             productKey = `title:${normCellTitle}`;
                         }
                     }
@@ -553,6 +557,12 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         matchedCount++;
                         sheetMatchCount++;
                         totalQtyFilledInExcel += matchedQty;
+                        
+                        // Sumar al total manual de Excel (con descuento)
+                        const pInfo = productKey.startsWith('isbn:') ? isbnProducts[productKey.split(':')[1]] : flatProducts[productKey.split(':')[1]];
+                        const dto = EDITORIAL_DTOS[pInfo.editorial] || 35;
+                        excelTotalSumManual += (pInfo.precio * matchedQty) * (1 - (dto / 100));
+
                         filledProducts.add(productKey);
                     } else if (matchedQty !== undefined) {
                         row.getCell(qtyColIndex + 1).value = 0;
@@ -578,34 +588,15 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             window.URL.revokeObjectURL(url);
             
             if (matchedCount > 0) {
-                // VERIFICACIÓN: Sumar F13:F22 manualmente en la hoja Totales
-                // (ExcelJS no recalcula fórmulas, hay que hacerlo a mano)
-                let excelTotalSum = 0;
-                let excelTotalFormatted = 'No encontrada';
-                const totalsSheet = workbook.getWorksheet('Totales') || workbook.getWorksheet('TOTALES') || workbook.getWorksheet('totales');
-                if (totalsSheet) {
-                    for (let row = 13; row <= 22; row++) {
-                        const cellVal = totalsSheet.getCell(`F${row}`).value;
-                        let numVal = 0;
-                        if (typeof cellVal === 'number') {
-                            numVal = cellVal;
-                        } else if (typeof cellVal === 'object' && cellVal !== null && typeof cellVal.result === 'number') {
-                            numVal = cellVal.result;
-                        }
-                        excelTotalSum += numVal;
-                    }
-                    excelTotalFormatted = `$${Math.round(excelTotalSum).toLocaleString('es-AR')}`;
-                    console.log(`[VERIFICACIÓN F13:F22] Suma manual: ${excelTotalSum} | Sistema: ${grandTotal}`);
-                }
+                const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
+                const excelTotalFormatted = `$${Math.round(excelTotalSumManual).toLocaleString('es-AR')}`;
 
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
                 let msg = `¡Éxito! Se actualizaron ${matchedCount} títulos.\n\n`;
                 msg += `Unidades en Sistema: ${totalQtyInDB}\n`;
                 msg += `Unidades en Excel: ${totalQtyFilledInExcel}\n`;
-                if (totalsSheet) {
-                    msg += `\nTotal $ Excel (F13:F22): ${excelTotalFormatted}\n`;
-                    msg += `Total $ Sistema: $${Math.round(grandTotal).toLocaleString('es-AR')}\n`;
-                }
+                msg += `\nTotal $ Excel (Calculado): ${excelTotalFormatted}\n`;
+                msg += `Total $ Sistema: $${Math.round(grandTotalSystem).toLocaleString('es-AR')}\n`;
                 
                 if (diff > 0) {
                     msg += `\n⚠️ ATENCIÓN: Faltan ${diff} unidades.`;
