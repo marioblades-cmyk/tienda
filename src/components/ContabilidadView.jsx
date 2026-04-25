@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // Efectivo Personal = billetera del admin para pagos del negocio
 const METODOS = ['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo Personal', 'Otros'];
-const ORIGENES = ['Tienda', 'Pedidos', 'Envios', 'Proveedores', 'Transferencia'];
+const ORIGENES = ['Tienda', 'Pedidos', 'Préstamos', 'Envios', 'Proveedores', 'Transferencia'];
 const METHOD_ICON  = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Efectivo Personal': '👛', 'Otros': '💳' };
 const METHOD_COLOR = {
     'Efectivo':                 'bg-success/10 text-success border-success/20',
@@ -23,6 +23,7 @@ const METHOD_COLOR = {
 const ORIGEN_COLOR = {
     'Tienda':       'bg-primary/10 text-primary border-primary/20',
     'Pedidos':      'bg-secondary/10 text-secondary border-secondary/20',
+    'Préstamos':    'bg-purple-50 text-purple-600 border-purple-200',
     'Envios':       'bg-orange-50 text-orange-500 border-orange-200',
     'Proveedores':  'bg-red-50 text-red-500 border-red-200',
 };
