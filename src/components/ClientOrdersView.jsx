@@ -185,19 +185,22 @@ export default function ClientOrdersView() {
         try {
             const { item, client } = damageTarget;
             const originalId = item.id;
+            const originalMonto = item.monto_pagado || 0;
 
-            // 1. Mark original item as DAÑADO
+            // 1. Marcar original como DAÑADO y ANULAR DEUDA/PAGO (se transfiere al nuevo)
             const { error: err1 } = await supabase
                 .from('cliente_items')
                 .update({ 
                     estado: 'DAÑADO',
-                    nota: (item.nota || '') + ` [DAÑADO - Reposición vía ${method}]`
+                    precio_venta: 0,
+                    monto_pagado: 0,
+                    nota: (item.nota || '') + ` [DAÑADO - Saldo $${originalMonto} transferido al nuevo]`
                 })
                 .eq('id', originalId);
             if (err1) throw err1;
 
             if (method === 'STOCK') {
-                // Find product in catalog
+                // Buscar producto en catálogo
                 const { data: prod, error: pErr } = await supabase
                     .from('catalogo_productos')
                     .select('id, stock_fisico, titulo')
@@ -209,7 +212,7 @@ export default function ClientOrdersView() {
                     throw new Error("No hay stock físico suficiente para reponer de inmediato.");
                 }
 
-                // 2. Create NEW item as EN TIENDA
+                // 2. Crear reposición como EN TIENDA con el saldo transferido
                 const { error: err2 } = await supabase
                     .from('cliente_items')
                     .insert([{
@@ -219,14 +222,14 @@ export default function ClientOrdersView() {
                         catalog_id: item.catalog_id,
                         product_id: item.product_id,
                         precio_venta: item.precio_venta,
-                        monto_pagado: item.monto_pagado,
+                        monto_pagado: originalMonto,
                         estado: 'EN TIENDA',
                         semana_id: null,
-                        nota: `Reposición de ítem #${originalId.slice(0,5)} desde STOCK`
+                        nota: `Reposición de ítem #${originalId.slice(0,5)} (Saldo de original)`
                     }]);
                 if (err2) throw err2;
 
-                // 3. Discount Stock
+                // 3. Descontar Stock
                 const { error: err3 } = await supabase
                     .from('catalogo_productos')
                     .update({ stock_fisico: prod.stock_fisico - 1 })
@@ -243,11 +246,11 @@ export default function ClientOrdersView() {
                 });
 
             } else {
-                // method === 'PEDIDO'
+                // método === 'PEDIDO'
                 const openWeek = semanas.find(s => s.abierta);
                 if (!openWeek) throw new Error("No hay ninguna semana abierta para realizar el pedido de reposición.");
 
-                // 2. Create NEW item as PEDIDO in open week
+                // 2. Crear reposición como PEDIDO con el saldo transferido
                 const { error: err2 } = await supabase
                     .from('cliente_items')
                     .insert([{
@@ -257,15 +260,15 @@ export default function ClientOrdersView() {
                         catalog_id: item.catalog_id,
                         product_id: item.product_id,
                         precio_venta: item.precio_venta,
-                        monto_pagado: item.monto_pagado,
+                        monto_pagado: originalMonto,
                         estado: `PEDIDO ${openWeek.nombre}`,
                         semana_id: openWeek.id,
-                        nota: `Reposición de ítem #${originalId.slice(0,5)} vía PEDIDO ${openWeek.nombre}`
+                        nota: `Reposición de ítem #${originalId.slice(0,5)} (Saldo de original)`
                     }]);
                 if (err2) throw err2;
             }
 
-            alert("Reposición procesada con éxito.");
+            alert("Reposición procesada con éxito y saldo transferido.");
             setShowDamageModal(false);
             setDamageTarget(null);
             fetchData();
