@@ -402,54 +402,60 @@ function MovimientosTab() {
                                 </div>
                             ))}
                         </div>
-                    }
-                </div>
-            </div>
+                <div className="p-4 border-b border-border bg-background flex flex-col gap-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        {/* Grupo 1: Acción y Tiempo */}
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => setShowTransferModal(true)}
+                                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-black hover:brightness-105 shadow-lg shadow-primary/20 transition-all shrink-0">
+                                <ArrowRightLeft size={14} /> Transferir
+                            </button>
+                            <div className="w-px h-6 bg-border mx-1" />
+                            <div className="flex items-center gap-2 bg-surface border border-border rounded-xl px-2 py-1 shadow-sm">
+                                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                                    className="bg-transparent text-[11px] font-bold outline-none focus:text-primary transition-colors cursor-pointer" />
+                                <span className="text-muted text-[10px] font-black">→</span>
+                                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                                    className="bg-transparent text-[11px] font-bold outline-none focus:text-primary transition-colors cursor-pointer" />
+                            </div>
+                        </div>
 
-            {/* Tabla */}
-            <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-                {showTransferModal && (
-                    <TransferenciaModal
-                        onClose={() => setShowTransferModal(false)}
-                        onDone={fetchMovimientos}
-                    />
-                )}
-                <div className="p-4 border-b border-border bg-background flex flex-wrap gap-3 items-center">
-                    <button onClick={() => setShowTransferModal(true)}
-                        className="flex items-center gap-2 px-4 py-1.5 bg-primary text-white rounded-lg text-xs font-black hover:brightness-105 shadow transition-all">
-                        <ArrowRightLeft size={14} /> Transferir entre cuentas
-                    </button>
-                    <div className="w-px h-5 bg-border" />
-                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                        className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs font-bold outline-none focus:border-primary" />
-                    <span className="text-muted text-xs">→</span>
-                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                        className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs font-bold outline-none focus:border-primary" />
-
-                    <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)}
-                        className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs font-bold outline-none cursor-pointer">
-                        <option value="todos">Ingresos + Egresos</option>
-                        <option value="INGRESO">Solo Ingresos</option>
-                        <option value="EGRESO">Solo Egresos</option>
-                    </select>
-                    <select value={filterMetodo} onChange={e => setFilterMetodo(e.target.value)}
-                        className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs font-bold outline-none cursor-pointer">
-                        <option value="todos">Todos los métodos</option>
-                        {METODOS.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                    <select value={filterOrigen} onChange={e => setFilterOrigen(e.target.value)}
-                        className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs font-bold outline-none cursor-pointer">
-                        <option value="todos">Todos los orígenes</option>
-                        {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-
-                    <div className="relative ml-auto">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar concepto..."
-                            className="pl-8 pr-3 py-1.5 bg-surface border border-border rounded-lg text-xs outline-none focus:border-primary w-48" />
-                        {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted"><X size={12} /></button>}
+                        {/* Grupo 2: Búsqueda y Contador */}
+                        <div className="flex items-center gap-3 flex-1 justify-end">
+                            <div className="relative w-full max-w-xs">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                                <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por concepto o categoría..."
+                                    className="w-full pl-9 pr-8 py-2 bg-surface border border-border rounded-xl text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all shadow-sm" />
+                                {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"><X size={14} /></button>}
+                            </div>
+                            <div className="px-3 py-2 bg-muted/10 rounded-xl text-[10px] font-black text-muted uppercase tracking-wider whitespace-nowrap">
+                                {filtered.length} REGISTROS
+                            </div>
+                        </div>
                     </div>
-                    <span className="text-[10px] font-black text-muted uppercase">{filtered.length} registros</span>
+
+                    <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                        <span className="text-[10px] font-black text-muted uppercase tracking-widest mr-1">Filtrar por:</span>
+                        
+                        <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)}
+                            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-[11px] font-bold outline-none cursor-pointer hover:border-primary transition-colors min-w-[140px] shadow-sm">
+                            <option value="todos">Ingresos + Egresos</option>
+                            <option value="INGRESO">🟢 Solo Ingresos</option>
+                            <option value="EGRESO">🔴 Solo Egresos</option>
+                        </select>
+
+                        <select value={filterMetodo} onChange={e => setFilterMetodo(e.target.value)}
+                            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-[11px] font-bold outline-none cursor-pointer hover:border-primary transition-colors min-w-[150px] shadow-sm">
+                            <option value="todos">Todos los métodos</option>
+                            {METODOS.map(m => <option key={m} value={m}>{METHOD_ICON[m]} {m}</option>)}
+                        </select>
+
+                        <select value={filterOrigen} onChange={e => setFilterOrigen(e.target.value)}
+                            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-[11px] font-bold outline-none cursor-pointer hover:border-primary transition-colors min-w-[150px] shadow-sm">
+                            <option value="todos">Todos los orígenes</option>
+                            {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
