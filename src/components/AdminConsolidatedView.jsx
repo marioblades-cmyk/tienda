@@ -489,7 +489,16 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     const normIsbn = String(p.ean || '').replace(/[^0-9]/g, '');
                     const pInfo = { qty: p.totalQty, original: p.titulo, precio: p.precio, editorial: p.editorial };
                     if (normTitle) flatProducts[normTitle] = pInfo;
-                    if (normIsbn && normIsbn.length > 5) isbnProducts[normIsbn] = pInfo;
+                    
+                    if (normIsbn && normIsbn.length > 5) {
+                        if (!isbnProducts[normIsbn]) {
+                            isbnProducts[normIsbn] = pInfo;
+                        } else {
+                            // Si el ISBN está repetido para distintos títulos en el sistema, 
+                            // lo marcamos para NO usarlo como única fuente de verdad.
+                            isbnProducts[normIsbn] = 'DUPLICATE';
+                        }
+                    }
                 });
             });
 
@@ -559,8 +568,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         }
                     }
 
-                    // 2. SEGUNDO INTENTO: Por ISBN (Si el título no coincidió)
-                    if (matchedQty === undefined && cellIsbn && isbnProducts[cellIsbn] !== undefined) {
+                    // 2. SEGUNDO INTENTO: Por ISBN (Si el título no coincidió y el ISBN no es ambiguo)
+                    if (matchedQty === undefined && cellIsbn && isbnProducts[cellIsbn] !== undefined && isbnProducts[cellIsbn] !== 'DUPLICATE') {
                         const pInfo = isbnProducts[cellIsbn];
                         matchedQty = pInfo.qty;
                         productKey = `isbn:${cellIsbn}`;
