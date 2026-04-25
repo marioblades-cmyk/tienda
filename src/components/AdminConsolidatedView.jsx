@@ -430,13 +430,29 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 }
 
                 if (foundTitle !== -1 && foundQty !== -1) {
+                    // Buscar Precio
+                    let foundPrice = -1;
+                    for (let j = 1; j <= Math.min(50, ws.rowCount); j++) {
+                        const r = ws.getRow(j);
+                        r.eachCell((cell, colNumber) => {
+                            const v = String(cell.value || '').toLowerCase();
+                            if (foundPrice === -1 && (v.includes('precio') || v.includes('p. publico') || v.includes('p. lista') || v.includes('importe') || v.includes('unit'))) {
+                                if (colNumber - 1 !== foundTitle && colNumber - 1 !== foundQty) {
+                                    foundPrice = colNumber - 1;
+                                }
+                            }
+                        });
+                        if (foundPrice !== -1) break;
+                    }
+
                     productSheets.push({
                         ws,
                         titleColIndex: foundTitle,
                         qtyColIndex: foundQty,
-                        isbnColIndex: foundIsbn
+                        isbnColIndex: foundIsbn,
+                        priceColIndex: foundPrice
                     });
-                    console.log(`✅ Hoja "${ws.name}" lista: Título=${foundTitle}, Cant=${foundQty}`);
+                    console.log(`✅ Hoja "${ws.name}" lista: Título=${foundTitle}, Cant=${foundQty}, Precio=${foundPrice}`);
                 } else if (foundTitle !== -1 && foundQty === -1) {
                     // FALLBACK ESPECÍFICO: Si conocemos la hoja pero no detectamos cantidad, usar columna por nombre de hoja
                     const wsNameLower = ws.name.toLowerCase().replace(/\s/g, '');
@@ -483,7 +499,6 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             let matchedCount = 0;
             let totalQtyInDB = 0;
             let totalQtyFilledInExcel = 0;
-            const excelSubtotalsByEditorial = {}; // Para calcular el total exacto como en el sistema
 
             const filledProducts = new Set(); // Para evitar duplicados (reimpresiones)
 
@@ -557,12 +572,6 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         matchedCount++;
                         sheetMatchCount++;
                         totalQtyFilledInExcel += matchedQty;
-                        
-                        // Acumular subtotal por editorial para el cálculo final
-                        const pInfo = productKey.startsWith('isbn:') ? isbnProducts[productKey.split(':')[1]] : flatProducts[productKey.split(':')[1]];
-                        const ed = pInfo.editorial || 'Otras';
-                        excelSubtotalsByEditorial[ed] = (excelSubtotalsByEditorial[ed] || 0) + (pInfo.precio * matchedQty);
-
                         filledProducts.add(productKey);
                     } else if (matchedQty !== undefined) {
                         row.getCell(qtyColIndex + 1).value = 0;
@@ -588,28 +597,70 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             window.URL.revokeObjectURL(url);
             
             if (matchedCount > 0) {
-                const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
-                
-                // Calcular total manual de Excel aplicando descuentos por editorial (igual que el sistema)
-                let finalExcelTotal = 0;
-                Object.entries(excelSubtotalsByEditorial).forEach(([ed, subtotal]) => {
-                    const dto = EDITORIAL_DTOS[ed] || 35;
-                    finalExcelTotal += Math.round(subtotal * (1 - (dto / 100)));
+                // --- VERIFICACIÓN REAL POST-LLENADO ---
+                // Re-escaneamos el Excel ya lleno para ver qué hay realmente ahí dentro
+                let realExcelTotal = 0;
+                const excelTotalsByEditorial = {};
+
+                productSheets.forEach(({ ws, titleColIndex, qtyColIndex, priceColIndex }) => {
+                    let sheetTotal = 0;
+                    ws.eachRow((row, rowNumber) => {
+                        if (rowNumber <= 5) return; // Saltar headers
+
+                        const qty = Number(row.getCell(qtyColIndex + 1).value) || 0;
+                        if (qty > 0) {
+                            // Intentar obtener precio de la columna detectada, o del sistema si no hay columna
+                            let price = 0;
+                            if (priceColIndex !== -1) {
+                                const pVal = row.getCell(priceColIndex + 1).value;
+                                if (typeof pVal === 'number') price = pVal;
+                                else if (typeof pVal === 'object' && pVal?.result) price = pVal.result;
+                            }
+
+                            // Si no hay precio en el Excel, buscamos en nuestro mapa para no perder la verificación
+                            if (price === 0) {
+                                const cellTitle = String(row.getCell(titleColIndex + 1).value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                if (flatProducts[cellTitle]) price = flatProducts[cellTitle].precio;
+                            }
+
+                            sheetTotal += (qty * price);
+                        }
+                    });
+
+                    if (sheetTotal > 0) {
+                        // Mapear nombre de hoja a editorial para el descuento
+                        let edMatch = 'Otras';
+                        const wsName = ws.name.toLowerCase();
+                        if (wsName.includes('ivrea')) edMatch = 'Ivrea';
+                        else if (wsName.includes('ovni')) edMatch = 'Ovnipress';
+                        else if (wsName.includes('panini') || wsName.includes('utopia')) edMatch = 'Panini-Utopia';
+                        else if (wsName.includes('penguin') || wsName.includes('rhm')) edMatch = 'Penguin';
+                        else if (wsName.includes('planeta')) edMatch = 'Planeta';
+                        else if (wsName.includes('pop') || wsName.includes('deux')) edMatch = 'Deux-PopFiction';
+                        else if (wsName.includes('v&r')) edMatch = 'V&R';
+                        else if (wsName.includes('hotel')) edMatch = 'Hotel de las Ideas';
+
+                        const dto = EDITORIAL_DTOS[edMatch] || 35;
+                        realExcelTotal += Math.round(sheetTotal * (1 - (dto / 100)));
+                    }
                 });
 
-                const excelTotalFormatted = `$${finalExcelTotal.toLocaleString('es-AR')}`;
+                const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
+                const excelTotalFormatted = `$${realExcelTotal.toLocaleString('es-AR')}`;
 
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
                 let msg = `¡Éxito! Se actualizaron ${matchedCount} títulos.\n\n`;
                 msg += `Unidades en Sistema: ${totalQtyInDB}\n`;
                 msg += `Unidades en Excel: ${totalQtyFilledInExcel}\n`;
-                msg += `\nTotal $ Excel (Calculado): ${excelTotalFormatted}\n`;
+                msg += `\nTotal $ Excel (VERIFICADO): ${excelTotalFormatted}\n`;
                 msg += `Total $ Sistema: $${Math.round(grandTotalSystem).toLocaleString('es-AR')}\n`;
                 
                 if (diff > 0) {
-                    msg += `\n⚠️ ATENCIÓN: Faltan ${diff} unidades.`;
+                    msg += `\n⚠️ ATENCIÓN: Faltan ${diff} unidades en el Excel.`;
+                } else if (realExcelTotal !== Math.round(grandTotalSystem)) {
+                    msg += `\n⚠️ ATENCIÓN: El monto total no coincide perfectamente.`;
                 } else {
-                    msg += `\n✅ ¡Unidades coinciden perfectamente!`;
+                    msg += `\n✅ ¡Unidades y montos coinciden perfectamente!`;
                 }
                 alert(msg);
             }
