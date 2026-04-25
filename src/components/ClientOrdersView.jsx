@@ -86,6 +86,9 @@ export default function ClientOrdersView() {
     const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
     const [editCliente, setEditCliente] = useState(null); // { id, nombre, celular, ci, ciudad, sucursal, direccion, notas_cliente }
     const [deleteCliente, setDeleteCliente] = useState(null); // { id, nombre } para confirmación
+    const [showDamageModal, setShowDamageModal] = useState(false);
+    const [damageTarget, setDamageTarget] = useState(null); // { item, client }
+    const [resolvingDamage, setResolvingDamage] = useState(false);
     
     // RESET MODAL ON CLOSE/OPEN (Hoja en blanco)
     useEffect(() => {
@@ -172,6 +175,104 @@ export default function ClientOrdersView() {
             alert("Error al realizar borrado masivo: " + err.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResolveDamage = async (method) => {
+        if (!damageTarget || !user) return;
+        setResolvingDamage(true);
+        try {
+            const { item, client } = damageTarget;
+            const originalId = item.id;
+
+            // 1. Mark original item as DAÑADO
+            const { error: err1 } = await supabase
+                .from('cliente_items')
+                .update({ 
+                    estado: 'DAÑADO',
+                    nota: (item.nota || '') + ` [DAÑADO - Reposición vía ${method}]`
+                })
+                .eq('id', originalId);
+            if (err1) throw err1;
+
+            if (method === 'STOCK') {
+                // Find product in catalog
+                const { data: prod, error: pErr } = await supabase
+                    .from('catalogo_productos')
+                    .select('id, stock_fisico, titulo')
+                    .eq('id', item.catalog_id || item.product_id)
+                    .maybeSingle();
+                
+                if (pErr) throw pErr;
+                if (!prod || (prod.stock_fisico || 0) <= 0) {
+                    throw new Error("No hay stock físico suficiente para reponer de inmediato.");
+                }
+
+                // 2. Create NEW item as EN TIENDA
+                const { error: err2 } = await supabase
+                    .from('cliente_items')
+                    .insert([{
+                        cliente_id: item.cliente_id,
+                        vendedor_id: item.vendedor_id,
+                        titulo: item.titulo,
+                        catalog_id: item.catalog_id,
+                        product_id: item.product_id,
+                        precio_venta: item.precio_venta,
+                        monto_pagado: item.monto_pagado,
+                        estado: 'EN TIENDA',
+                        semana_id: null,
+                        nota: `Reposición de ítem #${originalId.slice(0,5)} desde STOCK`
+                    }]);
+                if (err2) throw err2;
+
+                // 3. Discount Stock
+                const { error: err3 } = await supabase
+                    .from('catalogo_productos')
+                    .update({ stock_fisico: prod.stock_fisico - 1 })
+                    .eq('id', prod.id);
+                if (err3) throw err3;
+
+                await catalogService.logStockMovement({
+                    productoId: prod.id,
+                    titulo: prod.titulo,
+                    delta: -1,
+                    stockDespues: prod.stock_fisico - 1,
+                    motivo: 'CAMBIO/REPOSICIÓN',
+                    detalle: `Reposición para cliente ${client?.nombre || 'Desconocido'}`
+                });
+
+            } else {
+                // method === 'PEDIDO'
+                const openWeek = semanas.find(s => s.abierta);
+                if (!openWeek) throw new Error("No hay ninguna semana abierta para realizar el pedido de reposición.");
+
+                // 2. Create NEW item as PEDIDO in open week
+                const { error: err2 } = await supabase
+                    .from('cliente_items')
+                    .insert([{
+                        cliente_id: item.cliente_id,
+                        vendedor_id: item.vendedor_id,
+                        titulo: item.titulo,
+                        catalog_id: item.catalog_id,
+                        product_id: item.product_id,
+                        precio_venta: item.precio_venta,
+                        monto_pagado: item.monto_pagado,
+                        estado: `PEDIDO ${openWeek.nombre}`,
+                        semana_id: openWeek.id,
+                        nota: `Reposición de ítem #${originalId.slice(0,5)} vía PEDIDO ${openWeek.nombre}`
+                    }]);
+                if (err2) throw err2;
+            }
+
+            alert("Reposición procesada con éxito.");
+            setShowDamageModal(false);
+            setDamageTarget(null);
+            fetchData();
+        } catch (error) {
+            console.error(error);
+            alert("Error al procesar daño: " + error.message);
+        } finally {
+            setResolvingDamage(false);
         }
     };
 
@@ -390,18 +491,35 @@ export default function ClientOrdersView() {
 
         return (
             <div className={`flex flex-col ${compact ? 'items-start' : 'items-center'} gap-0.5`}>
-                <span
-                    onClick={()=>setEditingState(it.id)}
-                    className={`px-2 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-bold tracking-wide cursor-pointer border transition-colors whitespace-nowrap ${
-                        it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse' :
-                        it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
-                        it.estado === 'EN TIENDA' ? 'bg-success/10 border-success/30 text-success shadow-sm shadow-success/20' :
-                        (isAdjudicado || it.estado.startsWith('CONFIRMADO')) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
-                        'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'
-                    }`}
-                >
-                    {displayEstado}
-                </span>
+                <div className="flex items-center gap-1">
+                    <span
+                        onClick={()=>setEditingState(it.id)}
+                        className={`px-2 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-bold tracking-wide cursor-pointer border transition-colors whitespace-nowrap ${
+                            it.estado === 'DAÑADO' ? 'bg-orange-500/10 border-orange-500/30 text-orange-500' :
+                            it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse' :
+                            it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
+                            it.estado === 'EN TIENDA' ? 'bg-success/10 border-success/30 text-success shadow-sm shadow-success/20' :
+                            (isAdjudicado || it.estado.startsWith('CONFIRMADO')) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
+                            'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'
+                        }`}
+                    >
+                        {displayEstado}
+                    </span>
+                    {!compact && (it.estado === 'ENTREGADO' || it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const client = clientes.find(c => c.id === it.cliente_id);
+                                setDamageTarget({ item: it, client });
+                                setShowDamageModal(true);
+                            }}
+                            className="p-1 text-orange-400 hover:text-orange-600 hover:bg-orange-500/10 rounded transition-colors"
+                            title="Reportar daño / Cambio"
+                        >
+                            <AlertCircle size={14} />
+                        </button>
+                    )}
+                </div>
                 {!compact && it.estado === 'RECORTADO' && (
                     <button
                         onClick={(e) => { e.stopPropagation(); setReprogrammingItem(it); }}
@@ -3663,6 +3781,50 @@ export default function ClientOrdersView() {
                         >
                             Cancelar
                         </button>
+                    </div>
+                </div>
+            )}
+            {showDamageModal && damageTarget && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-navy/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="p-8 text-center">
+                            <div className="w-16 h-16 bg-orange-100 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <AlertCircle size={32} />
+                            </div>
+                            <h3 className="text-xl font-black text-navy mb-2 uppercase italic">Reportar Daño / Cambio</h3>
+                            <p className="text-sm text-muted mb-6">
+                                Estás reportando un problema con <strong>{damageTarget.item.titulo}</strong> para el cliente <strong>{damageTarget.client?.nombre}</strong>.
+                                <br/><br/>
+                                <span className="text-xs italic text-muted/60">El ítem actual se marcará como 'DAÑADO' y se creará una reposición.</span>
+                            </p>
+
+                            <div className="space-y-3">
+                                <button
+                                    onClick={() => handleResolveDamage('STOCK')}
+                                    disabled={resolvingDamage}
+                                    className="w-full bg-navy text-white font-black py-4 rounded-2xl hover:bg-navy/90 transition-all flex items-center justify-center gap-3 group"
+                                >
+                                    <Box size={20} className="group-hover:scale-110 transition-transform" />
+                                    REPONER DESDE STOCK FÍSICO
+                                </button>
+                                <button
+                                    onClick={() => handleResolveDamage('PEDIDO')}
+                                    disabled={resolvingDamage}
+                                    className="w-full bg-surface border-2 border-navy text-navy font-black py-4 rounded-2xl hover:bg-navy/5 transition-all flex items-center justify-center gap-3 group"
+                                >
+                                    <RefreshCw size={20} className="group-hover:rotate-180 transition-transform duration-500" />
+                                    PEDIR AL DISTRIBUIDOR
+                                </button>
+                            </div>
+                        </div>
+                        <div className="bg-background p-4 flex justify-center">
+                            <button 
+                                onClick={() => setShowDamageModal(false)}
+                                className="text-muted hover:text-navy text-xs font-black uppercase tracking-widest"
+                            >
+                                Cancelar
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
