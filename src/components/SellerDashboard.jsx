@@ -363,7 +363,11 @@ export default function SellerDashboard({ isAdmin }) {
                 if (action === 'PAUSAR') {
                     await supabase.from('cliente_items').update({ estado: 'EN PAUSA' }).eq('id', item.id);
                 } else if (action === 'MOVER') {
-                    await supabase.from('cliente_items').update({ semana_id: null, estado: 'PEDIDO (Siguiente)' }).eq('id', item.id);
+                    await supabase.from('cliente_items').update({ 
+                        semana_id: null, 
+                        estado: 'PEDIDO (Siguiente)',
+                        nota: (item.nota || '') + ` [CONFLICTO ${semanaActual.nombre}]`
+                    }).eq('id', item.id);
                 } else if (action === 'ELIMINAR') {
                     await supabase.from('cliente_items').delete().eq('id', item.id);
                 }

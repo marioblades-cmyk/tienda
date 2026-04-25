@@ -13,8 +13,11 @@ export default function AdminWeeklyView() {
     const [draggingId, setDraggingId] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [pendingOrders, setPendingOrders] = useState(0);
+    const [pendingList, setPendingList] = useState([]);
+    const [showPendingModal, setShowPendingModal] = useState(false);
     const [editingDateId, setEditingDateId] = useState(null);
     const [tempDate, setTempDate] = useState('');
+    const [selectedPending, setSelectedPending] = useState(new Set());
 
     useEffect(() => {
         fetchSemanas();
@@ -22,16 +25,23 @@ export default function AdminWeeklyView() {
     }, []);
 
     const fetchPending = async () => {
-        const { count, error } = await supabase
+        const { data, count, error } = await supabase
             .from('cliente_items')
-            .select('*', { count: 'exact', head: true })
+            .select('*, clientes(nombre)', { count: 'exact' })
             .is('semana_id', null)
             .eq('estado', 'PEDIDO (Siguiente)');
-        if (!error) setPendingOrders(count || 0);
+        
+        if (!error) {
+            setPendingOrders(count || 0);
+            setPendingList(data || []);
+        }
     };
 
-    const assignPending = async (semanaId, semanaNombre) => {
-        if (!confirm(`¿Quieres asignar los ${pendingOrders} pedidos pendientes a la ${semanaNombre}?`)) return;
+    const assignPending = async (semanaId, semanaNombre, ids = null) => {
+        const targetIds = ids || pendingList.map(p => p.id);
+        if (targetIds.length === 0) return;
+
+        if (!confirm(`¿Quieres asignar ${targetIds.length} pedidos a la ${semanaNombre}?`)) return;
         setLoading(true);
         try {
             const { error } = await supabase
@@ -40,11 +50,12 @@ export default function AdminWeeklyView() {
                     semana_id: semanaId, 
                     estado: `PEDIDO ${semanaNombre}` 
                 })
-                .is('semana_id', null)
-                .eq('estado', 'PEDIDO (Siguiente)');
+                .in('id', targetIds);
             
             if (error) throw error;
             alert("¡Éxito! Pedidos asignados.");
+            setShowPendingModal(false);
+            setSelectedPending(new Set());
             await fetchPending();
         } catch (err) {
             alert("Error al asignar: " + err.message);
@@ -268,17 +279,20 @@ export default function AdminWeeklyView() {
             </div>
 
             {pendingOrders > 0 && (
-                <div className="bg-purple-500/10 border-2 border-purple-500/30 p-4 rounded-xl flex items-center justify-between animate-pulse">
+                <div 
+                    onClick={() => setShowPendingModal(true)}
+                    className="bg-purple-500/10 border-2 border-purple-500/30 p-4 rounded-xl flex items-center justify-between animate-pulse cursor-pointer hover:bg-purple-500/20 transition-all"
+                >
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-purple-500 text-white rounded-full flex items-center justify-center font-bold shadow-lg">
                             {pendingOrders}
                         </div>
                         <div>
                             <p className="text-sm font-black text-purple-500 uppercase tracking-widest">Pedidos en Espera</p>
-                            <p className="text-[10px] text-muted-2">Hay {pendingOrders} ítems guardados como "Próximo Pedido" que necesitan ser asignados a una semana concreta.</p>
+                            <p className="text-[10px] text-muted-2">Hay {pendingOrders} ítems guardados como "Próximo Pedido". Haz clic para ver detalles.</p>
                         </div>
                     </div>
-                    <span className="text-[10px] font-bold text-muted-2 italic">Asigna desde una semana abierta ↓</span>
+                    <span className="text-[10px] font-bold text-muted-2 italic">Ver lista de pendientes ↓</span>
                 </div>
             )}
 
@@ -431,6 +445,78 @@ export default function AdminWeeklyView() {
                             <p className="text-muted font-mono text-sm italic">No hay semanas creadas aún.</p>
                         </div>
                     )}
+                </div>
+            )}
+            {showPendingModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-navy/60 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+                        <div className="p-6 border-b border-border flex justify-between items-center bg-purple-500 text-white">
+                            <div>
+                                <h3 className="text-xl font-black uppercase italic">Pedidos en Espera ({pendingOrders})</h3>
+                                <p className="text-[10px] opacity-80 font-bold">Estos ítems no tienen una semana asignada aún.</p>
+                            </div>
+                            <button onClick={() => setShowPendingModal(false)} className="hover:bg-white/20 p-2 rounded-full transition-colors">
+                                <Plus size={24} className="rotate-45" />
+                            </button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-6 space-y-2 custom-scrollbar">
+                            {pendingList.map(p => (
+                                <div 
+                                    key={p.id} 
+                                    onClick={() => {
+                                        const next = new Set(selectedPending);
+                                        if (next.has(p.id)) next.delete(p.id);
+                                        else next.add(p.id);
+                                        setSelectedPending(next);
+                                    }}
+                                    className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between ${
+                                        selectedPending.has(p.id) ? 'border-purple-500 bg-purple-50' : 'border-border hover:border-purple-200'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${selectedPending.has(p.id) ? 'bg-purple-500 border-purple-500 text-white' : 'border-border'}`}>
+                                            {selectedPending.has(p.id) && <Plus size={14} />}
+                                        </div>
+                                        <div>
+                                            <div className="font-bold text-sm text-navy leading-tight">{p.titulo}</div>
+                                            <div className="text-[10px] text-muted-2">Cliente: {p.clientes?.nombre}</div>
+                                        </div>
+                                    </div>
+                                    {p.nota && (
+                                        <div className="text-[9px] bg-background px-2 py-1 rounded border border-border italic text-muted max-w-[200px] truncate">
+                                            {p.nota}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="p-6 border-t border-border bg-background flex flex-col md:flex-row gap-4">
+                            <button 
+                                onClick={() => {
+                                    if (selectedPending.size === pendingList.length) setSelectedPending(new Set());
+                                    else setSelectedPending(new Set(pendingList.map(p => p.id)));
+                                }}
+                                className="px-6 py-3 rounded-xl border-2 border-border font-bold text-xs hover:bg-white transition-all uppercase"
+                            >
+                                {selectedPending.size === pendingList.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+                            </button>
+                            
+                            <div className="flex-1 flex gap-2">
+                                {semanas.filter(s => s.abierta).map(s => (
+                                    <button
+                                        key={s.id}
+                                        onClick={() => assignPending(s.id, s.nombre, Array.from(selectedPending))}
+                                        disabled={selectedPending.size === 0 || loading}
+                                        className="flex-1 bg-purple-500 text-white font-black py-3 rounded-xl shadow-lg hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest disabled:opacity-50"
+                                    >
+                                        Asignar a {s.nombre.split(' ')[2] || 'Semana'} ({selectedPending.size})
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
