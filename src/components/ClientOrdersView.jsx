@@ -3813,7 +3813,7 @@ export default function ClientOrdersView() {
                                             </span>
                                         </div>
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] text-muted uppercase">Flotante</span>
+                                            <span className="text-[10px] text-muted uppercase">Flotante Total</span>
                                             <span className="text-sm font-black text-navy">
                                                 {damageStockAnalysis.flotantes.reduce((acc, f) => acc + f.qty, 0)} unidades
                                             </span>
@@ -3823,6 +3823,28 @@ export default function ClientOrdersView() {
                                     <div className="flex items-center gap-2 animate-pulse">
                                         <div className="w-2 h-2 bg-muted/20 rounded-full animate-bounce"></div>
                                         <span className="text-[10px] font-bold text-muted/40 uppercase">Consultando inventario...</span>
+                                    </div>
+                                )}
+
+                                {damageStockAnalysis?.flotantes.length > 0 && (
+                                    <div className="mt-4 pt-4 border-t border-border space-y-2">
+                                        <span className="text-[9px] font-bold text-muted uppercase tracking-tighter block mb-1">Próximos Arribos:</span>
+                                        <div className="flex flex-wrap gap-2">
+                                            {damageStockAnalysis.flotantes.map((f, i) => (
+                                                <div key={i} className="bg-white border border-border p-2 rounded-xl flex items-center gap-3 shadow-sm">
+                                                    <div className="text-center shrink-0">
+                                                        <div className={`text-[10px] font-black px-1.5 py-0.5 rounded ${f.isConfirmed ? 'bg-orange-500 text-white' : 'bg-muted/20 text-muted'}`}>
+                                                            +{f.qty}
+                                                        </div>
+                                                        <div className="text-[7px] font-bold mt-0.5 uppercase">{f.isConfirmed ? 'CONF' : 'PEND'}</div>
+                                                    </div>
+                                                    <div className="overflow-hidden">
+                                                        <div className="text-[8px] font-black uppercase text-navy truncate w-24">{f.nombre}</div>
+                                                        <div className="text-[8px] text-muted font-bold">~{f.fechaArribo.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' })}</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
                             </div>
