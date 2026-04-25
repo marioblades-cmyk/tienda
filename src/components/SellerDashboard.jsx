@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { readExcelRaw } from '../services/excelProcessor';
-import { Download, Upload, CheckCircle, Clock, AlertCircle, FileText, Trash2 } from 'lucide-react';
+import { Download, Upload, CheckCircle, Clock, AlertCircle, FileText, Trash2, Zap } from 'lucide-react';
 import { translateError } from '../services/errorTranslations';
 import AdminConsolidatedView from './AdminConsolidatedView';
+import ExcelJS from 'exceljs';
 
 export default function SellerDashboard({ isAdmin }) {
     const { user, profile } = useAuth();
@@ -12,8 +13,10 @@ export default function SellerDashboard({ isAdmin }) {
     const [pedidosRealizados, setPedidosRealizados] = useState([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
     const [isDragging, setIsDragging] = useState({ personal: false, tienda: false });
     const [validationResult, setValidationResult] = useState(null); // { items, type, discrepancies, file }
+    const [conflictState, setConflictState] = useState(null); // { missingItems, redItems, workbook, resolutions }
 
     // Modo simulación admin
     const [vendedoresList, setVendedoresList] = useState([]);
@@ -90,6 +93,290 @@ export default function SellerDashboard({ isAdmin }) {
         } catch (error) {
             console.error('Error descargando:', error);
             alert('Error: ' + translateError(error));
+        }
+    };
+
+    const executeDownload = async (workbook, semana, nombreVendedor, matchedCount) => {
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        let fecha = semana.nombre || 'Semana';
+        fecha = fecha.replace(/MANGAS COMICS BOLIVIA STORE/i, '').trim().replace(/\//g, '-');
+        a.download = `PEDIDO_CLIENTES_${fecha}_${nombreVendedor}.xlsx`;
+        
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        if (matchedCount > 0) {
+            alert(`¡Éxito! Se generó tu Excel con ${matchedCount} títulos de tus clientes pre-llenados. Recuerda revisarlo antes de subirlo.`);
+        }
+    };
+
+    const handleIntelligentDownload = async () => {
+        if (!semanaActual?.archivo_url || !user) return;
+        setIsExporting(true);
+        try {
+            const currentVendorId = (isAdmin && simulatedVendorId) ? simulatedVendorId : user.id;
+
+            // 1. Fetch seller client_items
+            const { data: dbItems, error: dbErr } = await supabase
+                .from('cliente_items')
+                .select('*, clientes(*)')
+                .eq('semana_id', semanaActual.id)
+                .eq('vendedor_id', currentVendorId);
+
+            if (dbErr) throw dbErr;
+
+            if (!dbItems || dbItems.length === 0) {
+                alert("No tienes pedidos de clientes registrados para esta semana. El Excel se descargará en blanco.");
+                await handleDownload();
+                setIsExporting(false);
+                return;
+            }
+
+            // Group db items by title/isbn
+            const flatProducts = {};
+            const isbnProducts = {};
+
+            dbItems.forEach(p => {
+                const normTitle = String(p.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                const normIsbn = String(p.isbn || p.ean || '').replace(/[^0-9]/g, '');
+                if (normTitle) {
+                    if (!flatProducts[normTitle]) flatProducts[normTitle] = { qty: 0, original: p.titulo };
+                    flatProducts[normTitle].qty += 1;
+                }
+                if (normIsbn && normIsbn.length > 5) {
+                    isbnProducts[normIsbn] = (isbnProducts[normIsbn] || 0) + 1;
+                }
+            });
+
+            // 2. Fetch the Base Excel
+            const response = await fetch(semanaActual.archivo_url);
+            const arrayBuffer = await response.arrayBuffer();
+
+            const isLegacy = semanaActual.archivo_nombre?.toLowerCase().endsWith('.xls') || 
+                             semanaActual.archivo_url.toLowerCase().includes('.xls?');
+            
+            if (isLegacy) {
+                alert("Atención: El archivo base es formato .xls (antiguo). La preservación de formato podría fallar.");
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(arrayBuffer);
+
+            const productSheets = [];
+
+            for (const ws of workbook.worksheets) {
+                let foundTitle = -1;
+                let foundQty = -1;
+                let foundIsbn = -1;
+
+                for (let i = 1; i <= Math.min(50, ws.rowCount); i++) {
+                    const row = ws.getRow(i);
+                    row.eachCell((cell, colNumber) => {
+                        const val = String(cell.value || '').toLowerCase();
+                        
+                        if (foundTitle === -1 && (
+                            val === 'título' || val === 'titulo' || val.includes('titulo') ||
+                            val.includes('producto') || val.includes('detalle') || 
+                            val === 'articulo' || val === 'artículo' || val.includes('articulo') ||
+                            val === 'nombre' || val === 'tãtulo' || val.includes('descrip') ||
+                            val === 'ejemplar' || val === 'item' || val === 'manga'
+                        )) {
+                            foundTitle = colNumber - 1;
+                        }
+
+                        if (foundQty === -1 && (
+                            val.includes('cantidad') || val.includes('cant') || 
+                            val.includes('unidades') || val.includes('pedido') ||
+                            val === 'q' || val === 'qty'
+                        ) && !val.includes('pag') && !val.includes('p\u00e1g')) {
+                            if (colNumber - 1 !== foundTitle) {
+                                foundQty = colNumber - 1;
+                            }
+                        }
+
+                        if (foundIsbn === -1 && (
+                            val.includes('isbn') || val.includes('ean') || 
+                            val.includes('código') || val.includes('codigo') || 
+                            val.includes('barra') || val.includes('ean13')
+                        )) {
+                            foundIsbn = colNumber - 1;
+                        }
+                    });
+
+                    if (foundTitle !== -1 && foundQty !== -1 && foundTitle !== foundQty) break;
+                }
+
+                if (foundTitle !== -1 && (foundQty === -1 || foundQty === foundTitle)) {
+                    foundQty = -1;
+                    for (let j = 1; j <= Math.min(50, ws.rowCount); j++) {
+                        const r = ws.getRow(j);
+                        r.eachCell((cell, colNumber) => {
+                            const v = String(cell.value || '').toLowerCase();
+                            if (foundQty === -1 && (v.includes('cant') || v.includes('pedido') || v.includes('unid') || v === 'q' || v === 'qty')) {
+                                if (colNumber - 1 !== foundTitle) {
+                                    foundQty = colNumber - 1;
+                                }
+                            }
+                        });
+                        if (foundQty !== -1) break;
+                    }
+                }
+
+                if (foundTitle !== -1 && foundQty !== -1) {
+                    productSheets.push({ ws, titleColIndex: foundTitle, qtyColIndex: foundQty, isbnColIndex: foundIsbn });
+                } else if (foundTitle !== -1 && foundQty === -1) {
+                    const wsNameLower = ws.name.toLowerCase().replace(/\s/g, '');
+                    let fallbackQty = -1;
+                    if (wsNameLower.includes('ovni')) fallbackQty = 4;
+                    if (fallbackQty !== -1) {
+                        productSheets.push({ ws, titleColIndex: foundTitle, qtyColIndex: fallbackQty, isbnColIndex: foundIsbn });
+                    }
+                }
+            }
+
+            if (productSheets.length === 0) {
+                alert("No se encontró formato compatible en el Excel base. Se descargará el archivo original.");
+                await handleDownload();
+                setIsExporting(false);
+                return;
+            }
+
+            let matchedCount = 0;
+            const filledProducts = new Set();
+            const redItemsFound = [];
+
+            productSheets.forEach(({ ws, titleColIndex, qtyColIndex, isbnColIndex }) => {
+                ws.eachRow((row, rowNumber) => {
+                    if (rowNumber <= 5) {
+                        const val = String(row.getCell(titleColIndex + 1).value || '').toLowerCase();
+                        if (val.includes('título') || val.includes('detalle') || val.includes('editorial')) return;
+                    }
+
+                    const titleCell = row.getCell(titleColIndex + 1);
+                    const cellTitle = titleCell.value;
+                    const cellIsbn = isbnColIndex !== -1 ? String(row.getCell(isbnColIndex + 1).value || '').replace(/[^0-9]/g, '') : null;
+                    
+                    if (!cellTitle && !cellIsbn) return;
+
+                    let matchedQty = undefined;
+                    let productKey = null;
+                    let matchedDbItems = [];
+
+                    if (cellIsbn && isbnProducts[cellIsbn] !== undefined) {
+                        matchedQty = isbnProducts[cellIsbn];
+                        productKey = `isbn:${cellIsbn}`;
+                        dbItems.forEach(db => {
+                            if (String(db.isbn || db.ean || '').replace(/[^0-9]/g, '') === cellIsbn) matchedDbItems.push(db);
+                        });
+                    } else if (cellTitle) {
+                        const normCellTitle = String(cellTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (flatProducts[normCellTitle] !== undefined) {
+                            matchedQty = flatProducts[normCellTitle].qty;
+                            productKey = `title:${normCellTitle}`;
+                            dbItems.forEach(db => {
+                                if (String(db.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '') === normCellTitle) matchedDbItems.push(db);
+                            });
+                        }
+                    }
+
+                    const isRed = (cell) => {
+                        const checkColor = (c) => c && typeof c === 'string' && (c.includes('FF0000') || c.includes('C00000'));
+                        return (cell.font?.color?.argb && checkColor(cell.font.color.argb.toUpperCase())) ||
+                               (cell.fill?.fgColor?.argb && checkColor(cell.fill.fgColor.argb.toUpperCase()));
+                    };
+
+                    if (matchedQty !== undefined && !filledProducts.has(productKey)) {
+                        if (isRed(titleCell)) {
+                            row.getCell(qtyColIndex + 1).value = 0;
+                            filledProducts.add(productKey);
+                            matchedDbItems.forEach(db => {
+                                if (!redItemsFound.find(r => r.id === db.id)) redItemsFound.push(db);
+                            });
+                        } else {
+                            row.getCell(qtyColIndex + 1).value = matchedQty;
+                            matchedCount++;
+                            filledProducts.add(productKey);
+                        }
+                    } else if (matchedQty !== undefined) {
+                        row.getCell(qtyColIndex + 1).value = 0; // Avoid duplicating
+                    }
+                });
+            });
+
+            // Find missing items
+            const missingItems = [];
+            dbItems.forEach(db => {
+                const normTitle = String(db.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                const normIsbn = String(db.isbn || db.ean || '').replace(/[^0-9]/g, '');
+                let found = false;
+                if (normIsbn && normIsbn.length > 5 && filledProducts.has(`isbn:${normIsbn}`)) found = true;
+                if (normTitle && filledProducts.has(`title:${normTitle}`)) found = true;
+                
+                if (!found && !redItemsFound.find(r => r.id === db.id)) {
+                    missingItems.push(db);
+                }
+            });
+
+            const nombreVendedor = (profile?.nombre || user?.user_metadata?.nombre || 'Vendedor').split(' ')[0];
+
+            if (missingItems.length > 0 || redItemsFound.length > 0) {
+                setConflictState({
+                    missingItems,
+                    redItems: redItemsFound,
+                    workbook,
+                    matchedCount,
+                    nombreVendedor,
+                    semanaActual,
+                    resolutions: {} // { id: action }
+                });
+                setIsExporting(false);
+                return;
+            }
+
+            await executeDownload(workbook, semanaActual, nombreVendedor, matchedCount);
+
+        } catch (error) {
+            console.error('Error generando excel inteligente:', error);
+            alert('Error generando Excel pre-llenado: ' + translateError(error) + '. Intentando descarga normal...');
+            await handleDownload();
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const applyConflictResolutions = async () => {
+        if (!conflictState) return;
+        setUploading(true);
+        try {
+            const { missingItems, redItems, resolutions, workbook, semanaActual, nombreVendedor, matchedCount } = conflictState;
+            const allConflictItems = [...missingItems, ...redItems];
+
+            for (const item of allConflictItems) {
+                const action = resolutions[item.id] || 'MANTENER';
+                if (action === 'PAUSAR') {
+                    await supabase.from('cliente_items').update({ estado: 'EN PAUSA' }).eq('id', item.id);
+                } else if (action === 'MOVER') {
+                    await supabase.from('cliente_items').update({ semana_id: null, estado: 'PEDIDO (Siguiente)' }).eq('id', item.id);
+                } else if (action === 'ELIMINAR') {
+                    await supabase.from('cliente_items').delete().eq('id', item.id);
+                }
+            }
+
+            await executeDownload(workbook, semanaActual, nombreVendedor, matchedCount);
+            setConflictState(null);
+            fetchSemanaYPedidos();
+        } catch (error) {
+            console.error('Error aplicando resoluciones:', error);
+            alert('Error: ' + translateError(error));
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -345,12 +632,26 @@ export default function SellerDashboard({ isAdmin }) {
                                 <p className="text-xs font-mono text-muted mb-6">Estado: {semanaActual.abierta ? 'ABIERTA PARA CARGA' : 'CERRADA'}</p>
 
                                 {semanaActual.archivo_url ? (
-                                    <button
-                                        onClick={handleDownload}
-                                        className="flex items-center justify-center gap-3 w-full bg-accent text-black font-bold py-3 rounded hover:bg-accent/90 transition-colors"
-                                    >
-                                        <Download size={18} /> DESCARGAR EXCEL BASE
-                                    </button>
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={handleIntelligentDownload}
+                                            disabled={isExporting}
+                                            className="flex items-center justify-center gap-3 w-full bg-accent text-black font-black py-3 rounded-xl hover:bg-accent/90 transition-all shadow-lg hover:shadow-accent/20 hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                                        >
+                                            {isExporting ? (
+                                                <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                                            ) : (
+                                                <Zap size={18} className="fill-black" />
+                                            )}
+                                            {isExporting ? 'PREPARANDO EXCEL...' : 'DESCARGAR MI PEDIDO PRE-LLENADO'}
+                                        </button>
+                                        <button
+                                            onClick={handleDownload}
+                                            className="flex items-center justify-center gap-2 w-full bg-surface border border-border text-xs font-bold py-2 rounded-xl hover:bg-background transition-colors opacity-70 hover:opacity-100"
+                                        >
+                                            <Download size={14} /> Descargar Formato en Blanco
+                                        </button>
+                                    </div>
                                 ) : (
                                     <div className="bg-warning/10 text-warning p-4 rounded text-xs font-mono flex items-start gap-3">
                                         <AlertCircle size={16} className="shrink-0" />
@@ -397,7 +698,90 @@ export default function SellerDashboard({ isAdmin }) {
 
                         {semanaActual.abierta && (
                             <div className="lg:col-span-2 space-y-6">
-                                {validationResult ? (
+                                {conflictState ? (
+                                    <div className="glass p-8 rounded-3xl border-2 border-error/50 bg-error/5 animate-in zoom-in-95 duration-300">
+                                        <div className="flex justify-between items-start mb-6">
+                                            <div>
+                                                <h3 className="text-2xl font-black text-navy flex items-center gap-2">
+                                                    <AlertCircle className="text-error" /> RESOLUCIÓN DE CONFLICTOS
+                                                </h3>
+                                                <p className="text-xs text-muted mt-1 uppercase font-mono tracking-tighter">
+                                                    Se detectaron ítems faltantes o cancelados en el Excel del distribuidor.
+                                                </p>
+                                            </div>
+                                            <button 
+                                                onClick={() => setConflictState(null)}
+                                                className="text-muted hover:text-error transition-colors px-4 py-2 text-xs font-black uppercase"
+                                            >
+                                                Cancelar
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                                            {[...conflictState.redItems, ...conflictState.missingItems].map((item, idx) => {
+                                                const isRed = conflictState.redItems.find(r => r.id === item.id);
+                                                return (
+                                                    <div 
+                                                        key={item.id} 
+                                                        className={`p-4 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-4 ${
+                                                            isRed ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-3 w-full">
+                                                            <div className={`p-2 rounded-lg ${isRed ? 'bg-red-200 text-red-700' : 'bg-orange-200 text-orange-700'}`}>
+                                                                <AlertCircle size={16} />
+                                                            </div>
+                                                            <div className="flex-1">
+                                                                <div className="text-[10px] font-black uppercase opacity-60 leading-none mb-1">
+                                                                    {isRed ? 'CANCELADO (ROJO)' : 'FALTANTE EN EXCEL'}
+                                                                </div>
+                                                                <div className="font-bold text-sm leading-tight">{item.titulo}</div>
+                                                                <div className="text-xs opacity-80">Cliente: {item.clientes?.nombre}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 w-full md:w-auto">
+                                                            <select
+                                                                value={conflictState.resolutions[item.id] || (isRed ? 'PAUSAR' : 'MANTENER')}
+                                                                onChange={(e) => setConflictState({
+                                                                    ...conflictState,
+                                                                    resolutions: { ...conflictState.resolutions, [item.id]: e.target.value }
+                                                                })}
+                                                                className="flex-1 md:w-48 px-3 py-2 rounded-lg bg-white border border-border text-xs font-bold focus:ring-2 focus:ring-primary outline-none"
+                                                            >
+                                                                <option value="MANTENER">Mantener como Pedido</option>
+                                                                <option value="PAUSAR">Pausar Pedido (EN PAUSA)</option>
+                                                                <option value="MOVER">Pasar a Siguiente Semana</option>
+                                                                <option value="ELIMINAR">Eliminar Pedido</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div className="mt-8 flex gap-4">
+                                            <button 
+                                                onClick={() => {
+                                                    const res = {};
+                                                    [...conflictState.redItems, ...conflictState.missingItems].forEach(it => {
+                                                        res[it.id] = 'PAUSAR';
+                                                    });
+                                                    setConflictState({ ...conflictState, resolutions: res });
+                                                }}
+                                                className="px-6 py-4 rounded-2xl border border-border font-bold text-xs hover:bg-background transition-all"
+                                            >
+                                                PAUSAR TODOS
+                                            </button>
+                                            <button 
+                                                onClick={applyConflictResolutions}
+                                                disabled={uploading}
+                                                className="flex-1 bg-navy text-white font-black py-4 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest disabled:opacity-50"
+                                            >
+                                                {uploading ? 'PROCESANDO...' : 'CONFIRMAR Y DESCARGAR'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : validationResult ? (
                                     <div className="glass p-8 rounded-3xl border-2 border-secondary/50 bg-secondary/5 animate-in zoom-in-95 duration-300">
                                         <div className="flex justify-between items-start mb-6">
                                             <div>
