@@ -17,6 +17,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [masterData, setMasterData] = useState(null);
     const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
     const [isExportingWithFormat, setIsExportingWithFormat] = useState(false);
+    const [exportVerification, setExportVerification] = useState(null); // { success, msg, details: { systemQty, excelQty, systemTotal, excelTotal, titlesMatched, diff } }
 
 
     const EDITORIAL_DTOS = {
@@ -676,23 +677,22 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 });
 
                 const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
-                const excelTotalFormatted = `$${realExcelTotal.toLocaleString('es-AR')}`;
-
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
-                let msg = `¡Éxito! Se actualizaron ${matchedCount} títulos.\n\n`;
-                msg += `Unidades en Sistema: ${totalQtyInDB}\n`;
-                msg += `Unidades en Excel: ${totalQtyFilledInExcel}\n`;
-                msg += `\nTotal $ Excel (VERIFICADO): ${excelTotalFormatted}\n`;
-                msg += `Total $ Sistema: $${Math.round(grandTotalSystem).toLocaleString('es-AR')}\n`;
-                
-                if (diff > 0) {
-                    msg += `\n⚠️ ATENCIÓN: Faltan ${diff} unidades en el Excel.`;
-                } else if (realExcelTotal !== Math.round(grandTotalSystem)) {
-                    msg += `\n⚠️ ATENCIÓN: El monto total no coincide perfectamente.`;
-                } else {
-                    msg += `\n✅ ¡Unidades y montos coinciden perfectamente!`;
-                }
-                alert(msg);
+                const totalMatch = Math.abs(realExcelTotal - Math.round(grandTotalSystem)) < 5; // Tolerancia pequeña para redondeos
+                const qtyMatch = diff === 0;
+
+                setExportVerification({
+                    success: qtyMatch && totalMatch,
+                    msg: (qtyMatch && totalMatch) ? "¡Verificación Exitosa!" : "Discrepancia Detectada",
+                    details: {
+                        titlesMatched: matchedCount,
+                        systemQty: totalQtyInDB,
+                        excelQty: totalQtyFilledInExcel,
+                        systemTotal: Math.round(grandTotalSystem),
+                        excelTotal: realExcelTotal,
+                        diff: diff
+                    }
+                });
             }
 
         } catch (err) {
@@ -1345,6 +1345,89 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     })}
                 </div>
             </section>
+            {/* MODAL DE VERIFICACIÓN DE EXPORTACIÓN */}
+            {exportVerification && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-navy/60 backdrop-blur-md animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[2rem] w-full max-w-lg overflow-hidden shadow-2xl shadow-navy/40 border border-white/20 transform animate-in zoom-in-95 duration-300">
+                        {/* Header con gradiente según éxito */}
+                        <div className={`p-8 text-center relative overflow-hidden ${exportVerification.success ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : 'bg-gradient-to-br from-amber-500 to-orange-600'}`}>
+                            <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+                                <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                    <path d="M0 100 C 20 0 50 0 100 100 Z" fill="white" />
+                                </svg>
+                            </div>
+                            
+                            <div className="relative z-10 flex flex-col items-center gap-4">
+                                <div className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-xl flex items-center justify-center shadow-inner border border-white/30 animate-bounce-slow">
+                                    {exportVerification.success ? (
+                                        <CheckCircle2 size={40} className="text-white drop-shadow-md" />
+                                    ) : (
+                                        <AlertCircle size={40} className="text-white drop-shadow-md" />
+                                    )}
+                                </div>
+                                <div>
+                                    <h3 className="text-2xl font-black text-white tracking-tight uppercase">{exportVerification.msg}</h3>
+                                    <p className="text-white/80 text-sm font-medium mt-1">Se procesaron {exportVerification.details.titlesMatched} títulos correctamente</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Cuerpo de detalles */}
+                        <div className="p-8 space-y-6">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center">
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Unidades Totales</span>
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-2xl font-black text-navy">{exportVerification.details.excelQty}</span>
+                                        <span className="text-xs font-bold text-slate-400">/ {exportVerification.details.systemQty}</span>
+                                    </div>
+                                    {exportVerification.details.diff === 0 ? (
+                                        <span className="text-[10px] font-bold text-emerald-500 mt-1 uppercase">✓ Coinciden</span>
+                                    ) : (
+                                        <span className="text-[10px] font-bold text-rose-500 mt-1 uppercase">⚠ Faltan {exportVerification.details.diff}</span>
+                                    )}
+                                </div>
+
+                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center">
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Monto (Neto)</span>
+                                    <div className="flex flex-col items-center">
+                                        <span className="text-xl font-black text-navy leading-none">${exportVerification.details.excelTotal.toLocaleString('es-AR')}</span>
+                                        <span className="text-[10px] font-bold text-slate-400 mt-1">Sistema: ${exportVerification.details.systemTotal.toLocaleString('es-AR')}</span>
+                                    </div>
+                                    {Math.abs(exportVerification.details.excelTotal - exportVerification.details.systemTotal) < 5 ? (
+                                        <span className="text-[10px] font-bold text-emerald-500 mt-1 uppercase">✓ Coinciden</span>
+                                    ) : (
+                                        <span className="text-[10px] font-bold text-amber-600 mt-1 uppercase">⚠ Dif. ${Math.abs(exportVerification.details.excelTotal - exportVerification.details.systemTotal).toLocaleString('es-AR')}</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className={`p-5 rounded-2xl flex items-start gap-4 ${exportVerification.success ? 'bg-emerald-50 border border-emerald-100' : 'bg-amber-50 border border-amber-100'}`}>
+                                <div className={`p-2 rounded-xl mt-1 ${exportVerification.success ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+                                    <ShoppingBag size={16} />
+                                </div>
+                                <div>
+                                    <h4 className={`text-sm font-black uppercase tracking-tight ${exportVerification.success ? 'text-emerald-800' : 'text-amber-800'}`}>
+                                        {exportVerification.success ? 'Listo para enviar' : 'Revisión recomendada'}
+                                    </h4>
+                                    <p className={`text-xs mt-1 leading-relaxed ${exportVerification.success ? 'text-emerald-700/80' : 'text-amber-700/80'}`}>
+                                        {exportVerification.success 
+                                            ? 'Los datos en el archivo Excel coinciden perfectamente con los pedidos en el sistema. El consolidado está verificado.' 
+                                            : 'Se han detectado pequeñas diferencias en las unidades o montos. Revisa si hay títulos marcados en rojo en el Excel o con ISBNs duplicados.'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={() => setExportVerification(null)}
+                                className={`w-full py-5 rounded-2xl font-black text-sm tracking-widest uppercase transition-all shadow-lg ${exportVerification.success ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/30' : 'bg-navy hover:bg-navy-light text-white shadow-navy/30'}`}
+                            >
+                                Entendido, Continuar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
