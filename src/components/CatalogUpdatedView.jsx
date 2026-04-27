@@ -155,13 +155,19 @@ const CatalogUpdatedView = () => {
             const results = await catalogService.fetchFullCatalog(force);
             
             // --- NEW: Load Integrated Stock Data ---
-            const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false });
+            const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false }).limit(10);
+            const weekIds = (weeks || []).map(w => w.id);
+
             const [masters, receptions, allOrders, { data: floatingSummary }, clientItems] = await Promise.all([
-                supabase.from('master_confirmaciones').select('semana_id, datos_json'),
-                supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida'),
-                supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)'),
+                supabase.from('master_confirmaciones').select('semana_id, datos_json').in('semana_id', weekIds),
+                supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').in('semana_id', weekIds),
+                supabase.from('pedido_items')
+                    .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)')
+                    .in('pedido.semana_id', weekIds)
+                    .order('id', { ascending: false })
+                    .limit(5000),
                 supabase.rpc('get_floating_stock_summary'),
-                supabase.from('cliente_items').select('semana_id, titulo, estado')
+                supabase.from('cliente_items').select('semana_id, titulo, estado').in('semana_id', weekIds).limit(5000)
             ]);
 
             const weekStats = (weeks || []).map(w => {

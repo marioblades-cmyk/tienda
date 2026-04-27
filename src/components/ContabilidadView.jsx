@@ -402,6 +402,11 @@ function MovimientosTab() {
                                 </div>
                             ))}
                         </div>
+                    }
+                </div>
+            </div>
+
+            <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-border bg-background flex flex-col gap-4">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                         {/* Grupo 1: Acción y Tiempo */}
