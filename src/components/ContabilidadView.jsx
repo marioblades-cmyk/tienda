@@ -524,6 +524,12 @@ function MovimientosTab() {
                     </table>
                 </div>
             </div>
+            {showTransferModal && (
+                <TransferenciaModal 
+                    onClose={() => setShowTransferModal(false)} 
+                    onDone={() => fetchMovimientos()} 
+                />
+            )}
         </div>
     );
 }
