@@ -41,6 +41,32 @@ function TransferenciaModal({ onClose, onDone }) {
     const [monto, setMonto] = useState('');
     const [concepto, setConcepto] = useState('');
     const [saving, setSaving] = useState(false);
+    const [turnoId, setTurnoId] = useState(null);
+    const [turnoChecked, setTurnoChecked] = useState(false);
+
+    // Detectar el turno activo al abrir el modal (misma lógica que FlujoCajaView)
+    useEffect(() => {
+        const detectarTurno = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('turnos_caja')
+                    .select('id')
+                    .eq('estado', 'ABIERTO')
+                    .order('abierto_at', { ascending: false })
+                    .limit(1);
+                if (error) console.error('[TransferenciaModal] error:', error);
+                const tId = data?.[0]?.id || null;
+                console.log('[TransferenciaModal] turno detectado:', tId, '| data:', data);
+                setTurnoId(tId);
+            } catch (e) {
+                console.error('[TransferenciaModal] excepción:', e);
+                setTurnoId(null);
+            } finally {
+                setTurnoChecked(true);
+            }
+        };
+        detectarTurno();
+    }, []);
 
     const handleConfirm = async () => {
         const amt = parseFloat(monto);
@@ -51,7 +77,7 @@ function TransferenciaModal({ onClose, onDone }) {
             const label = concepto || `Transferencia ${desde} → ${hacia}`;
             const { error } = await supabase.from('caja_movimientos').insert([
                 {
-                    turno_id: null,
+                    turno_id: desde !== 'Efectivo Personal' ? turnoId : null,
                     tipo: 'EGRESO',
                     categoria: 'Transferencia Interna',
                     concepto: `[SALIDA] ${label}`,
@@ -60,7 +86,7 @@ function TransferenciaModal({ onClose, onDone }) {
                     origen: 'Transferencia',
                 },
                 {
-                    turno_id: null,
+                    turno_id: hacia !== 'Efectivo Personal' ? turnoId : null,
                     tipo: 'INGRESO',
                     categoria: 'Transferencia Interna',
                     concepto: `[ENTRADA] ${label}`,
@@ -144,6 +170,13 @@ function TransferenciaModal({ onClose, onDone }) {
                             placeholder="Ej: Depósito acumulado del mes"
                             className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary" />
                     </div>
+
+                    {turnoChecked && !turnoId && (
+                        <div className="flex items-center gap-2 p-3 bg-orange-50 border border-orange-200 rounded-xl text-[10px] text-orange-700 font-bold leading-tight">
+                            <AlertCircle size={14} />
+                            AVISO: No hay turno de caja abierto. Esta transferencia no afectará el saldo del punto de venta actual.
+                        </div>
+                    )}
                 </div>
 
                 <div className="p-4 border-t border-border flex justify-end gap-3 bg-background rounded-b-2xl">
@@ -161,7 +194,7 @@ function TransferenciaModal({ onClose, onDone }) {
 // ─────────────────────────────────────────────
 // TAB 1: MOVIMIENTOS
 // ─────────────────────────────────────────────
-function MovimientosTab() {
+function MovimientosTab({ turnoActivo }) {
     const [movimientos, setMovimientos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -251,20 +284,22 @@ function MovimientosTab() {
         return true;
     }), [movimientos, filterMetodo, filterOrigen, filterTipo, search]);
 
-    const totalIngresos        = movimientos.filter(m => m.tipo === 'INGRESO').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
-    const totalEgresos         = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria !== 'Préstamo Otorgado').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const totalIngresos        = movimientos.filter(m => m.tipo === 'INGRESO' && m.origen !== 'Transferencia').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const totalEgresos         = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria !== 'Préstamo Otorgado' && m.origen !== 'Transferencia').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
     const totalPrestamosOtorg  = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria === 'Préstamo Otorgado').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
     const balanceNeto          = totalIngresos - totalEgresos;
 
     const porMetodo = METODOS.map(met => ({
         metodo: met,
-        total: movimientos.filter(m => m.tipo === 'INGRESO' && (m.metodo_pago || 'Efectivo') === met)
+        total: movimientos
+            .filter(m => m.tipo === 'INGRESO' && m.origen !== 'Transferencia' && (m.metodo_pago || 'Efectivo') === met)
             .reduce((s, m) => s + (parseFloat(m.monto) || 0), 0)
     })).filter(m => m.total > 0);
 
-    const porOrigen = ORIGENES.map(ori => ({
+    const porOrigen = ORIGENES.filter(ori => ori !== 'Transferencia').map(ori => ({
         origen: ori,
-        total: movimientos.filter(m => m.tipo === 'INGRESO' && (m.origen || 'Tienda') === ori)
+        total: movimientos
+            .filter(m => m.tipo === 'INGRESO' && m.origen !== 'Transferencia' && (m.origen || 'Tienda') === ori)
             .reduce((s, m) => s + (parseFloat(m.monto) || 0), 0)
     })).filter(o => o.total > 0);
 
@@ -283,6 +318,15 @@ function MovimientosTab() {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Modal: Transferencia */}
+            {showTransferModal && (
+                <TransferenciaModal 
+                    turnoActivo={turnoActivo}
+                    onClose={() => setShowTransferModal(false)} 
+                    onDone={fetchMovimientos} 
+                />
+            )}
 
             {/* Modal: Editar Movimiento */}
             <AnimatePresence>
@@ -1061,7 +1105,7 @@ function CategoriasModal({ onClose, onRefresh }) {
 // ─────────────────────────────────────────────
 // TAB: INGRESOS (Manuales / Otros)
 // ─────────────────────────────────────────────
-function IngresosTab() {
+function IngresosTab({ turnoActivo }) {
     const [categoria, setCategoria] = useState('Otro ingreso');
     const [monto, setMonto] = useState('');
     const [metodo, setMetodo] = useState('Efectivo');
@@ -1096,8 +1140,16 @@ function IngresosTab() {
         if (!amt || amt <= 0) return showMsg('Ingresa un monto válido.', 'error');
         setSaving(true);
         try {
+            const { data: currentTurno } = await supabase
+                .from('turnos_caja')
+                .select('id')
+                .eq('estado', 'ABIERTO')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            const tId = currentTurno?.[0]?.id || null;
+
             const { error } = await supabase.from('caja_movimientos').insert([{
-                turno_id: null,
+                turno_id: metodo !== 'Efectivo Personal' ? tId : null,
                 tipo: 'INGRESO',
                 categoria,
                 concepto: concepto || categoria,
@@ -1239,7 +1291,7 @@ function IngresosTab() {
     );
 }
 
-function EgresosTab() {
+function EgresosTab({ turnoActivo }) {
     const [categorias, setCategorias] = useState([]);
     const [categoria, setCategoria] = useState('');
     const [monto, setMonto] = useState('');
@@ -1291,8 +1343,16 @@ function EgresosTab() {
         if (!categoria) return showMsg('Selecciona una categoría.', 'error');
         setSaving(true);
         try {
+            const { data: currentTurno } = await supabase
+                .from('turnos_caja')
+                .select('id')
+                .eq('estado', 'ABIERTO')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            const tId = currentTurno?.[0]?.id || null;
+
             const { error } = await supabase.from('caja_movimientos').insert([{
-                turno_id: null,
+                turno_id: metodo !== 'Efectivo Personal' ? tId : null,
                 tipo: 'EGRESO',
                 categoria,
                 concepto: concepto || categoria,
@@ -1583,6 +1643,31 @@ function EgresosTab() {
 // ─────────────────────────────────────────────
 export default function ContabilidadView() {
     const [tab, setTab] = useState('movimientos');
+    const [turnoActivo, setTurnoActivo] = useState(null);
+
+    useEffect(() => {
+        fetchTurnoActivo();
+    }, []);
+
+    const fetchTurnoActivo = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('turnos_caja')
+                .select('*')
+                .eq('estado', 'ABIERTO')
+                .order('abierto_at', { ascending: false })
+                .limit(1);
+            
+            if (error) {
+                console.error('Error supabase turnos_caja:', error);
+                return;
+            }
+            const active = data?.[0] || null;
+            setTurnoActivo(active);
+        } catch (e) {
+            console.error('Error fetching turno activo:', e);
+        }
+    };
 
     return (
         <div className="flex flex-col gap-6 max-w-7xl mx-auto animate-fade-in">
@@ -1608,9 +1693,9 @@ export default function ContabilidadView() {
 
             <AnimatePresence mode="wait">
                 <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-                    {tab === 'movimientos' ? <MovimientosTab /> :
-                     tab === 'ingresos' ? <IngresosTab /> :
-                     tab === 'egresos' ? <EgresosTab /> :
+                    {tab === 'movimientos' ? <MovimientosTab turnoActivo={turnoActivo} /> :
+                     tab === 'ingresos' ? <IngresosTab turnoActivo={turnoActivo} /> :
+                     tab === 'egresos' ? <EgresosTab turnoActivo={turnoActivo} /> :
                      <ConciliacionTab />}
                 </motion.div>
             </AnimatePresence>

@@ -561,6 +561,37 @@ export default function FlujoCajaView({ user, profile }) {
         setShowDetailModal(turnoResumen);
     };
 
+    const handleReopenTurno = async (turnoId) => {
+        if (turnoActivo) {
+            alert('⚠️ No puedes reabrir un turno mientras haya otro activo. Cierra el turno actual primero.');
+            return;
+        }
+        if (!isAdmin) {
+            alert('⚠️ Solo el administrador puede reabrir turnos.');
+            return;
+        }
+        
+        if (!window.confirm('¿Estás seguro de que deseas reabrir este turno? Volverá a aparecer como el turno activo.')) return;
+
+        try {
+            const { error } = await supabase
+                .from('turnos_caja')
+                .update({ 
+                    cerrado_at: null,
+                    estado: 'ABIERTO'
+                })
+                .eq('id', turnoId);
+
+            if (error) throw error;
+            
+            // Recargar datos
+            await init();
+            alert('✅ Turno reabierto con éxito.');
+        } catch (e) {
+            alert('Error al reabrir turno: ' + e.message);
+        }
+    };
+
     const handleDeleteTurno = async (id) => {
         const ok = await showConfirm('¿Seguro que deseas ELIMINAR este turno? (Se borrarán todos sus movimientos asociados)');
         if (!ok) return;
@@ -589,16 +620,35 @@ export default function FlujoCajaView({ user, profile }) {
 
     const calculateTotals = () => {
         const esCash = m => (m.metodo_pago || 'Efectivo') === 'Efectivo';
-        const efectivoIngresos = movimientos.filter(m => m.tipo === 'INGRESO' &&  esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
-        const efectivoEgresos  = movimientos.filter(m => m.tipo === 'EGRESO'  &&  esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
-        const digitalIngresos  = movimientos.filter(m => m.tipo === 'INGRESO' && !esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
-        const digitalEgresos   = movimientos.filter(m => m.tipo === 'EGRESO'  && !esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
-        const totalIngresos    = efectivoIngresos + digitalIngresos;
-        const totalEgresos     = efectivoEgresos  + digitalEgresos;
-        const efectivoEnCaja   = (parseFloat(turnoActivo?.monto_inicial) || 0) + efectivoIngresos - efectivoEgresos;
-        return { efectivoIngresos, efectivoEgresos, digitalIngresos, digitalEgresos, totalIngresos, totalEgresos, efectivoEnCaja,
-                 // aliases para compatibilidad con código existente
-                 ingresos: totalIngresos, egresos: totalEgresos, saldoActual: efectivoEnCaja };
+        const noEsTransf = m => m.origen !== 'Transferencia';
+
+        // Totales Operativos (Excluyendo Transferencias Internas)
+        const efectivoIngresosOp = movimientos.filter(m => m.tipo === 'INGRESO' && esCash(m) && noEsTransf(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const efectivoEgresosOp  = movimientos.filter(m => m.tipo === 'EGRESO'  && esCash(m) && noEsTransf(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const digitalIngresosOp  = movimientos.filter(m => m.tipo === 'INGRESO' && !esCash(m) && noEsTransf(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const digitalEgresosOp   = movimientos.filter(m => m.tipo === 'EGRESO'  && !esCash(m) && noEsTransf(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+
+        // Movimientos para el Saldo de Efectivo (Incluye TODO el efectivo que entra/sale del cajón)
+        const efectivoIngresosTotal = movimientos.filter(m => m.tipo === 'INGRESO' && esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+        const efectivoEgresosTotal  = movimientos.filter(m => m.tipo === 'EGRESO'  && esCash(m)).reduce((a, m) => a + (parseFloat(m.monto) || 0), 0);
+
+        const totalIngresosOp = efectivoIngresosOp + digitalIngresosOp;
+        const totalEgresosOp  = efectivoEgresosOp  + digitalEgresosOp;
+        const efectivoEnCaja  = (parseFloat(turnoActivo?.monto_inicial) || 0) + efectivoIngresosTotal - efectivoEgresosTotal;
+
+        return { 
+            efectivoIngresos: efectivoIngresosOp, 
+            efectivoEgresos: efectivoEgresosOp, 
+            digitalIngresos: digitalIngresosOp, 
+            digitalEgresos: digitalEgresosOp, 
+            totalIngresos: totalIngresosOp, 
+            totalEgresos: totalEgresosOp, 
+            efectivoEnCaja,
+            // aliases para compatibilidad
+            ingresos: totalIngresosOp, 
+            egresos: totalEgresosOp, 
+            saldoActual: efectivoEnCaja 
+        };
     };
 
     if (loading) return <div className="py-20 flex justify-center items-center"><div className="animate-spin text-primary w-10 h-10 border-4 border-current border-t-transparent rounded-full" /></div>;
@@ -1459,13 +1509,25 @@ export default function FlujoCajaView({ user, profile }) {
                                                     </td>
                                                     <td className="p-4 text-right font-black font-mono text-base text-navy tracking-tighter leading-none">Bs {h.monto_final?.toLocaleString()}</td>
                                                     <td className="p-4 text-center">
-                                                        <button
-                                                            onClick={() => setShowDetailModal(h)}
-                                                            className="p-2 bg-background rounded-lg text-navy/40 hover:text-primary transition-all border border-border/20 shadow-sm"
-                                                        >
-                                                            <Eye size={14} />
-                                                        </button>
-                                                    </td>
+                                                         <div className="flex items-center justify-center gap-2">
+                                                            <button
+                                                                onClick={() => setShowDetailModal(h)}
+                                                                className="p-2 bg-background rounded-lg text-navy/40 hover:text-primary transition-all border border-border/20 shadow-sm"
+                                                                title="Ver detalles"
+                                                            >
+                                                                <Eye size={14} />
+                                                            </button>
+                                                            {isAdmin && (
+                                                                <button
+                                                                    onClick={() => handleReopenTurno(h.id)}
+                                                                    className="p-2 bg-background rounded-lg text-orange-400 hover:text-orange-600 transition-all border border-orange-200/50 shadow-sm"
+                                                                    title="Reabrir turno"
+                                                                >
+                                                                    <History size={14} />
+                                                                </button>
+                                                            )}
+                                                         </div>
+                                                     </td>
                                                 </tr>
                                                 );
                                             })}
@@ -1574,6 +1636,9 @@ export default function FlujoCajaView({ user, profile }) {
                                                 </button>
                                                 {isAdmin && (
                                                     <>
+                                                        <button onClick={() => handleReopenTurno(h.id)} className="p-2.5 bg-background rounded-xl text-orange-400 hover:text-orange-600 transition-all border border-orange-200/50 shadow-sm" title="Reabrir turno">
+                                                            <History size={16} />
+                                                        </button>
                                                         <button onClick={() => setShowEditModal(h)} className="p-2.5 bg-background rounded-xl text-navy/70 hover:text-accent transition-all border border-border/20 shadow-sm" title="Editar (solo admin)">
                                                             <Edit3 size={16} />
                                                         </button>
