@@ -49,6 +49,8 @@ const CatalogUpdatedView = () => {
     const [newItemModal, setNewItemModal] = useState(false);
     const [newItemForm, setNewItemForm] = useState({});
     const [newItemSaving, setNewItemSaving] = useState(false);
+    const [activeTab, setActiveTab] = useState('catalogo'); // 'catalogo' | 'completas'
+    const [seriesEditorialFilter, setSeriesEditorialFilter] = useState('TODAS');
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -600,7 +602,91 @@ const CatalogUpdatedView = () => {
         setTimeout(startQueueWorker, 100);
     };
 
-    // CATEGORÍAS SEGÚN EDITORIAL
+    // DETECTOR DE SERIES COMPLETAS
+    const seriesCompletas = useMemo(() => {
+        // Regex que extrae el número de tomo en varios formatos:
+        // "Vol. 1", "Vol 1", "Volumen 1", simple trailing number, with trailing edition like "(EDICIÓN DELUXE)"
+        const VOLUME_REGEX = /(?:vol(?:umen|ume|\.)?\s*|tomo\s*|#\s*)(\d+)(?:\s*\(.*?\))?\s*$/i;
+        const TRAILING_NUM_REGEX = /\s+(\d{1,3})(?:\s*\(.*?\))?\s*$/;
+
+        // Agrupar todos los items por serie detectada
+        const groups = {};
+
+        catalogData.forEach(item => {
+            const titulo = (item.titulo || '').trim();
+            let serieNombre = null;
+            let tomoNum = null;
+
+            // Intentar formato Vol./Volumen/Tomo
+            const volMatch = titulo.match(VOLUME_REGEX);
+            if (volMatch) {
+                tomoNum = parseInt(volMatch[1], 10);
+                serieNombre = titulo.slice(0, volMatch.index).trim().replace(/[-–:\s]+$/, '').trim();
+            } else {
+                // Intentar número simple al final
+                const numMatch = titulo.match(TRAILING_NUM_REGEX);
+                if (numMatch) {
+                    tomoNum = parseInt(numMatch[1], 10);
+                    serieNombre = titulo.slice(0, numMatch.index).trim().replace(/[-–:\s]+$/, '').trim();
+                }
+            }
+
+            // Si no tiene número → tomo único, excluir
+            if (!serieNombre || tomoNum === null || isNaN(tomoNum)) return;
+            // Normalizar clave (mayúsculas, sin espacios extra)
+            const key = serieNombre.toUpperCase().trim();
+
+            if (!groups[key]) groups[key] = { nombre: serieNombre, editorial: item.editorial, imagen: item.imagen_url, tomos: {} };
+            groups[key].tomos[tomoNum] = { stock: item.stock_fisico || 0, item };
+        });
+
+        // Filtrar: solo series donde tenemos TODOS los tomos del 1 al máximo, cada uno con stock ≥ 1
+        const completas = [];
+        Object.values(groups).forEach(serie => {
+            const numeros = Object.keys(serie.tomos).map(Number).sort((a, b) => a - b);
+            if (numeros.length < 2) return; // Excluir si solo hay 1 tomo registrado
+            const maxTomo = numeros[numeros.length - 1];
+            const minTomo = numeros[0];
+
+            // Verificar que tenemos TODOS los números del mínimo al máximo
+            let completa = true;
+            for (let t = minTomo; t <= maxTomo; t++) {
+                if (!serie.tomos[t] || (serie.tomos[t].stock || 0) < 1) {
+                    completa = false;
+                    break;
+                }
+            }
+            if (!completa) return;
+
+            // Calcular stock mínimo (el tomo con menos unidades)
+            const stockMin = Math.min(...numeros.map(n => serie.tomos[n].stock));
+            // Buscar imagen del primer tomo
+            const primerTomo = serie.tomos[minTomo]?.item;
+
+            completas.push({
+                nombre: serie.nombre,
+                editorial: serie.editorial || primerTomo?.editorial || '—',
+                imagen: primerTomo?.imagen_url || null,
+                totalTomos: maxTomo - minTomo + 1,
+                minTomo,
+                maxTomo,
+                stockMin,
+                tomos: serie.tomos,
+            });
+        });
+
+        return completas.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    }, [catalogData]);
+
+    const editorialesCompletas = useMemo(() => {
+        return ['TODAS', ...new Set(seriesCompletas.map(s => s.editorial).filter(Boolean))].sort();
+    }, [seriesCompletas]);
+
+    const seriesCompletasFiltradas = useMemo(() => {
+        if (seriesEditorialFilter === 'TODAS') return seriesCompletas;
+        return seriesCompletas.filter(s => s.editorial === seriesEditorialFilter);
+    }, [seriesCompletas, seriesEditorialFilter]);
+
     const dynamicCategories = useMemo(() => {
         const edMatch = editorialFilter.trim().toUpperCase();
         const base = edMatch === 'TODOS' 
@@ -985,6 +1071,179 @@ const CatalogUpdatedView = () => {
                 </div>
             </div>
 
+            {/* Tab bar */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <button
+                    onClick={() => setActiveTab('catalogo')}
+                    style={{
+                        padding: '0.625rem 1.5rem', borderRadius: '12px', fontWeight: 800, fontSize: '0.875rem',
+                        border: activeTab === 'catalogo' ? '2px solid #f07d2a' : '2px solid #e2e8f0',
+                        background: activeTab === 'catalogo' ? '#fff7ed' : 'white',
+                        color: activeTab === 'catalogo' ? '#f07d2a' : '#64748b',
+                        cursor: 'pointer', transition: 'all 0.2s'
+                    }}
+                >
+                    📦 Catálogo Maestro
+                </button>
+                <button
+                    onClick={() => setActiveTab('completas')}
+                    style={{
+                        padding: '0.625rem 1.5rem', borderRadius: '12px', fontWeight: 800, fontSize: '0.875rem',
+                        border: activeTab === 'completas' ? '2px solid #16a34a' : '2px solid #e2e8f0',
+                        background: activeTab === 'completas' ? '#f0fdf4' : 'white',
+                        color: activeTab === 'completas' ? '#16a34a' : '#64748b',
+                        cursor: 'pointer', transition: 'all 0.2s',
+                        display: 'flex', alignItems: 'center', gap: '0.5rem'
+                    }}
+                >
+                    🏆 Series Completas
+                    <span style={{ background: '#16a34a', color: 'white', borderRadius: '999px', padding: '1px 8px', fontSize: '0.75rem', fontWeight: 900 }}>
+                        {seriesCompletas.length}
+                    </span>
+                </button>
+            </div>
+
+            {activeTab === 'completas' ? (
+                /* ─── PANEL: SERIES COMPLETAS ─── */
+                <div>
+                    {/* Header */}
+                    <div style={{ background: 'white', borderRadius: '16px', border: '1px solid #eef2f6', padding: '1.5rem', marginBottom: '1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                            <div style={{ background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)', color: 'white', padding: '0.75rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(22,163,74,0.3)' }}>
+                                <CheckCircle2 size={24} />
+                            </div>
+                            <div>
+                                <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0, color: '#1e293b' }}>
+                                    Series Completas en Stock
+                                    <span style={{ fontSize: '0.875rem', color: '#16a34a', background: 'rgba(22,163,74,0.1)', padding: '2px 10px', borderRadius: '20px', marginLeft: '12px', fontWeight: 600 }}>
+                                        {seriesCompletasFiltradas.length} series
+                                    </span>
+                                </h2>
+                                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Series de las que tenemos todos los tomos en stock (sin huecos), con al menos 2 tomos.</p>
+                            </div>
+                            <div style={{ marginLeft: 'auto' }}>
+                                <select
+                                    value={seriesEditorialFilter}
+                                    onChange={e => setSeriesEditorialFilter(e.target.value)}
+                                    style={{ padding: '0.625rem 1rem', borderRadius: '12px', border: '2px solid #e2e8f0', outline: 'none', fontSize: '0.875rem', background: 'white', fontWeight: 600, color: '#334155' }}
+                                >
+                                    {editorialesCompletas.map(ed => <option key={ed} value={ed}>{ed}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Stats */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                            <div style={{ background: '#f0fdf4', borderRadius: '12px', padding: '1rem', border: '1px solid #bbf7d0' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Series Completas</div>
+                                <div style={{ fontSize: '2rem', fontWeight: 900, color: '#16a34a', fontFamily: 'monospace' }}>{seriesCompletasFiltradas.length}</div>
+                            </div>
+                            <div style={{ background: '#eff6ff', borderRadius: '12px', padding: '1rem', border: '1px solid #bfdbfe' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Tomos</div>
+                                <div style={{ fontSize: '2rem', fontWeight: 900, color: '#2563eb', fontFamily: 'monospace' }}>{seriesCompletasFiltradas.reduce((s, x) => s + x.totalTomos, 0)}</div>
+                            </div>
+                            <div style={{ background: '#fff7ed', borderRadius: '12px', padding: '1rem', border: '1px solid #fed7aa' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#c2410c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stock Mínimo Promedio</div>
+                                <div style={{ fontSize: '2rem', fontWeight: 900, color: '#ea580c', fontFamily: 'monospace' }}>
+                                    {seriesCompletasFiltradas.length > 0 ? Math.round(seriesCompletasFiltradas.reduce((s, x) => s + x.stockMin, 0) / seriesCompletasFiltradas.length) : 0}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Cards */}
+                    {seriesCompletasFiltradas.length === 0 ? (
+                        <div style={{ background: 'white', borderRadius: '16px', border: '1px solid #eef2f6', padding: '4rem', textAlign: 'center' }}>
+                            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📚</div>
+                            <p style={{ color: '#94a3b8', fontWeight: 600, fontSize: '1rem' }}>No se encontraron series completas con los filtros actuales.</p>
+                            <p style={{ color: '#cbd5e1', fontSize: '0.875rem' }}>Una serie aparece aquí cuando tienes todos los tomos (del 1 al máximo) con stock ≥ 1.</p>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
+                            {seriesCompletasFiltradas.map((serie, i) => (
+                                <div key={i} style={{
+                                    background: 'white', borderRadius: '16px', border: '2px solid #bbf7d0',
+                                    overflow: 'hidden', boxShadow: '0 4px 12px rgba(22,163,74,0.08)',
+                                    transition: 'all 0.2s', cursor: 'default'
+                                }}
+                                    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(22,163,74,0.15)'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(22,163,74,0.08)'; }}
+                                >
+                                    {/* Imagen */}
+                                    <div style={{ height: '220px', background: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
+                                        {serie.imagen ? (
+                                            <>
+                                                {/* Fondo desenfocado para rellenar */}
+                                                <div style={{
+                                                    position: 'absolute', inset: 0,
+                                                    backgroundImage: `url(${serie.imagen})`,
+                                                    backgroundSize: 'cover',
+                                                    backgroundPosition: 'center',
+                                                    filter: 'blur(12px) brightness(0.35)',
+                                                    transform: 'scale(1.1)'
+                                                }} />
+                                                {/* Imagen principal centrada y completa */}
+                                                <img src={serie.imagen} alt={serie.nombre}
+                                                    style={{ position: 'relative', height: '100%', width: 'auto', maxWidth: '100%', objectFit: 'contain', display: 'block', zIndex: 1 }}
+                                                    onError={e => { e.currentTarget.parentElement.style.background = 'linear-gradient(135deg, #1e293b, #0f172a)'; e.currentTarget.style.display = 'none'; }}
+                                                />
+                                            </>
+                                        ) : (
+                                            <div style={{ fontSize: '3.5rem', opacity: 0.3, zIndex: 1 }}>📚</div>
+                                        )}
+                                        <div style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: '#16a34a', color: 'white', borderRadius: '999px', padding: '2px 10px', fontSize: '0.7rem', fontWeight: 900, zIndex: 2, boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}>
+                                            ✓ COMPLETA
+                                        </div>
+                                    </div>
+
+                                    {/* Info */}
+                                    <div style={{ padding: '1rem' }}>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.25rem', lineHeight: 1.3 }}>{serie.nombre}</div>
+                                        <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, marginBottom: '0.75rem' }}>{serie.editorial}</div>
+
+                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                            <span style={{ background: '#eff6ff', color: '#1d4ed8', borderRadius: '8px', padding: '3px 10px', fontSize: '0.7rem', fontWeight: 800 }}>
+                                                📖 {serie.totalTomos} tomos (#{serie.minTomo}–#{serie.maxTomo})
+                                            </span>
+                                            <span style={{
+                                                background: serie.stockMin >= 3 ? '#f0fdf4' : serie.stockMin >= 2 ? '#fff7ed' : '#fef2f2',
+                                                color: serie.stockMin >= 3 ? '#16a34a' : serie.stockMin >= 2 ? '#ea580c' : '#dc2626',
+                                                borderRadius: '8px', padding: '3px 10px', fontSize: '0.7rem', fontWeight: 800,
+                                                border: `1px solid ${serie.stockMin >= 3 ? '#bbf7d0' : serie.stockMin >= 2 ? '#fed7aa' : '#fecaca'}`
+                                            }}>
+                                                📦 Mín. {serie.stockMin} u.
+                                            </span>
+                                        </div>
+
+                                        {/* Barra de tomos */}
+                                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
+                                            {Array.from({ length: serie.maxTomo - serie.minTomo + 1 }, (_, idx) => {
+                                                const t = serie.minTomo + idx;
+                                                const s = serie.tomos[t]?.stock || 0;
+                                                return (
+                                                    <div key={t} title={`Tomo ${t}: ${s} u.`}
+                                                        style={{
+                                                            width: '18px', height: '22px', borderRadius: '4px', fontSize: '0.5rem',
+                                                            fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            background: s >= 3 ? '#16a34a' : s >= 2 ? '#f59e0b' : s >= 1 ? '#ef4444' : '#e2e8f0',
+                                                            color: s >= 1 ? 'white' : '#94a3b8'
+                                                        }}>
+                                                        {t}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', fontSize: '0.6rem', color: '#94a3b8', fontWeight: 700 }}>
+                                            <span>🟢 ≥3 u.</span><span>🟡 2 u.</span><span>🔴 1 u.</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ) : (
+            <>
             {/* Tabla Premium */}
             <div style={{ 
                 background: 'white', 
@@ -2272,6 +2531,8 @@ const CatalogUpdatedView = () => {
                         </div>
                     </div>
                 </div>
+            )}
+            </>
             )}
         </div>
     );
