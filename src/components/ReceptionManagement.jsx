@@ -69,14 +69,14 @@ export default function ReceptionManagement() {
             const semanaName = semanas.find(s => s.id === semanaId)?.nombre || '';
 
             // Todas las queries en paralelo
-            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmadosRes, vendRes] = await Promise.all([
+            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsFilteredRes, vendRes] = await Promise.all([
                 supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
-                // Por semana_id (items ADJUDICADO asignados a esta semana)
+                // Por semana_id (items ya asignados a esta semana)
                 supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
-                // Todos los CONFIRMADO (filtramos por semana en JS para evitar problemas de acentos en ILIKE)
-                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', 'CONFIRMADO%'),
+                // Todos los que contengan el nombre de la semana en su estado (CONFIRMADO/ADJUDICADO {semana})
+                semanaName ? supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', `%${semanaName}%`) : Promise.resolve({ data: [] }),
                 supabase.from('vendedores').select('id, nombre'),
             ]);
             const master = masterRes.data;
@@ -85,17 +85,12 @@ export default function ReceptionManagement() {
             const vList = vendRes.data || [];
             setVendedoresList(vList);
 
-            // Filtrar CONFIRMADO por semana en JS (maneja acentos correctamente)
-            const semanaNameLower = semanaName.toLowerCase();
-            const confirmadosDeSemana = (cItemsConfirmadosRes.data || []).filter(ci => {
-                if (!semanaName) return false;
-                const suffix = ci.estado.slice('CONFIRMADO '.length).trim().toLowerCase();
-                return suffix === semanaNameLower || suffix.startsWith(semanaNameLower);
-            });
+            // Los items filtrados por texto (matching por nombre de semana en el estado)
+            const matchedByStatus = cItemsFilteredRes.data || [];
 
-            // Combinar y deduplicar clientItems (semana_id + CONFIRMADO de esta semana)
+            // Combinar y deduplicar clientItems (semana_id + match por texto en estado)
             const seenIds = new Set();
-            const cItems = [...(cItemsByIdRes.data || []), ...confirmadosDeSemana].filter(ci => {
+            const cItems = [...(cItemsByIdRes.data || []), ...matchedByStatus].filter(ci => {
                 if (seenIds.has(ci.id)) return false;
                 seenIds.add(ci.id);
                 return true;
