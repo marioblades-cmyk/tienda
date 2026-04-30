@@ -69,15 +69,16 @@ export default function ReceptionManagement() {
             const semanaName = semanas.find(s => s.id === semanaId)?.nombre || '';
 
             // Todas las queries en paralelo
-            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmedRes, cItemsAdjRes, vendRes] = await Promise.all([
+            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmedRes, cItemsAdjRes, cItemsPedidoRes, vendRes] = await Promise.all([
                 supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
                 // Por semana_id (items ya asignados a esta semana)
                 supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
-                // Todos los confirmados/adjudicados para filtrar en JS (evita problemas de acentos en Supabase)
-                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%CONFIRMADO%'),
-                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%ADJUDICADO%'),
+                // Todos los confirmados/adjudicados/pedidos recientes (ordenados para evitar el límite de 1000 filas de Supabase)
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%CONFIRMADO%').order('created_at', { ascending: false }).limit(1000),
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%ADJUDICADO%').order('created_at', { ascending: false }).limit(1000),
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('estado', 'PEDIDO').order('created_at', { ascending: false }).limit(1000),
                 supabase.from('vendedores').select('id, nombre'),
             ]);
             const master = masterRes.data;
@@ -86,14 +87,29 @@ export default function ReceptionManagement() {
             const vList = vendRes.data || [];
             setVendedoresList(vList);
 
+            // Extraer los títulos maestros normalizados para detectar coincidencias globales con estado PEDIDO
+            const masterTitlesNormalized = new Set((master?.datos_json || []).map(it => normalizeTitle(it.titulo)));
+
             // Filtrado inteligente en JS (normalizando para ignorar acentos y mayúsculas)
             const weekSearchKey = normalizeTitle(semanaName);
-            const matchedByStatus = [...(cItemsConfirmedRes.data || []), ...(cItemsAdjRes.data || [])].filter(ci => {
-                if (!semanaName) return false;
-                return normalizeTitle(ci.estado).includes(weekSearchKey);
+            
+            const allCandidateItems = [
+                ...(cItemsConfirmedRes.data || []), 
+                ...(cItemsAdjRes.data || []),
+                ...(cItemsPedidoRes.data || [])
+            ];
+
+            const matchedByStatus = allCandidateItems.filter(ci => {
+                const normEstado = normalizeTitle(ci.estado);
+                // 1. Si el estado contiene el nombre de la semana (ej. AD. CONFIRMADO 17)
+                if (semanaName && normEstado.includes(weekSearchKey)) return true;
+                // 2. Si el estado es PEDIDO y el título coincide con algo que llega esta semana
+                if (normEstado === 'pedido' && masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
+                
+                return false;
             });
 
-            // Combinar y deduplicar clientItems (semana_id + match por texto en estado)
+            // Combinar y deduplicar clientItems (semana_id + match por texto en estado + PEDIDO coincidente)
             const seenIds = new Set();
             const cItems = [...(cItemsByIdRes.data || []), ...matchedByStatus].filter(ci => {
                 if (seenIds.has(ci.id)) return false;
@@ -127,15 +143,21 @@ export default function ReceptionManagement() {
                 if (toHeal.length > 0) {
                     console.log(`🔧 Auto-heal: marcando ${toHeal.length} cliente_items como EN TIENDA. IDs: ${toHeal.join(', ')}`); // FIX BUG #6: logging
                     await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', toHeal);
-                    // Re-fetch cItems frescos después del heal
-                    const [healed1, healed2] = await Promise.all([
+                    // Re-fetch cItems frescos después del heal (usando la nueva lógica)
+                    const [healed1, healed2, healed3, healed4] = await Promise.all([
                         supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
-                        semanaName
-                            ? supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', `CONFIRMADO ${semanaName}%`)
-                            : Promise.resolve({ data: [] }),
+                        supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%CONFIRMADO%').order('created_at', { ascending: false }).limit(1000),
+                        supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%ADJUDICADO%').order('created_at', { ascending: false }).limit(1000),
+                        supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('estado', 'PEDIDO').order('created_at', { ascending: false }).limit(1000),
                     ]);
+                    const allHealedCandidates = [...(healed2.data || []), ...(healed3.data || []), ...(healed4.data || [])].filter(ci => {
+                        const normEstado = normalizeTitle(ci.estado);
+                        if (semanaName && normEstado.includes(weekSearchKey)) return true;
+                        if (normEstado === 'pedido' && masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
+                        return false;
+                    });
                     const seenIds2 = new Set();
-                    const cItemsHealed = [...(healed1.data || []), ...(healed2.data || [])].filter(ci => {
+                    const cItemsHealed = [...(healed1.data || []), ...allHealedCandidates].filter(ci => {
                         if (seenIds2.has(ci.id)) return false;
                         seenIds2.add(ci.id);
                         return true;
@@ -444,10 +466,13 @@ export default function ReceptionManagement() {
             const qtyRec = item.cantidad_recibida;
 
             // Buscamos cuántos clientes están esperando este título (independientemente de quién los pidió)
-            const pendingForTitle = clientItems.filter(ci => 
-                normalizeTitle(ci.titulo) === key && 
-                (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'))
-            );
+            const pendingForTitle = clientItems.filter(ci => {
+                if (normalizeTitle(ci.titulo) !== key) return false;
+                const normEstado = normalizeTitle(ci.estado);
+                return normEstado.includes('adjudicado') || 
+                       normEstado.includes('confirmado') || 
+                       normEstado === 'pedido';
+            });
 
             // PRIORIDAD 1: Clientes. Ellos "toman" primero de lo que llegó.
             const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
@@ -1015,7 +1040,10 @@ export default function ReceptionManagement() {
                                                             </div>
                                                             {(() => {
                                                                 const forTitle = clientItems.filter(ci => normalizeTitle(ci.titulo) === key);
-                                                                const pending = forTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')).length;
+                                                                const pending = forTitle.filter(ci => {
+                                                                    const normEstado = normalizeTitle(ci.estado);
+                                                                    return normEstado.includes('adjudicado') || normEstado.includes('confirmado') || normEstado === 'pedido';
+                                                                }).length;
                                                                 const inStore = forTitle.filter(ci => ci.estado === 'EN TIENDA').length;
                                                                 const total = forTitle.length;
                                                                 return (
