@@ -231,25 +231,35 @@ export default function ReceptionManagement() {
             // Calculamos cuánto de lo confirmado le toca a cada uno en este ítem
             let remaining = confirmedQty;
             
-            // Prioridad 1: Tienda
-            const tiendaOrders = arr.filter(b => b.tipo === 'tienda');
-            tiendaOrders.forEach(b => {
-                const take = Math.min(remaining, b.cantidad);
-                stats.tienda += take;
-                stats.total += take;
-                remaining -= take;
-            });
-
-            // Prioridad 2: Vendedores / Clientes
+            // PRIORIDAD 1: Clientes / Vendedores (Incluso si el Excel decía Tienda)
             const vendorOrders = arr.filter(b => b.tipo !== 'tienda');
             vendorOrders.forEach(b => {
                 const take = Math.min(remaining, b.cantidad);
-                const vName = b.vendedor || 'Socio';
-                stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + take;
-                stats.clientes += take;
-                stats.total += take;
-                remaining -= take;
+                if (take > 0) {
+                    const vName = b.vendedor || 'Socio';
+                    stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + take;
+                    stats.clientes += take;
+                    stats.total += take;
+                    remaining -= take;
+                }
             });
+
+            // PRIORIDAD 2: Tienda (Solo lo que sobre)
+            const tiendaOrders = arr.filter(b => b.tipo === 'tienda');
+            tiendaOrders.forEach(b => {
+                const take = Math.min(remaining, b.cantidad);
+                if (take > 0) {
+                    stats.tienda += take;
+                    stats.total += take;
+                    remaining -= take;
+                }
+            });
+
+            // Si sobran unidades que no estaban en ningún pedido pero sí en el Master
+            if (remaining > 0) {
+                stats.tienda += remaining;
+                stats.total += remaining;
+            }
         });
 
         return stats;
@@ -433,19 +443,20 @@ export default function ReceptionManagement() {
             const key = normalizeTitle(item.titulo);
             const qtyRec = item.cantidad_recibida;
 
-            const breakdown = orderBreakdown[key] || [];
-            const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-            const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+            // Buscamos cuántos clientes están esperando este título (independientemente de quién los pidió)
+            const pendingForTitle = clientItems.filter(ci => 
+                normalizeTitle(ci.titulo) === key && 
+                (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'))
+            );
 
-            let calcForStore = Math.min(tiendaOrdered, qtyRec);
-            if (calcForStore < 0) calcForStore = 0;
-            const availableForClients = Math.max(0, qtyRec - calcForStore);
-            const clientSliceLimit = Math.min(availableForClients, totalVendorOrdered);
-            
-            const preAllocated = clientItems
-                .filter(ci => normalizeTitle(ci.titulo) === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
-                .slice(0, clientSliceLimit);
-            allPreAllocatedIds.push(...preAllocated.map(p => p.id));
+            // PRIORIDAD 1: Clientes. Ellos "toman" primero de lo que llegó.
+            const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
+            const preAllocated = pendingForTitle.slice(0, clientSliceLimit);
+            const preAllocatedIds = preAllocated.map(p => p.id);
+            allPreAllocatedIds.push(...preAllocatedIds);
+
+            // PRIORIDAD 2: Tienda. Se queda con lo que sobre después de cubrir clientes.
+            let calcForStore = Math.max(0, qtyRec - clientSliceLimit);
 
             if (calcForStore > 0) {
                 const prod = prodMap[key];
