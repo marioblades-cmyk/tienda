@@ -3355,7 +3355,7 @@ export default function ClientOrdersView() {
                                                                             let semana_id = null;
                                                                             if (source.startsWith('pedido_')) {
                                                                                 const sId = source.split('_')[1];
-                                                                                if (sId !== 'PENDIENTE') semana_id = sId;
+                                                                                if (sId !== 'PENDIENTE' && sId !== 'ESPANA') semana_id = sId;
                                                                             } else if (source.startsWith('flotante_')) {
                                                                                 semana_id = source.split('_').pop();
                                                                             }
@@ -3388,6 +3388,7 @@ export default function ClientOrdersView() {
                                                                                 <option key={s.id} value={`pedido_${s.id}`}>🚀 P/ {s.nombre}</option>
                                                                             ))}
                                                                             <option value="pedido_PENDIENTE">📂 PRÓXIMO PEDIDO (SIN FECHA)</option>
+                                                                            <option value="pedido_ESPANA">🇪🇸 IMPORTACIÓN ESPAÑA</option>
                                                                         </optgroup>
                                                                     </select>
                                                                 </td>
