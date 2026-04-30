@@ -69,14 +69,15 @@ export default function ReceptionManagement() {
             const semanaName = semanas.find(s => s.id === semanaId)?.nombre || '';
 
             // Todas las queries en paralelo
-            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsFilteredRes, vendRes] = await Promise.all([
+            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmedRes, cItemsAdjRes, vendRes] = await Promise.all([
                 supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
                 // Por semana_id (items ya asignados a esta semana)
                 supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
-                // Todos los que contengan el nombre de la semana en su estado (CONFIRMADO/ADJUDICADO {semana})
-                semanaName ? supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', `%${semanaName}%`) : Promise.resolve({ data: [] }),
+                // Todos los confirmados/adjudicados para filtrar en JS (evita problemas de acentos en Supabase)
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%CONFIRMADO%'),
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', '%ADJUDICADO%'),
                 supabase.from('vendedores').select('id, nombre'),
             ]);
             const master = masterRes.data;
@@ -85,8 +86,12 @@ export default function ReceptionManagement() {
             const vList = vendRes.data || [];
             setVendedoresList(vList);
 
-            // Los items filtrados por texto (matching por nombre de semana en el estado)
-            const matchedByStatus = cItemsFilteredRes.data || [];
+            // Filtrado inteligente en JS (normalizando para ignorar acentos y mayúsculas)
+            const weekSearchKey = normalizeTitle(semanaName);
+            const matchedByStatus = [...(cItemsConfirmedRes.data || []), ...(cItemsAdjRes.data || [])].filter(ci => {
+                if (!semanaName) return false;
+                return normalizeTitle(ci.estado).includes(weekSearchKey);
+            });
 
             // Combinar y deduplicar clientItems (semana_id + match por texto en estado)
             const seenIds = new Set();
