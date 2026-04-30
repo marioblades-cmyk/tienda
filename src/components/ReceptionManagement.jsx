@@ -159,7 +159,7 @@ export default function ReceptionManagement() {
                 for (const ci of cItems) {
                     const key = normalizeTitle(ci.titulo);
                     const received = receptionMap[key] || 0;
-                    if (received > 0 && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'))) {
+                    if (received > 0 && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO') || ci.estado === 'PEDIDO')) {
                         const already = healCount[key] || 0;
                         if (already < received) {
                             toHeal.push(ci.id);
@@ -223,17 +223,23 @@ export default function ReceptionManagement() {
                 setAlreadyReceived({});
             }
 
-            // Build breakdown
+            // Build breakdown agrupado para evitar saturación visual
             const breakdown = {};
             // 1. Semanas / Pedidos directos
             (orders || []).forEach(item => {
                 const key = normalizeTitle(item.titulo);
                 if (!breakdown[key]) breakdown[key] = [];
-                breakdown[key].push({
-                    vendedor: item.pedido.vendedor_nombre,
-                    cantidad: item.cantidad,
-                    tipo: item.pedido.tipo
-                });
+                
+                const existing = breakdown[key].find(b => b.vendedor === item.pedido.vendedor_nombre && b.tipo === item.pedido.tipo);
+                if (existing) {
+                    existing.cantidad += item.cantidad;
+                } else {
+                    breakdown[key].push({
+                        vendedor: item.pedido.vendedor_nombre,
+                        cantidad: item.cantidad,
+                        tipo: item.pedido.tipo
+                    });
+                }
             });
             // 2. Pedidos de Clientes (Manuales/Reservas)
             cItems.forEach(ci => {
@@ -243,11 +249,16 @@ export default function ReceptionManagement() {
                 // Buscar nombre del vendedor
                 const vendName = vList.find(v => v.id === ci.vendedor_id)?.nombre || 'Desconocido';
                 
-                breakdown[key].push({
-                    vendedor: vendName,
-                    cantidad: 1, // Cada registro en cliente_items es una unidad
-                    tipo: 'cliente'
-                });
+                const existing = breakdown[key].find(b => b.vendedor === vendName && b.tipo === 'cliente');
+                if (existing) {
+                    existing.cantidad += 1;
+                } else {
+                    breakdown[key].push({
+                        vendedor: vendName,
+                        cantidad: 1, // Cada registro en cliente_items es una unidad
+                        tipo: 'cliente'
+                    });
+                }
             });
 
             setOrderBreakdown(breakdown);
@@ -1076,7 +1087,7 @@ export default function ReceptionManagement() {
                                                                 {breakdown.map((b, bIdx) => (
                                                                     <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
                                                                         {b.tipo === 'tienda' 
-                                                                            ? (showTiendaNames ? `TIENDA (${b.vendedor}): ${b.cantidad}` : `TIENDA: ${b.cantidad}`)
+                                                                            ? (showTiendaNames ? `STOCK (${b.vendedor}): ${b.cantidad}` : `STOCK: ${b.cantidad}`)
                                                                             : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
                                                                         }
                                                                     </span>
@@ -1094,7 +1105,7 @@ export default function ReceptionManagement() {
                                                                     <div className="mt-1 text-[9px] font-bold uppercase">
                                                                         {total === 0
                                                                             ? <span className="text-red-400 animate-pulse">⚠ 0 clientes cargados</span>
-                                                                            : <span className="text-secondary">{pending > 0 ? `${pending} pendientes` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} en tienda` : ''}</span>
+                                                                            : <span className="text-secondary">{pending > 0 ? `${pending} clientes esperan` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} listos en tienda` : ''}</span>
                                                                         }
                                                                     </div>
                                                                 );
