@@ -910,7 +910,7 @@ export default function ReceptionManagement() {
 
                             {/* Dashboard Stats */}
                             {dashboardStats && (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 border-2 border-green-500/30 p-2 rounded-3xl bg-green-50/50 mb-6">
                                     <div className="bg-navy text-white p-4 rounded-2xl shadow-lg relative overflow-hidden group">
                                         <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-110 transition-transform">
                                             <Package size={48} />
