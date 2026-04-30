@@ -467,8 +467,16 @@ export default function ReceptionManagement() {
         }));
 
         if (stockRows.length > 0) {
-            const { error: upsertErr } = await supabase.from('catalogo_productos').upsert(stockRows, { onConflict: 'id' });
-            if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
+            // Usamos updates individuales para evitar errores con columnas NOT NULL (como product_id) que upsert requiere
+            const updatePromises = stockRows.map(row => 
+                supabase.from('catalogo_productos')
+                    .update({ stock_fisico: row.stock_fisico, updated_at: new Date().toISOString() })
+                    .eq('id', row.id)
+            );
+            
+            const results = await Promise.all(updatePromises);
+            const firstError = results.find(r => r.error)?.error;
+            if (firstError) throw new Error('Error al actualizar stock: ' + firstError.message);
             
             catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
 
