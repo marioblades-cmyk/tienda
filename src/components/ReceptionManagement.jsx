@@ -108,16 +108,33 @@ export default function ReceptionManagement() {
             const weekSearchKey = normalizeTitle(semanaName);
             const masterTitlesNormalized = new Set((master?.datos_json || []).map(it => normalizeTitle(it.titulo)).filter(Boolean));
 
+            console.log("=== DIAGNOSTICO DE RECEPCION ===");
+            console.log(`Buscando ${allPendingItems.length} items pendientes...`);
+
             const matchedByStatus = allPendingItems.filter(ci => {
                 const normEstado = normalizeTitle(ci.estado);
+                const normTitle = normalizeTitle(ci.titulo);
+                
+                // Diagnostic logging for JOJOLION 07
+                if (normTitle.includes('jojolion07')) {
+                    console.log(`[DEBUG] Encontrado Jojolion 07 en pendientes!`);
+                    console.log(`- Titulo Original: "${ci.titulo}"`);
+                    console.log(`- Estado Original: "${ci.estado}"`);
+                    console.log(`- Norm Estado: "${normEstado}"`);
+                    console.log(`- Esta en Master?: ${masterTitlesNormalized.has(normTitle)}`);
+                }
+
                 // 1. Si el estado contiene explícitamente la semana
                 if (semanaName && normEstado.includes(weekSearchKey)) return true;
                 // 2. Si el estado es genéricamente pendiente (PEDIDO/ADJUDICADO/CONFIRMADO) y el título coincide
                 if (normEstado === 'pedido' || normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
-                    if (masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
+                    if (masterTitlesNormalized.has(normTitle)) return true;
                 }
                 return false;
             });
+            
+            console.log(`Items emparejados por estado/titulo: ${matchedByStatus.length}`);
+            console.log("================================");
 
             // Combinar y deduplicar clientItems (semana_id + match por título)
             const seenIds = new Set();
