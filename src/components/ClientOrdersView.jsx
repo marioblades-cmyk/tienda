@@ -920,6 +920,7 @@ export default function ClientOrdersView() {
                         if (sId === 'ESPANA') {
                             targetSemanaId = null;
                             estadoTarget = 'PRE-VENTA ESPAÑA';
+                            cItem.nota = cItem.nota ? `[ESPAÑA] ${cItem.nota}` : '[ESPAÑA]';
                         } else {
                             targetSemanaId = sId;
                             const sFound = semanas.find(s=>s.id === targetSemanaId);
@@ -2546,7 +2547,7 @@ export default function ClientOrdersView() {
                                 <tr className="bg-muted/50 text-muted uppercase text-[10px] font-black tracking-widest border-b border-border">
                                     <th className="px-6 py-4 w-10 text-center">
                                         <input type="checkbox" className="w-4 h-4 accent-purple-500" onChange={e => {
-                                            const espItems = items.filter(i => i.estado.includes('ESPAÑA') || i.estado.includes('TRÁNSITO'));
+                                            const espItems = items.filter(i => i.estado.includes('ESPAÑA') || i.estado.includes('TRÁNSITO') || i.nota?.includes('[ESPAÑA]'));
                                             setSelectedItems(prev => {
                                                 const n = new Set(prev);
                                                 espItems.forEach(i => e.target.checked ? n.add(i.id) : n.delete(i.id));
@@ -2563,7 +2564,7 @@ export default function ClientOrdersView() {
                             </thead>
                             <tbody className="divide-y divide-border/10">
                                 {(() => {
-                                    const espItems = items.filter(i => i.estado.includes('ESPAÑA') || i.estado.includes('TRÁNSITO'));
+                                    const espItems = items.filter(i => i.estado.includes('ESPAÑA') || i.estado.includes('TRÁNSITO') || i.nota?.includes('[ESPAÑA]'));
                                     if (espItems.length === 0) {
                                         return <tr><td colSpan="6" className="py-20 text-center text-muted italic">No hay pedidos de España pendientes.</td></tr>;
                                     }
@@ -2586,11 +2587,23 @@ export default function ClientOrdersView() {
                                                 <td className="px-6 py-4 text-center">
                                                     {renderStatus(it, true)}
                                                 </td>
-                                                <td className="px-6 py-4 text-right font-mono text-xs font-black" style={{ color: saldo > 0 ? 'var(--error)' : 'var(--success)' }}>
-                                                    BS {formatS(saldo)}
+                                                <td className="px-6 py-4 text-right font-mono text-[10px]">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-muted opacity-60">Venta: BS {formatS(it.precio_venta)}</span>
+                                                        <span className="font-black text-xs" style={{ color: saldo > 0 ? 'var(--error)' : 'var(--success)' }}>
+                                                            Saldo: BS {formatS(saldo)}
+                                                        </span>
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <div className="flex items-center justify-center gap-2">
+                                                        <button 
+                                                            onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
+                                                            className="p-2 bg-primary/10 text-primary rounded-xl hover:bg-primary hover:text-white transition-all shadow-sm border border-primary/20"
+                                                            title="Editar ítem"
+                                                        >
+                                                            <Edit2 size={16} />
+                                                        </button>
                                                         <button 
                                                             onClick={() => handleBulkEstado(new Set([it.id]), 'EN TIENDA')}
                                                             className="p-2 bg-success/10 text-success rounded-xl hover:bg-success hover:text-white transition-all shadow-sm border border-success/20"

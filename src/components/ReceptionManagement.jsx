@@ -29,6 +29,7 @@ export default function ReceptionManagement() {
     const [diagData, setDiagData] = useState([]);
     const [diagLoading, setDiagLoading] = useState(false);
     const [diagCatalogCount, setDiagCatalogCount] = useState(null);
+    const [vendedoresList, setVendedoresList] = useState([]);
     const { isAdmin, isSocio } = useAuth();
 
     useEffect(() => {
@@ -45,11 +46,16 @@ export default function ReceptionManagement() {
     }, [selectedSemana]);
 
     const fetchSemanas = async () => {
-        const { data } = await supabase
+        const { data: semData } = await supabase
             .from('semanas')
             .select('*')
             .order('created_at', { ascending: false });
-        if (data) setSemanas(data);
+        if (semData) setSemanas(semData);
+
+        const { data: vendData } = await supabase
+            .from('vendedores')
+            .select('id, nombre');
+        if (vendData) setVendedoresList(vendData);
     };
 
     const fetchReceptionData = async (semanaId) => {
@@ -59,7 +65,7 @@ export default function ReceptionManagement() {
             const semanaName = semanas.find(s => s.id === semanaId)?.nombre || '';
 
             // Todas las queries en paralelo
-            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmadosRes] = await Promise.all([
+            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmadosRes, vendRes] = await Promise.all([
                 supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
@@ -67,10 +73,13 @@ export default function ReceptionManagement() {
                 supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
                 // Todos los CONFIRMADO (filtramos por semana en JS para evitar problemas de acentos en ILIKE)
                 supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', 'CONFIRMADO%'),
+                supabase.from('vendedores').select('id, nombre'),
             ]);
             const master = masterRes.data;
             const orders = ordersRes.data;
             const currentReception = receptionRes.data;
+            const vList = vendRes.data || [];
+            setVendedoresList(vList);
 
             // Filtrar CONFIRMADO por semana en JS (maneja acentos correctamente)
             const semanaNameLower = semanaName.toLowerCase();
@@ -145,6 +154,7 @@ export default function ReceptionManagement() {
 
             // Build breakdown
             const breakdown = {};
+            // 1. Semanas / Pedidos directos
             (orders || []).forEach(item => {
                 const key = item.titulo.toLowerCase().trim();
                 if (!breakdown[key]) breakdown[key] = [];
@@ -154,6 +164,21 @@ export default function ReceptionManagement() {
                     tipo: item.pedido.tipo
                 });
             });
+            // 2. Pedidos de Clientes (Manuales/Reservas)
+            cItems.forEach(ci => {
+                const key = (ci.titulo || '').toLowerCase().trim();
+                if (!breakdown[key]) breakdown[key] = [];
+                
+                // Buscar nombre del vendedor
+                const vendName = vList.find(v => v.id === ci.clientes?.vendedor_id)?.nombre || 'Desconocido';
+                
+                breakdown[key].push({
+                    vendedor: vendName,
+                    cantidad: 1, // Cada registro en cliente_items es una unidad
+                    tipo: 'cliente'
+                });
+            });
+
             setOrderBreakdown(breakdown);
 
         } catch (err) {
@@ -831,16 +856,20 @@ export default function ReceptionManagement() {
                                     />
                                 </div>
 
-                                <select
-                                    value={vendorFilter}
-                                    onChange={(e) => setVendorFilter(e.target.value)}
-                                    className="bg-white border border-border/40 p-4 rounded-2xl text-sm font-bold focus:border-secondary outline-none transition-all md:w-64"
-                                >
-                                    <option value="">Todos los destinos</option>
-                                    {allVendors.map(v => (
-                                        <option key={v} value={v}>{v}</option>
-                                    ))}
-                                </select>
+                                <div className="relative md:w-64">
+                                    <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={18} />
+                                    <select
+                                        value={vendorFilter}
+                                        onChange={(e) => setVendorFilter(e.target.value)}
+                                        className="w-full bg-white border border-border/40 p-4 pl-12 rounded-2xl text-sm font-bold focus:border-secondary outline-none transition-all appearance-none cursor-pointer shadow-sm"
+                                    >
+                                        <option value="">Todos los destinos</option>
+                                        {allVendors.map(v => (
+                                            <option key={v} value={v}>{v}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={16} />
+                                </div>
 
                                 <label className="flex items-center gap-3 bg-white border border-border/40 px-5 py-4 rounded-2xl cursor-pointer hover:border-secondary/50 transition-colors">
                                     <input
