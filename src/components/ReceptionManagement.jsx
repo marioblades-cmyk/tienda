@@ -83,34 +83,36 @@ export default function ReceptionManagement() {
             const vList = vendRes.data || [];
             setVendedoresList(vList);
 
-            // 2. Fetch garantizado por Título
-            // Para asegurar que ningún pedido manual reciente se pierda por límites de paginación o texto raro,
-            // buscamos todos los items pendientes que coincidan exactamente con los títulos del camión.
-            const masterTitles = [...new Set((master?.datos_json || []).map(it => it.titulo).filter(Boolean))];
-            const titleChunks = [];
-            for (let i = 0; i < masterTitles.length; i += 50) {
-                titleChunks.push(masterTitles.slice(i, i + 50));
-            }
-            const chunkPromises = titleChunks.map(chunk => 
-                supabase.from('cliente_items')
+            // 2. Fetch garantizado de TODO lo pendiente (Fuerza Bruta Paginada)
+            // Para asegurar que ningún pedido se pierda por espacios invisibles, acentos o límites de Supabase,
+            // descargamos todos los items pendientes en bloques y usamos JavaScript puro para emparejar.
+            let allPendingItems = [];
+            let from = 0;
+            let to = 999;
+            while(true) {
+                const { data, error } = await supabase.from('cliente_items')
                     .select('*, clientes(nombre, vendedor_id)')
-                    .in('titulo', chunk)
                     .neq('estado', 'ENTREGADO')
                     .neq('estado', 'EN TIENDA')
                     .neq('estado', 'DAÑADO')
-            );
-            const chunkResults = await Promise.all(chunkPromises);
-            const itemsByTitle = chunkResults.flatMap(res => res.data || []);
+                    .range(from, to);
+                
+                if (error || !data || data.length === 0) break;
+                allPendingItems.push(...data);
+                if (data.length < 1000) break;
+                from += 1000;
+                to += 1000;
+            }
 
             // 3. Filtrado inteligente en JS (normalizando para ignorar acentos y mayúsculas)
             const weekSearchKey = normalizeTitle(semanaName);
-            const masterTitlesNormalized = new Set(masterTitles.map(t => normalizeTitle(t)));
+            const masterTitlesNormalized = new Set((master?.datos_json || []).map(it => normalizeTitle(it.titulo)).filter(Boolean));
 
-            const matchedByStatus = itemsByTitle.filter(ci => {
+            const matchedByStatus = allPendingItems.filter(ci => {
                 const normEstado = normalizeTitle(ci.estado);
                 // 1. Si el estado contiene explícitamente la semana
                 if (semanaName && normEstado.includes(weekSearchKey)) return true;
-                // 2. Si el estado es genéricamente pendiente (PEDIDO/ADJUDICADO/CONFIRMADO) y el título coincide (ya está garantizado por el fetch, pero re-verificamos)
+                // 2. Si el estado es genéricamente pendiente (PEDIDO/ADJUDICADO/CONFIRMADO) y el título coincide
                 if (normEstado === 'pedido' || normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
                     if (masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
                 }
@@ -154,18 +156,25 @@ export default function ReceptionManagement() {
                     // Re-fetch cItems frescos después del heal (usando la nueva lógica)
                     const healedByIdRes = await supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId);
                     
-                    const healedChunkPromises = titleChunks.map(chunk => 
-                        supabase.from('cliente_items')
+                    let allHealedPendingItems = [];
+                    let hFrom = 0;
+                    let hTo = 999;
+                    while(true) {
+                        const { data, error } = await supabase.from('cliente_items')
                             .select('*, clientes(nombre, vendedor_id)')
-                            .in('titulo', chunk)
                             .neq('estado', 'ENTREGADO')
                             .neq('estado', 'EN TIENDA')
                             .neq('estado', 'DAÑADO')
-                    );
-                    const healedChunkResults = await Promise.all(healedChunkPromises);
-                    const healedItemsByTitle = healedChunkResults.flatMap(res => res.data || []);
+                            .range(hFrom, hTo);
+                        
+                        if (error || !data || data.length === 0) break;
+                        allHealedPendingItems.push(...data);
+                        if (data.length < 1000) break;
+                        hFrom += 1000;
+                        hTo += 1000;
+                    }
                     
-                    const healedMatchedByStatus = healedItemsByTitle.filter(ci => {
+                    const healedMatchedByStatus = allHealedPendingItems.filter(ci => {
                         const normEstado = normalizeTitle(ci.estado);
                         if (semanaName && normEstado.includes(weekSearchKey)) return true;
                         if (normEstado === 'pedido' || normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
