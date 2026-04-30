@@ -74,7 +74,7 @@ export default function ReceptionManagement() {
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
                 // Por semana_id (items ya asignados a esta semana)
-                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
+                supabase.from('cliente_items').select('*, clientes(nombre)').eq('semana_id', semanaId),
                 supabase.from('vendedores').select('id, nombre'),
             ]);
             const master = masterRes.data;
@@ -91,7 +91,7 @@ export default function ReceptionManagement() {
             let to = 999;
             while(true) {
                 const { data, error } = await supabase.from('cliente_items')
-                    .select('*, clientes(nombre, vendedor_id)')
+                    .select('*, clientes(nombre)')
                     .neq('estado', 'ENTREGADO')
                     .neq('estado', 'EN TIENDA')
                     .neq('estado', 'DAÑADO')
@@ -171,14 +171,14 @@ export default function ReceptionManagement() {
                     console.log(`🔧 Auto-heal: marcando ${toHeal.length} cliente_items como EN TIENDA. IDs: ${toHeal.join(', ')}`); // FIX BUG #6: logging
                     await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', toHeal);
                     // Re-fetch cItems frescos después del heal (usando la nueva lógica)
-                    const healedByIdRes = await supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId);
+                    const healedByIdRes = await supabase.from('cliente_items').select('*, clientes(nombre)').eq('semana_id', semanaId);
                     
                     let allHealedPendingItems = [];
                     let hFrom = 0;
                     let hTo = 999;
                     while(true) {
                         const { data, error } = await supabase.from('cliente_items')
-                            .select('*, clientes(nombre, vendedor_id)')
+                            .select('*, clientes(nombre)')
                             .neq('estado', 'ENTREGADO')
                             .neq('estado', 'EN TIENDA')
                             .neq('estado', 'DAÑADO')
@@ -241,7 +241,7 @@ export default function ReceptionManagement() {
                 if (!breakdown[key]) breakdown[key] = [];
                 
                 // Buscar nombre del vendedor
-                const vendName = vList.find(v => v.id === ci.clientes?.vendedor_id)?.nombre || 'Desconocido';
+                const vendName = vList.find(v => v.id === ci.vendedor_id)?.nombre || 'Desconocido';
                 
                 breakdown[key].push({
                     vendedor: vendName,
