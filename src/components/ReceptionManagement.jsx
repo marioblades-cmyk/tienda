@@ -955,7 +955,7 @@ export default function ReceptionManagement() {
                                                             <div className="flex flex-wrap gap-1">
                                                                 {breakdown.map((b, bIdx) => (
                                                                     <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                        {b.tipo === 'tienda' ? 'TIENDA' : 'VENDEDOR'} · {b.vendedor}: {b.cantidad}
+                                                                        {b.tipo === 'tienda' ? `TIENDA: ${b.cantidad}` : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`}
                                                                     </span>
                                                                 ))}
                                                             </div>
