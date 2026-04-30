@@ -347,7 +347,21 @@ export default function FlujoCajaView({ user, profile }) {
                     showToast(`Error al descontar stock (${item.titulo}): ${stockErr.message}`, 'error');
                     throw stockErr;
                 }
-                console.log(`✅ Stock descontado OK: ${item.titulo}`);
+
+                // LOG: Registrar el movimiento en el historial de stock
+                // Buscamos el item en el carrito para obtener el stock previo (stock_max)
+                const cartItem = ventaCart.find(ci => ci.id === item.id);
+                const stockPrevio = cartItem?.stock_max || 0;
+                await catalogService.logStockMovement({
+                    productoId: item.id,
+                    titulo: item.titulo,
+                    delta: -item.cantidad,
+                    stockDespues: stockPrevio - item.cantidad,
+                    motivo: 'VENTA STOCK',
+                    detalle: `Venta POS por ${vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio'}`
+                });
+
+                console.log(`✅ Stock descontado y logeado OK: ${item.titulo}`);
             }
 
             // 2. Registrar movimiento en Flujo de Caja con metadatos
@@ -519,7 +533,21 @@ export default function FlujoCajaView({ user, profile }) {
                     console.error('❌ Error RPC restauración:', rpcErr);
                     return showToast(`No se pudo restaurar stock de ${item.titulo}: ${rpcErr.message}`, 'error');
                 }
-                console.log(`✅ Stock restaurado OK: ${item.titulo}`);
+
+                // LOG: Registrar la restauración en el historial de stock
+                // Obtenemos el stock actual para ponerlo en el log
+                const { data: currentProd } = await supabase.from('catalogo_productos').select('stock_fisico').eq('id', item.id).maybeSingle();
+                
+                await catalogService.logStockMovement({
+                    productoId: item.id,
+                    titulo: item.titulo,
+                    delta: qty,
+                    stockDespues: currentProd?.stock_fisico || 0,
+                    motivo: 'RESTAURACIÓN',
+                    detalle: `Anulación de venta POS #${movement.id.slice(0, 5)}`
+                });
+
+                console.log(`✅ Stock restaurado y logeado OK: ${item.titulo}`);
             }
             catalogService.patchStockInCache(
                 movement.items_json.map(i => ({ id: i.id, delta: parseInt(i.cantidad) }))

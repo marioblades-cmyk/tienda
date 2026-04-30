@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
+// Normaliza títulos para matching robusto: minúsculas, sin espacios extra internos ni bordes
+const normalizeTitle = (str) => (str || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
 export default function ReceptionManagement() {
     const [semanas, setSemanas] = useState([]);
     const [selectedSemana, setSelectedSemana] = useState('');
@@ -100,7 +103,7 @@ export default function ReceptionManagement() {
             // Index current reception
             const receptionMap = {};
             (currentReception || []).forEach(r => {
-                const key = r.titulo.toLowerCase().trim();
+                const key = normalizeTitle(r.titulo);
                 receptionMap[key] = (receptionMap[key] || 0) + r.cantidad_recibida;
             });
 
@@ -110,7 +113,7 @@ export default function ReceptionManagement() {
                 const toHeal = [];
                 const healCount = {};
                 for (const ci of cItems) {
-                    const key = (ci.titulo || '').toLowerCase().trim();
+                    const key = normalizeTitle(ci.titulo);
                     const received = receptionMap[key] || 0;
                     if (received > 0 && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'))) {
                         const already = healCount[key] || 0;
@@ -121,6 +124,7 @@ export default function ReceptionManagement() {
                     }
                 }
                 if (toHeal.length > 0) {
+                    console.log(`🔧 Auto-heal: marcando ${toHeal.length} cliente_items como EN TIENDA. IDs: ${toHeal.join(', ')}`); // FIX BUG #6: logging
                     await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', toHeal);
                     // Re-fetch cItems frescos después del heal
                     const [healed1, healed2] = await Promise.all([
@@ -156,7 +160,7 @@ export default function ReceptionManagement() {
             const breakdown = {};
             // 1. Semanas / Pedidos directos
             (orders || []).forEach(item => {
-                const key = item.titulo.toLowerCase().trim();
+                const key = normalizeTitle(item.titulo);
                 if (!breakdown[key]) breakdown[key] = [];
                 breakdown[key].push({
                     vendedor: item.pedido.vendedor_nombre,
@@ -166,7 +170,7 @@ export default function ReceptionManagement() {
             });
             // 2. Pedidos de Clientes (Manuales/Reservas)
             cItems.forEach(ci => {
-                const key = (ci.titulo || '').toLowerCase().trim();
+                const key = normalizeTitle(ci.titulo);
                 if (!breakdown[key]) breakdown[key] = [];
                 
                 // Buscar nombre del vendedor
@@ -213,7 +217,7 @@ export default function ReceptionManagement() {
 
         if (vendorFilter) {
             result = result.filter(it => {
-                const key = it.titulo.toLowerCase().trim();
+                const key = normalizeTitle(it.titulo);
                 const bd = orderBreakdown[key] || [];
                 if (vendorFilter === 'Tienda') {
                     return bd.some(b => b.tipo === 'tienda');
@@ -224,7 +228,7 @@ export default function ReceptionManagement() {
 
         if (hideComplete) {
             result = result.filter(it => {
-                const key = it.titulo.toLowerCase().trim();
+                const key = normalizeTitle(it.titulo);
                 const prevRec = alreadyReceived[key] || 0;
                 const inputVal = receivedCounts[key] || '';
                 const confirmedQty = it.cantidad || 0;
@@ -333,6 +337,24 @@ export default function ReceptionManagement() {
                 .eq('estado', 'EN TIENDA');
             if (updError) throw updError;
 
+            // FIX BUG #5: También revertir items que llegaron por estado CONFIRMADO {semana}
+            // (pueden tener semana_id diferente al seleccionado y no se revirtieron arriba)
+            const semanaNameForCancel = semanas.find(s => s.id === selectedSemana)?.nombre || '';
+            if (semanaNameForCancel) {
+                const { data: confirmadosEnTienda } = await supabase
+                    .from('cliente_items')
+                    .select('id, semana_id, estado')
+                    .ilike('estado', `CONFIRMADO ${semanaNameForCancel}%`);
+                const extraIds = (confirmadosEnTienda || [])
+                    .filter(ci => ci.semana_id !== selectedSemana && ci.estado === 'EN TIENDA')
+                    .map(ci => ci.id);
+                if (extraIds.length > 0) {
+                    await supabase.from('cliente_items')
+                        .update({ estado: 'ADJUDICADO' })
+                        .in('id', extraIds);
+                }
+            }
+
             const stockMsg = prodIds.length > 0 ? ' El stock fue revertido.' : ' (No había delta de stock guardado — revisá el stock manualmente.)';
             alert(`✅ Recepción reiniciada.${stockMsg} Podés volver a procesarla.`);
             setReceivedCounts({});
@@ -343,6 +365,82 @@ export default function ReceptionManagement() {
         } finally {
             setSaving(false);
         }
+    };
+
+    const performReceptionUpdates = async (itemsToSave) => {
+        if (skipStockUpdate) return { missingFromCatalog: [] };
+
+        const allProds = await catalogService.fetchFullCatalog(true);
+        const prodMap = {};
+        allProds.forEach(p => { prodMap[normalizeTitle(p.titulo)] = p; });
+        const idToKey = {};
+        allProds.forEach(p => { idToKey[p.id] = normalizeTitle(p.titulo); });
+
+        const allPreAllocatedIds = [];
+        const stockDeltas = {};
+        const missingFromCatalog = [];
+
+        for (const item of itemsToSave) {
+            const key = normalizeTitle(item.titulo);
+            const qtyRec = item.cantidad_recibida;
+
+            const breakdown = orderBreakdown[key] || [];
+            const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+            const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+
+            let calcForStore = Math.min(tiendaOrdered, qtyRec);
+            if (calcForStore < 0) calcForStore = 0;
+            const availableForClients = Math.max(0, qtyRec - calcForStore);
+            const clientSliceLimit = Math.min(availableForClients, totalVendorOrdered);
+            
+            const preAllocated = clientItems
+                .filter(ci => normalizeTitle(ci.titulo) === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
+                .slice(0, clientSliceLimit);
+            allPreAllocatedIds.push(...preAllocated.map(p => p.id));
+
+            if (calcForStore > 0) {
+                const prod = prodMap[key];
+                if (prod) {
+                    stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
+                } else {
+                    missingFromCatalog.push(item.titulo);
+                }
+            }
+        }
+
+        if (allPreAllocatedIds.length > 0) {
+            await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', allPreAllocatedIds);
+        }
+
+        const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
+            id,
+            stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
+        }));
+
+        if (stockRows.length > 0) {
+            const { error: upsertErr } = await supabase.from('catalogo_productos').upsert(stockRows, { onConflict: 'id' });
+            if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
+            
+            catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
+
+            const { data: prevDeltaRow } = await supabase.from('app_state').select('data').eq('id', `reception_delta_${selectedSemana}`).maybeSingle();
+            const mergedDeltas = { ...(prevDeltaRow?.data || {}) };
+            Object.entries(stockDeltas).forEach(([id, delta]) => {
+                mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
+            });
+            await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
+
+            const semanaName = semanas.find(s => s.id === selectedSemana)?.nombre || '';
+            for (const row of stockRows) {
+                await catalogService.logStockMovement({
+                    productoId: row.id, titulo: prodMap[idToKey[row.id]]?.titulo || '',
+                    delta: stockDeltas[row.id], stockDespues: row.stock_fisico,
+                    motivo: 'RECEPCIÓN', detalle: semanaName,
+                });
+            }
+        }
+
+        return { missingFromCatalog };
     };
 
     const handleKeyDown = (e) => {
@@ -370,12 +468,12 @@ export default function ReceptionManagement() {
 
     const handleSaveReception = async () => {
         const itemsToSave = Object.entries(receivedCounts)
-            .filter(([_, qty]) => qty > 0)
-            .map(([title, qty]) => {
-                const originalItem = masterItems.find(it => it.titulo.toLowerCase().trim() === title);
+            .filter(([_, qty]) => parseInt(qty) > 0)
+            .map(([titleKey, qty]) => {
+                const originalItem = masterItems.find(it => normalizeTitle(it.titulo) === titleKey);
                 return {
                     semana_id: selectedSemana,
-                    titulo: originalItem?.titulo || title.toUpperCase(),
+                    titulo: originalItem?.titulo || titleKey.toUpperCase(),
                     cantidad_recibida: parseInt(qty),
                     cantidad_faltante: Math.max(0, (originalItem?.cantidad || 0) - parseInt(qty))
                 };
@@ -385,106 +483,12 @@ export default function ReceptionManagement() {
 
         setSaving(true);
         try {
-            // 1. Insert into reception table
+            const { missingFromCatalog } = await performReceptionUpdates(itemsToSave);
+
             const { error: insError } = await supabase
                 .from('pedido_items_recepcion')
                 .insert(itemsToSave);
-
             if (insError) throw insError;
-
-            const missingFromCatalog = [];
-
-            // 2. Update physical stock and client orders status
-            if (!skipStockUpdate) {
-                // Usar fetchFullCatalog (paginado) para evitar el límite de 1000 filas de Supabase
-                const allProds = await catalogService.fetchFullCatalog(true);
-                const prodMap = {};
-                allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
-                // Mapa inverso id→key para lookups O(1) en vez de búsqueda lineal O(N)
-                const idToKey = {};
-                allProds.forEach(p => { idToKey[p.id] = (p.titulo || '').trim().toLowerCase(); });
-
-                // Calcular todos los cambios sin hacer queries por item
-                const allPreAllocatedIds = [];
-                const stockDeltas = {}; // prod.id → cantidad a sumar
-
-                for (const item of itemsToSave) {
-                    const key = item.titulo.toLowerCase().trim();
-                    const qtyRec = item.cantidad_recibida;
-
-                    // Breakdown PRIMERO para saber cuántas copias son de vendedor (no de tienda)
-                    const breakdown = orderBreakdown[key] || [];
-                    const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                    const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-
-                    // Clientes solo consumen copias de vendedores, nunca las copias de tienda
-                    const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
-                    const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
-                        .slice(0, clientSliceLimit);
-                    const preAllocatedIds = preAllocated.map(p => p.id);
-                    allPreAllocatedIds.push(...preAllocatedIds);
-
-                    // Tienda siempre recibe lo que ordenó (hasta lo recibido)
-                    let calcForStore = Math.min(tiendaOrdered, qtyRec);
-                    if (calcForStore < 0) calcForStore = 0;
-
-                    if (calcForStore > 0) {
-                        const prod = prodMap[key];
-                        if (prod) {
-                            stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
-                        } else {
-                            missingFromCatalog.push(item.titulo);
-                        }
-                    }
-                }
-
-                // Un solo UPDATE para todos los cliente_items
-                if (allPreAllocatedIds.length > 0) {
-                    await supabase.from('cliente_items')
-                        .update({ estado: 'EN TIENDA' })
-                        .in('id', allPreAllocatedIds);
-                }
-
-                // Un solo UPSERT para todos los stocks
-                const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
-                    id,
-                    stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
-                }));
-                if (stockRows.length > 0) {
-                    const { error: upsertErr } = await supabase.from('catalogo_productos')
-                        .upsert(stockRows, { onConflict: 'id' });
-                    if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
-                    catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
-
-                    // Guardar delta exacto en app_state para poder revertir en cancel
-                    const { data: prevDeltaRow } = await supabase.from('app_state')
-                        .select('data').eq('id', `reception_delta_${selectedSemana}`).maybeSingle();
-                    const prevDeltas = prevDeltaRow?.data || {};
-                    const mergedDeltas = { ...prevDeltas };
-                    Object.entries(stockDeltas).forEach(([id, delta]) => {
-                        mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
-                    });
-                    await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
-
-                    // Registrar en historial de stock
-                    const semanaName = semanas.find(s => s.id === selectedSemana)?.nombre || '';
-                    for (const row of stockRows) {
-                        const titulo = prodMap[idToKey[row.id]]?.titulo || '';
-                        await catalogService.logStockMovement({
-                            productoId: row.id, titulo,
-                            delta: stockDeltas[row.id],
-                            stockDespues: row.stock_fisico,
-                            motivo: 'RECEPCIÓN',
-                            detalle: semanaName,
-                        });
-                    }
-                }
-
-                if (missingFromCatalog.length > 0) {
-                    console.warn('Títulos sin match en catálogo:', missingFromCatalog);
-                }
-            }
 
             const missingMsg = !skipStockUpdate && missingFromCatalog?.length > 0
                 ? `\n⚠️ Sin match en catálogo: ${missingFromCatalog.join(', ')}` : '';
@@ -502,112 +506,34 @@ export default function ReceptionManagement() {
     const handleFullReception = async () => {
         if (!confirm("¿Deseas marcar TODO el pedido como recibido físicamente? Esto actualizará el stock de todos los títulos confirmados.")) return;
 
-        const itemsToSave = masterItems.map(it => ({
-            semana_id: selectedSemana,
-            titulo: it.titulo,
-            cantidad_recibida: it.cantidad,
-            cantidad_faltante: 0
-        }));
+        const itemsToSave = masterItems
+            .filter(it => {
+                const key = normalizeTitle(it.titulo);
+                return (it.cantidad || 0) > (alreadyReceived[key] || 0);
+            })
+            .map(it => {
+                const key = normalizeTitle(it.titulo);
+                const prevRec = alreadyReceived[key] || 0;
+                return {
+                    semana_id: selectedSemana,
+                    titulo: it.titulo,
+                    cantidad_recibida: (it.cantidad || 0) - prevRec,
+                    cantidad_faltante: 0
+                };
+            });
+
+        if (itemsToSave.length === 0) {
+            return alert("✅ Todo ya fue recibido en recepciones parciales previas.");
+        }
 
         setSaving(true);
         try {
-            // 1. Insert into reception table
+            const { missingFromCatalog } = await performReceptionUpdates(itemsToSave);
+
             const { error: insError } = await supabase
                 .from('pedido_items_recepcion')
                 .insert(itemsToSave);
-
             if (insError) throw insError;
-
-            const missingFromCatalog = [];
-
-            // 2. Update physical stock in catalog and client orders status
-            if (!skipStockUpdate) {
-                // Usar fetchFullCatalog (paginado) para evitar el límite de 1000 filas de Supabase
-                const allProds = await catalogService.fetchFullCatalog(true);
-                const prodMap = {};
-                allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
-                // Mapa inverso id→key para lookups O(1) en vez de búsqueda lineal O(N)
-                const idToKey = {};
-                allProds.forEach(p => { idToKey[p.id] = (p.titulo || '').trim().toLowerCase(); });
-
-                const allPreAllocatedIds = [];
-                const stockDeltas = {};
-
-                for (const item of itemsToSave) {
-                    const key = item.titulo.toLowerCase().trim();
-                    const qtyRec = item.cantidad_recibida;
-
-                    // Breakdown PRIMERO para saber cuántas copias son de vendedor (no de tienda)
-                    const breakdown = orderBreakdown[key] || [];
-                    const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                    const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-
-                    // Clientes solo consumen copias de vendedores, nunca las copias de tienda
-                    const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
-                    const preAllocated = clientItems
-                        .filter(ci => ci.titulo.toLowerCase().trim() === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
-                        .slice(0, clientSliceLimit);
-                    const preAllocatedIds = preAllocated.map(p => p.id);
-                    allPreAllocatedIds.push(...preAllocatedIds);
-
-                    // Tienda siempre recibe lo que ordenó (hasta lo recibido)
-                    let calcForStore = Math.min(tiendaOrdered, qtyRec);
-                    if (calcForStore < 0) calcForStore = 0;
-
-                    if (calcForStore > 0) {
-                        const prod = prodMap[key];
-                        if (prod) {
-                            stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
-                        } else {
-                            missingFromCatalog.push(item.titulo);
-                        }
-                    }
-                }
-
-                if (allPreAllocatedIds.length > 0) {
-                    await supabase.from('cliente_items')
-                        .update({ estado: 'EN TIENDA' })
-                        .in('id', allPreAllocatedIds);
-                }
-
-                const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
-                    id,
-                    stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,
-                }));
-                if (stockRows.length > 0) {
-                    const { error: upsertErr } = await supabase.from('catalogo_productos')
-                        .upsert(stockRows, { onConflict: 'id' });
-                    if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
-                    catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
-
-                    // Guardar delta exacto en app_state para poder revertir en cancel
-                    const { data: prevDeltaRow } = await supabase.from('app_state')
-                        .select('data').eq('id', `reception_delta_${selectedSemana}`).maybeSingle();
-                    const prevDeltas = prevDeltaRow?.data || {};
-                    const mergedDeltas = { ...prevDeltas };
-                    Object.entries(stockDeltas).forEach(([id, delta]) => {
-                        mergedDeltas[id] = (mergedDeltas[id] || 0) + delta;
-                    });
-                    await supabase.from('app_state').upsert({ id: `reception_delta_${selectedSemana}`, data: mergedDeltas });
-
-                    // Registrar en historial de stock
-                    const semanaNameFull = semanas.find(s => s.id === selectedSemana)?.nombre || '';
-                    for (const row of stockRows) {
-                        const tituloFull = prodMap[idToKey[row.id]]?.titulo || '';
-                        await catalogService.logStockMovement({
-                            productoId: row.id, titulo: tituloFull,
-                            delta: stockDeltas[row.id],
-                            stockDespues: row.stock_fisico,
-                            motivo: 'RECEPCIÓN',
-                            detalle: semanaNameFull,
-                        });
-                    }
-                }
-
-                if (missingFromCatalog.length > 0) {
-                    console.warn('Títulos sin match en catálogo:', missingFromCatalog);
-                }
-            }
 
             const missingMsgFull = !skipStockUpdate && missingFromCatalog.length > 0
                 ? `\n⚠️ Sin match en catálogo: ${missingFromCatalog.join(', ')}` : '';
@@ -659,7 +585,7 @@ export default function ReceptionManagement() {
         try {
             const allProds = await catalogService.fetchFullCatalog(true);
             const prodMap = {};
-            allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
+            allProds.forEach(p => { prodMap[normalizeTitle(p.titulo)] = p; });
 
             const rows = Object.keys(alreadyReceived).map(key => {
                 const prod = prodMap[key];
@@ -691,7 +617,7 @@ export default function ReceptionManagement() {
             const allProds = await catalogService.fetchFullCatalog(true);
             setDiagCatalogCount(allProds.length);
             const prodMap = {};
-            allProds.forEach(p => { prodMap[(p.titulo || '').trim().toLowerCase()] = p; });
+            allProds.forEach(p => { prodMap[normalizeTitle(p.titulo)] = p; });
 
             const findNearest = (key) => {
                 const words = key.split(/\s+/).filter(w => w.length > 2);
@@ -705,7 +631,7 @@ export default function ReceptionManagement() {
             };
 
             const rows = masterItems.map(item => {
-                const key = (item.titulo || '').toLowerCase().trim();
+                const key = normalizeTitle(item.titulo);
                 const qtyRec = Number(receivedCounts[key]) || 0;
                 const prod = prodMap[key];
                 const nearest = !prod ? findNearest(key) : null;
@@ -713,18 +639,19 @@ export default function ReceptionManagement() {
                 const breakdown = orderBreakdown[key] || [];
                 const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                 const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                const clientSliceLimit = Math.min(qtyRec, totalVendorOrdered);
+                
+                let calcForStore = Math.min(tiendaOrdered, qtyRec);
+                if (calcForStore < 0) calcForStore = 0;
+                const availableForClients = Math.max(0, qtyRec - calcForStore);
+                const clientSliceLimit = Math.min(availableForClients, totalVendorOrdered);
 
-                const allForTitle = clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key);
+                const allForTitle = clientItems.filter(ci => normalizeTitle(ci.titulo) === key);
                 const pendingClients = allForTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'));
                 const enTiendaClients = allForTitle.filter(ci => ci.estado === 'EN TIENDA');
                 const clientsWillChange = pendingClients.slice(0, clientSliceLimit);
                 const clientsWontChange = pendingClients.slice(clientSliceLimit);
 
                 const getName = ci => ci.clientes?.nombre || `Cliente ${ci.cliente_id?.slice(-6) || '?'}`;
-
-                let calcForStore = Math.min(tiendaOrdered, qtyRec);
-                if (calcForStore < 0) calcForStore = 0;
 
                 return {
                     titulo: item.titulo, key, qtyRec, matchEnCatalogo: !!prod, nearest,
@@ -918,7 +845,7 @@ export default function ReceptionManagement() {
                                     </thead>
                                     <tbody className="divide-y divide-border/20">
                                         {filteredItems.map((it, idx) => {
-                                            const key = (it.titulo || '').toLowerCase().trim();
+                                            const key = normalizeTitle(it.titulo);
                                             const breakdown = orderBreakdown[key] || [];
 
                                             const confirmedQty = it.cantidad || 0;
@@ -949,7 +876,14 @@ export default function ReceptionManagement() {
                                                                 {isFullyReceivedBefore && <CheckCircle2 size={14} className="text-green-500" />}
                                                             </div>
                                                         </td>
-                                                        <td className="p-4 text-center font-black text-navy text-lg">{confirmedQty}</td>
+                                                        <td className="p-4 text-center">
+                                                            <span className="font-black text-navy text-lg">{confirmedQty}</span>
+                                                            {prevReceived > 0 && !isFullyReceivedBefore && (
+                                                                <div className="text-[9px] font-bold text-orange-500 mt-0.5">
+                                                                    Pendiente: {confirmedQty - prevReceived}
+                                                                </div>
+                                                            )}
+                                                        </td>
                                                         <td className="p-4">
                                                             <div className="flex flex-wrap gap-1">
                                                                 {breakdown.map((b, bIdx) => (
@@ -959,7 +893,7 @@ export default function ReceptionManagement() {
                                                                 ))}
                                                             </div>
                                                             {(() => {
-                                                                const forTitle = clientItems.filter(ci => (ci.titulo || '').toLowerCase().trim() === key);
+                                                                const forTitle = clientItems.filter(ci => normalizeTitle(ci.titulo) === key);
                                                                 const pending = forTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')).length;
                                                                 const inStore = forTitle.filter(ci => ci.estado === 'EN TIENDA').length;
                                                                 const total = forTitle.length;
