@@ -808,8 +808,7 @@ const CatalogUpdatedView = () => {
                 stock_fisico: parseInt(f.stock_fisico) || 0,
                 stock_minimo: parseInt(f.stock_minimo) || 0,
                 es_reimpresion: f.es_reimpresion || false,
-                imagen_url: f.imagen_url || null,
-                origen: f.origen || null
+                imagen_url: f.imagen_url || null
             };
             const { data, error } = await supabase.from('catalogo_productos').insert([payload]).select('*').single();
             if (error) throw error;
