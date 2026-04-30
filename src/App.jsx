@@ -80,9 +80,9 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
     const sellerItems = [
         { id: 'pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
         { id: 'confirmaciones-info', icon: BarChart3, label: 'Información de Confirmaciones' },
+        { id: 'recepcion', icon: Truck, label: 'Recepción' },
         ...(isSocio ? [
             { id: 'remitos', icon: Database, label: 'Gestión Integral' },
-            { id: 'recepcion', icon: Truck, label: 'Recepción' }
         ] : []),
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
