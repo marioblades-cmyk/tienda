@@ -217,17 +217,38 @@ export default function ReceptionManagement() {
             porVendedor: {}
         };
 
-        Object.values(orderBreakdown).forEach(arr => {
-            arr.forEach(item => {
-                const qty = item.cantidad || 0;
-                stats.total += qty;
-                if (item.tipo === 'tienda') {
-                    stats.tienda += qty;
-                } else {
-                    stats.clientes += qty;
-                    const vName = item.vendedor || 'Socio';
-                    stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + qty;
-                }
+        // Creamos un mapa de cantidades confirmadas por título para matching rápido
+        const confirmedMap = {};
+        masterItems.forEach(it => {
+            const key = normalizeTitle(it.titulo);
+            confirmedMap[key] = it.cantidad || 0;
+        });
+
+        Object.entries(orderBreakdown).forEach(([key, arr]) => {
+            const confirmedQty = confirmedMap[key] || 0;
+            if (confirmedQty <= 0) return; // Si no está confirmado en el Master, no cuenta para el dashboard
+
+            // Calculamos cuánto de lo confirmado le toca a cada uno en este ítem
+            let remaining = confirmedQty;
+            
+            // Prioridad 1: Tienda
+            const tiendaOrders = arr.filter(b => b.tipo === 'tienda');
+            tiendaOrders.forEach(b => {
+                const take = Math.min(remaining, b.cantidad);
+                stats.tienda += take;
+                stats.total += take;
+                remaining -= take;
+            });
+
+            // Prioridad 2: Vendedores / Clientes
+            const vendorOrders = arr.filter(b => b.tipo !== 'tienda');
+            vendorOrders.forEach(b => {
+                const take = Math.min(remaining, b.cantidad);
+                const vName = b.vendedor || 'Socio';
+                stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + take;
+                stats.clientes += take;
+                stats.total += take;
+                remaining -= take;
             });
         });
 
