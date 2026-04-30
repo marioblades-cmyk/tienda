@@ -80,7 +80,10 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
     const sellerItems = [
         { id: 'pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
         { id: 'confirmaciones-info', icon: BarChart3, label: 'Información de Confirmaciones' },
-        ...(isSocio ? [{ id: 'remitos', icon: Database, label: 'Gestión Integral' }] : []),
+        ...(isSocio ? [
+            { id: 'remitos', icon: Database, label: 'Gestión Integral' },
+            { id: 'recepcion', icon: Truck, label: 'Recepción' }
+        ] : []),
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
@@ -282,7 +285,8 @@ function Main() {
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback
     ) : (
-        activeTab === 'remitos' && isSocio ? <RemitosManagement isSocio={true} /> :
+        (activeTab === 'remitos' && isSocio) ? <RemitosManagement isSocio={true} /> :
+        (activeTab === 'recepcion' && isSocio) ? <ReceptionManagement /> :
         activeTab === 'confirmaciones-info' ? <ConfirmationInfoView /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :

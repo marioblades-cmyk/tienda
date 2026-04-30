@@ -164,6 +164,12 @@ const ComicAnalysisTool = () => {
         if (catalogToUse && Object.keys(catalogToUse).length > 0) {
             Object.values(catalogToUse).forEach(dbItem => {
                 if (!dbItem) return;
+
+                // PROTECCIÓN ESPAÑA: No marcar como ausentes productos de España o manuales
+                if (dbItem.editorial === 'Panini España' || (dbItem.product_id && dbItem.product_id.startsWith('manual-'))) {
+                    return;
+                }
+
                 if (activeEdNormalized.has(normalizeStr(dbItem.editorial))) {
                     const itemIdentifiers = [dbItem.ean_oficial, dbItem.ean_interno, dbItem.product_id].filter(Boolean);
                     const isByEan = itemIdentifiers.some(id => allProcessedEans.has(id));

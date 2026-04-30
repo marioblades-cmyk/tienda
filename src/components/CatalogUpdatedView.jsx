@@ -51,6 +51,9 @@ const CatalogUpdatedView = () => {
     const [newItemSaving, setNewItemSaving] = useState(false);
     const [activeTab, setActiveTab] = useState('catalogo'); // 'catalogo' | 'completas'
     const [seriesEditorialFilter, setSeriesEditorialFilter] = useState('TODAS');
+    const [paniniModal, setPaniniModal] = useState(false);
+    const [paniniHtml, setPaniniHtml] = useState('');
+    const [paniniLoading, setPaniniLoading] = useState(false);
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -772,14 +775,14 @@ const CatalogUpdatedView = () => {
             precio_n2_bs: baseItem.precio_n2_bs || '',
             precio_n3_bs: baseItem.precio_n3_bs || '',
             precio_mayoreo_bs: baseItem.precio_mayoreo_bs || '',
-            stock_fisico: 0,
-            stock_minimo: baseItem.stock_minimo || 0,
+            stock_fisico: '',
+            stock_minimo: baseItem.stock_minimo || '',
             es_reimpresion: false,
             _isCopy: true,
         } : {
             titulo: '', editorial: '', categoria: '', ean_oficial: '', ean_interno: '',
             precio_tapa: '', precio_venta_bs: '', precio_n2_bs: '', precio_n3_bs: '', precio_mayoreo_bs: '',
-            stock_fisico: 0, stock_minimo: 0, es_reimpresion: false, _isCopy: false,
+            stock_fisico: '', stock_minimo: '', es_reimpresion: false, _isCopy: false,
         });
         setNewItemModal(true);
     };
@@ -815,6 +818,41 @@ const CatalogUpdatedView = () => {
             alert('❌ Error: ' + err.message);
         } finally {
             setNewItemSaving(false);
+        }
+    };
+
+    const handleImportFromPanini = () => {
+        if (!paniniHtml.trim()) return alert('Por favor, pega el código fuente de la página de Panini España.');
+        setPaniniLoading(true);
+        try {
+            const data = catalogService.extractProductFromPanini(paniniHtml);
+            if (!data) throw new Error('No se detectó información válida de Panini. Asegúrate de copiar todo el contenido (Ctrl+A) de la página del producto.');
+
+            setNewItemForm({
+                titulo: data.titulo || '',
+                editorial: 'Panini España',
+                categoria: 'Manga Importado',
+                ean_oficial: data.ean || '',
+                ean_interno: '',
+                precio_tapa: data.precio_eur || '',
+                precio_venta_bs: '',
+                precio_n2_bs: '',
+                precio_n3_bs: '',
+                precio_mayoreo_bs: '',
+                stock_fisico: '',
+                stock_minimo: '',
+                es_reimpresion: false,
+                imagen_url: data.imagen || '',
+                origen: 'España',
+                _isCopy: false
+            });
+            setPaniniHtml('');
+            setPaniniModal(false);
+            setNewItemModal(true);
+        } catch (err) {
+            alert('❌ ' + err.message);
+        } finally {
+            setPaniniLoading(false);
         }
     };
 
@@ -932,6 +970,18 @@ const CatalogUpdatedView = () => {
                                 onMouseLeave={(e) => e.currentTarget.style.background = '#f0fdf4'}
                             >
                                 <Plus size={16} /> Nuevo ítem
+                            </button>
+                        )}
+
+                        {isAdmin && (
+                            <button
+                                onClick={() => setPaniniModal(true)}
+                                title="Importar desde Panini España (Pegar HTML)"
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem 1rem', borderRadius: '12px', border: '1px solid #fde68a', background: '#fffbeb', cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem', transition: 'all 0.2s ease', color: '#d97706' }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#fef3c7'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#fffbeb'}
+                            >
+                                <ShoppingCart size={16} /> Importar Panini ESP
                             </button>
                         )}
 
@@ -2468,7 +2518,7 @@ const CatalogUpdatedView = () => {
                                     <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Stock Físico</label>
                                     <input
                                         type="number" min="0"
-                                        value={newItemForm.stock_fisico ?? 0}
+                                        value={newItemForm.stock_fisico ?? ''}
                                         onChange={e => setNewItemForm(p => ({ ...p, stock_fisico: e.target.value }))}
                                         style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '13px', outline: 'none', textAlign: 'center', boxSizing: 'border-box' }}
                                         onFocus={e => e.target.style.borderColor = '#f07d2a'}
@@ -2479,7 +2529,7 @@ const CatalogUpdatedView = () => {
                                     <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: '4px' }}>Stock Mín</label>
                                     <input
                                         type="number" min="0"
-                                        value={newItemForm.stock_minimo ?? 0}
+                                        value={newItemForm.stock_minimo ?? ''}
                                         onChange={e => setNewItemForm(p => ({ ...p, stock_minimo: e.target.value }))}
                                         style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '13px', outline: 'none', textAlign: 'center', boxSizing: 'border-box' }}
                                         onFocus={e => e.target.style.borderColor = '#f07d2a'}
@@ -2527,6 +2577,58 @@ const CatalogUpdatedView = () => {
                             >
                                 {newItemSaving ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
                                 {newItemSaving ? 'Guardando...' : 'Crear ítem'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL IMPORTAR PANINI ESPAÑA */}
+            {paniniModal && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+                    <div className="animate-in zoom-in duration-300" style={{ background: 'white', width: '100%', maxWidth: '500px', borderRadius: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+                        <div style={{ background: '#d97706', padding: '20px', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <ShoppingCart size={24} />
+                                <h3 style={{ margin: 0, fontWeight: 900, fontSize: '1.2rem', letterSpacing: '-0.02em' }}>ESCANEADOR PANINI ESPAÑA</h3>
+                            </div>
+                            <button onClick={() => setPaniniModal(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', padding: '6px', borderRadius: '50%' }}><X size={20} /></button>
+                        </div>
+                        
+                        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '12px 16px' }}>
+                                <p style={{ fontSize: '13px', color: '#92400e', margin: 0, fontWeight: 600, lineHeight: '1.5' }}>
+                                    1. Ve a la página del producto en <a href="https://www.panini.es" target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>panini.es</a><br/>
+                                    2. Presiona <b>Ctrl + U</b> para ver el código fuente.<br/>
+                                    3. Presiona <b>Ctrl + A</b> y <b>Ctrl + C</b> para copiar todo.<br/>
+                                    4. Pega el contenido aquí abajo.
+                                </p>
+                            </div>
+
+                            <textarea
+                                value={paniniHtml}
+                                onChange={e => setPaniniHtml(e.target.value)}
+                                placeholder="Pega aquí el código fuente (HTML)..."
+                                style={{ width: '100%', height: '180px', padding: '12px', borderRadius: '12px', border: '1.5px solid #e2e8f0', fontFamily: 'monospace', fontSize: '11px', outline: 'none', resize: 'none' }}
+                                onFocus={e => e.target.style.borderColor = '#d97706'}
+                                onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                            />
+                        </div>
+
+                        <div style={{ padding: '16px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: '#f8fafc' }}>
+                            <button
+                                onClick={() => setPaniniModal(false)}
+                                style={{ padding: '10px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', background: 'white', fontWeight: 700, fontSize: '13px', cursor: 'pointer', color: '#64748b' }}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleImportFromPanini}
+                                disabled={paniniLoading || !paniniHtml.trim()}
+                                style={{ padding: '10px 24px', borderRadius: '12px', border: 'none', background: paniniHtml.trim() ? '#d97706' : '#94a3b8', color: 'white', fontWeight: 900, fontSize: '13px', cursor: paniniHtml.trim() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: '8px' }}
+                            >
+                                {paniniLoading ? <RefreshCw size={16} className="animate-spin" /> : <Zap size={16} />}
+                                {paniniLoading ? 'Escaneando...' : 'Escanear y Pre-rellenar'}
                             </button>
                         </div>
                     </div>

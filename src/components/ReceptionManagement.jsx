@@ -29,7 +29,7 @@ export default function ReceptionManagement() {
     const [diagData, setDiagData] = useState([]);
     const [diagLoading, setDiagLoading] = useState(false);
     const [diagCatalogCount, setDiagCatalogCount] = useState(null);
-    const { isAdmin } = useAuth();
+    const { isAdmin, isSocio } = useAuth();
 
     useEffect(() => {
         fetchSemanas();
@@ -244,7 +244,7 @@ export default function ReceptionManagement() {
 
     const handleCancelReception = async () => {
         if (!selectedSemana) return;
-        if (!isAdmin) return;
+        if (!isAdmin && !isSocio) return;
 
         const weekName = semanas.find(s => s.id === selectedSemana)?.nombre || 'esta semana';
 
@@ -747,7 +747,7 @@ export default function ReceptionManagement() {
                             ))}
                         </select>
 
-                        {isAdmin && (
+                        {(isAdmin || isSocio) && (
                             <>
                                 <label className="flex items-center gap-2 bg-white/50 px-3 py-2 rounded-xl cursor-pointer hover:bg-white transition-all border border-border/20 shadow-sm mr-2">
                                     <input

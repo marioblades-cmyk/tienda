@@ -1096,5 +1096,53 @@ export const catalogService = {
         if (numMismatch) score *= 0.1; // Penalización máxima si el número de tomo no existe en el otro
         
         return Math.min(100, Math.ceil(score));
+    },
+
+    /**
+     * Extrae información de un producto específico de Panini España
+     * @param {string} html 
+     */
+    extractProductFromPanini(html) {
+        if (!html) return null;
+        try {
+            const decodeEntities = (s) => {
+                if (!s) return "";
+                return s.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/#\d+;/g, '');
+            };
+
+            // 1. Título
+            const titleMatch = html.match(/<span\s+class="base"\s+data-ui-id="page-title-wrapper"[^>]*>([^<]+)<\/span>/i) ||
+                               html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+            const titulo = titleMatch ? decodeEntities(titleMatch[1].trim()) : null;
+
+            // 2. Precio (EUR)
+            const priceMatch = html.match(/<span\s+class="price">([^<]+)<\/span>/i);
+            const precio_eur = priceMatch ? priceMatch[1].replace(/[^\d.,]/g, '').replace(',', '.') : null;
+
+            // 3. EAN / SKU / ISBN
+            const skuMatch = html.match(/<div\s+class="value"\s+itemprop="sku">([^<]+)<\/div>/i) ||
+                             html.match(/["']sku["']:\s*["']([^"']+)["']/i) ||
+                             html.match(/ISBN:\s*<\/span>\s*<span[^>]*>([^<]+)<\/span>/i);
+            const ean = skuMatch ? skuMatch[1].trim() : null;
+
+            // 4. Imagen
+            const imgMatch = html.match(/["']full["']:\s*["']([^"']+)["']/i) ||
+                             html.match(/<img\s+class="product-image-photo"[^>]+src="([^"]+)"/i);
+            const imagen = imgMatch ? imgMatch[1] : null;
+
+            if (!titulo) return null;
+
+            return {
+                titulo,
+                precio_eur: parseFloat(precio_eur) || '',
+                ean,
+                imagen,
+                origen: 'España',
+                editorial: 'Panini España'
+            };
+        } catch (err) {
+            console.error('Error parsing Panini HTML:', err);
+            return null;
+        }
     }
 };

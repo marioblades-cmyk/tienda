@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle } from 'lucide-react';
+import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 export default function ClientOrdersView() {
@@ -18,7 +18,7 @@ export default function ClientOrdersView() {
     const [vendedores, setVendedores] = useState([]);
 
     // Controles vista
-    const [view, setView] = useState('clientes'); // 'clientes' | 'items' | 'hoja'
+    const [view, setView] = useState('clientes'); // 'clientes' | 'items' | 'hoja' | 'especiales'
     const [search, setSearch] = useState('');
     const [filterEstado, setFilterEstado] = useState('todos'); // 'todos' | 'PEDIDO' | 'CONFIRMADO' | 'EN TIENDA' | 'ENTREGADO'
     const [filterSemana, setFilterSemana] = useState('todos'); // 'todos' | semana_id
@@ -503,6 +503,8 @@ export default function ClientOrdersView() {
                             it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse' :
                             it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
                             it.estado === 'EN TIENDA' ? 'bg-success/10 border-success/30 text-success shadow-sm shadow-success/20' :
+                            it.estado.includes('ESPAÑA') ? 'bg-purple-500/10 border-purple-500/30 text-purple-400 shadow-sm shadow-purple-500/20' :
+                            it.estado.includes('TRÁNSITO') ? 'bg-orange-400/10 border-orange-400/30 text-orange-400 shadow-sm shadow-orange-500/20' :
                             (isAdjudicado || it.estado.startsWith('CONFIRMADO')) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
                             'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'
                         }`}
@@ -643,6 +645,11 @@ export default function ClientOrdersView() {
             } else {
                 const openWeek = semanas.find(s => s.abierta);
                 if (openWeek) defaultSource = `pedido_${openWeek.id}`;
+            }
+
+            // Sugerencia para España
+            if (catProd?.editorial === 'Panini España') {
+                defaultSource = 'pedido_ESPANA';
             }
 
             return { fisico, flotantes, defaultSource };
@@ -909,10 +916,16 @@ export default function ClientOrdersView() {
                         targetSemanaId = null;
                         estadoTarget = 'PEDIDO (Siguiente)';
                     } else if (cItem.source.startsWith('pedido_')) {
-                        targetSemanaId = cItem.source.replace('pedido_', '');
-                        const sFound = semanas.find(s=>s.id === targetSemanaId);
-                        const wName = sFound?.nombre || '';
-                        estadoTarget = `PEDIDO ${wName}`;
+                        const sId = cItem.source.replace('pedido_', '');
+                        if (sId === 'ESPANA') {
+                            targetSemanaId = null;
+                            estadoTarget = 'PRE-VENTA ESPAÑA';
+                        } else {
+                            targetSemanaId = sId;
+                            const sFound = semanas.find(s=>s.id === targetSemanaId);
+                            const wName = sFound?.nombre || '';
+                            estadoTarget = `PEDIDO ${wName}`;
+                        }
                     }
                 }
 
@@ -1398,9 +1411,10 @@ export default function ClientOrdersView() {
         }
     };
 
-    const handleBulkEstado = async (itemIds) => {
+    const handleBulkEstado = async (itemIds, statusParam = null) => {
         if (!itemIds || itemIds.size === 0) return;
-        const estado = bulkEstadoTarget === 'CONFIRMADO' ? 'ADJUDICADO' : bulkEstadoTarget;
+        const baseEstado = statusParam || bulkEstadoTarget;
+        const estado = baseEstado === 'CONFIRMADO' ? 'ADJUDICADO' : baseEstado;
         try {
             setLoading(true);
             
@@ -1818,6 +1832,7 @@ export default function ClientOrdersView() {
                     <button onClick={()=>setView('clientes')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='clientes'?'bg-surface text-primary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Por Cliente</button>
                     <button onClick={()=>setView('items')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='items'?'bg-surface text-primary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Resumen Ítems</button>
                     <button onClick={()=>setView('hoja')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='hoja'?'bg-surface text-secondary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>📋 Hoja de Pedido</button>
+                    <button onClick={()=>setView('especiales')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='especiales'?'bg-purple-500/10 text-purple-600 shadow-sm ring-1 ring-purple-500/50':'text-muted hover:text-text'}`}>🇪🇸 España</button>
                     <button onClick={()=>setView('lista')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='lista'?'bg-surface text-muted shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Lista de Clientes</button>
                 </div>
                 <div className="text-[10px] font-black text-muted uppercase tracking-widest hidden md:block">Gestión de Cartera de Clientes</div>
@@ -2497,6 +2512,102 @@ export default function ClientOrdersView() {
                         </p>
                     </div>
                 </div>
+            ) : view === 'especiales' ? (
+                <div className="bg-surface border border-border rounded-2xl overflow-hidden shadow-xl animate-in slide-in-from-bottom-4 duration-500">
+                    <div className="p-6 border-b border-border bg-gradient-to-r from-purple-500/5 to-transparent flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <h3 className="text-xl font-bold text-text flex items-center gap-2">
+                                <ShoppingCart className="text-purple-500" size={24} /> 
+                                Gestión de Importaciones (España)
+                            </h3>
+                            <p className="text-sm text-muted mt-1">Control de pedidos irregulares y pre-ventas directas.</p>
+                        </div>
+                        {isAdmin && selectedItems.size > 0 && (
+                            <div className="flex items-center gap-3 bg-purple-500/10 p-2 rounded-xl border border-purple-500/20">
+                                <span className="text-[10px] font-black text-purple-600 uppercase">{selectedItems.size} SELECCIONADOS</span>
+                                <div className="flex gap-1">
+                                    {['PRE-VENTA ESPAÑA', 'PEDIDO ESPAÑA', 'TRÁNSITO ESPAÑA', 'EN TIENDA'].map(est => (
+                                        <button 
+                                            key={est}
+                                            onClick={() => handleBulkEstado(selectedItems, est)}
+                                            className="px-2 py-1 bg-purple-500 text-white text-[9px] font-black rounded uppercase hover:bg-purple-600 transition-all"
+                                        >
+                                            {est.split(' ')[0]}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-muted/50 text-muted uppercase text-[10px] font-black tracking-widest border-b border-border">
+                                    <th className="px-6 py-4 w-10 text-center">
+                                        <input type="checkbox" className="w-4 h-4 accent-purple-500" onChange={e => {
+                                            const espItems = items.filter(i => i.estado.includes('ESPAÑA') || i.estado.includes('TRÁNSITO'));
+                                            setSelectedItems(prev => {
+                                                const n = new Set(prev);
+                                                espItems.forEach(i => e.target.checked ? n.add(i.id) : n.delete(i.id));
+                                                return n;
+                                            });
+                                        }} />
+                                    </th>
+                                    <th className="px-6 py-4">Ítem / Producto</th>
+                                    <th className="px-6 py-4">Cliente</th>
+                                    <th className="px-6 py-4 text-center">Estado Actual</th>
+                                    <th className="px-6 py-4 text-right">Saldo Pendiente</th>
+                                    <th className="px-6 py-4 text-center">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/10">
+                                {(() => {
+                                    const espItems = items.filter(i => i.estado.includes('ESPAÑA') || i.estado.includes('TRÁNSITO'));
+                                    if (espItems.length === 0) {
+                                        return <tr><td colSpan="6" className="py-20 text-center text-muted italic">No hay pedidos de España pendientes.</td></tr>;
+                                    }
+                                    return espItems.map(it => {
+                                        const cliente = clientes.find(c => c.id === it.cliente_id);
+                                        const saldo = Math.max(0, it.precio_venta - it.monto_pagado);
+                                        return (
+                                            <tr key={it.id} className={`hover:bg-purple-500/5 transition-colors group ${selectedItems.has(it.id) ? 'bg-purple-500/5' : ''}`}>
+                                                <td className="px-6 py-4 text-center">
+                                                    <input type="checkbox" className="w-4 h-4 accent-purple-500" checked={selectedItems.has(it.id)} onChange={e => setSelectedItems(prev => { const n = new Set(prev); e.target.checked ? n.add(it.id) : n.delete(it.id); return n; })} />
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold text-text leading-tight">{it.titulo}</div>
+                                                    <div className="text-[10px] text-muted font-mono mt-0.5">{it.product_id || 'ID MANUAL'}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="text-sm font-bold text-text">{cliente?.nombre || 'Desconocido'}</div>
+                                                    <div className="text-[10px] text-muted font-mono">{cliente?.celular}</div>
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    {renderStatus(it, true)}
+                                                </td>
+                                                <td className="px-6 py-4 text-right font-mono text-xs font-black" style={{ color: saldo > 0 ? 'var(--error)' : 'var(--success)' }}>
+                                                    BS {formatS(saldo)}
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <button 
+                                                            onClick={() => handleBulkEstado(new Set([it.id]), 'EN TIENDA')}
+                                                            className="p-2 bg-success/10 text-success rounded-xl hover:bg-success hover:text-white transition-all shadow-sm border border-success/20"
+                                                            title="Marcar como Recibido (En Tienda)"
+                                                        >
+                                                            <Check size={16} />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    });
+                                })()}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             ) : view === 'lista' ? (() => {
                 // Filtrar clientes según vendedor activo
                 const listaVendedorId = !isAdmin ? user?.id :
@@ -2978,6 +3089,7 @@ export default function ClientOrdersView() {
                                                                 const s = semanas.find(x => x.id == id);
                                                                 return s ? `📂 P/ ${s.nombre}` : "---";
                                                             }
+                                                            if (selectedStockSource === 'pedido_ESPANA') return "🇪🇸 ESPAÑA / IMPORTACIÓN";
                                                             return "SELECCIONE ORIGEN";
                                                         })()}
                                                     </div>
@@ -3008,6 +3120,9 @@ export default function ClientOrdersView() {
                                                                     📂 Encargar para {s.nombre}
                                                                 </div>
                                                             ))}
+                                                            <div onClick={() => { setSelectedStockSource('pedido_ESPANA'); setDropdownOpen(false); }} className="p-3 rounded-xl bg-purple-500/5 hover:bg-purple-500/10 border border-dashed border-purple-500/20 cursor-pointer text-center">
+                                                                <span className="text-purple-500 font-black text-[9px]">🇪🇸 IMPORTACIÓN ESPAÑA (Manual)</span>
+                                                            </div>
                                                             <div onClick={() => { setSelectedStockSource('pedido_PENDIENTE'); setDropdownOpen(false); }} className="p-3 rounded-xl bg-purple-500/5 hover:bg-purple-500/10 border border-dashed border-purple-500/20 cursor-pointer text-center">
                                                                 <span className="text-purple-500 font-black text-[9px]">🚀 PRÓXIMO PEDIDO (Automático)</span>
                                                             </div>
