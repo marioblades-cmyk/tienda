@@ -23,6 +23,7 @@ export default function ReceptionManagement() {
     const [searchTerm, setSearchTerm] = useState('');
     const [vendorFilter, setVendorFilter] = useState('');
     const [hideComplete, setHideComplete] = useState(false);
+    const [showTiendaNames, setShowTiendaNames] = useState(false);
     const [skipStockUpdate, setSkipStockUpdate] = useState(false);
     const [clientItems, setClientItems] = useState([]);
     const [showVerify, setShowVerify] = useState(false);
@@ -835,6 +836,16 @@ export default function ReceptionManagement() {
                                     <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
                                 </label>
 
+                                <label className="flex items-center gap-3 bg-white border border-border/40 px-5 py-4 rounded-2xl cursor-pointer hover:border-secondary/50 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={showTiendaNames}
+                                        onChange={(e) => setShowTiendaNames(e.target.checked)}
+                                        className="accent-secondary w-5 h-5 rounded"
+                                    />
+                                    <span className="text-sm font-bold text-navy select-none">Ver solicitantes tienda</span>
+                                </label>
+
                                 <button
                                     onClick={handleDiagnostico}
                                     disabled={diagLoading}
@@ -955,7 +966,10 @@ export default function ReceptionManagement() {
                                                             <div className="flex flex-wrap gap-1">
                                                                 {breakdown.map((b, bIdx) => (
                                                                     <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                        {b.tipo === 'tienda' ? `TIENDA: ${b.cantidad}` : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`}
+                                                                        {b.tipo === 'tienda' 
+                                                                            ? (showTiendaNames ? `TIENDA (${b.vendedor}): ${b.cantidad}` : `TIENDA: ${b.cantidad}`)
+                                                                            : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
+                                                                        }
                                                                     </span>
                                                                 ))}
                                                             </div>
