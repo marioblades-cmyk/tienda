@@ -206,6 +206,33 @@ export default function ReceptionManagement() {
         return Array.from(vendors).sort();
     }, [orderBreakdown]);
 
+    const dashboardStats = useMemo(() => {
+        if (!selectedSemana || masterItems.length === 0) return null;
+        
+        const stats = {
+            tienda: 0,
+            clientes: 0,
+            total: 0,
+            porVendedor: {}
+        };
+
+        Object.values(orderBreakdown).forEach(arr => {
+            arr.forEach(item => {
+                const qty = item.cantidad || 0;
+                stats.total += qty;
+                if (item.tipo === 'tienda') {
+                    stats.tienda += qty;
+                } else {
+                    stats.clientes += qty;
+                    const vName = item.vendedor || 'Socio';
+                    stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + qty;
+                }
+            });
+        });
+
+        return stats;
+    }, [orderBreakdown, selectedSemana, masterItems]);
+
     const filteredItems = useMemo(() => {
         let result = masterItems;
 
@@ -829,6 +856,46 @@ export default function ReceptionManagement() {
                                     </button>
                                 )}
                             </div>
+
+                            {/* Dashboard Stats */}
+                            {dashboardStats && (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                    <div className="bg-navy text-white p-4 rounded-2xl shadow-lg relative overflow-hidden group">
+                                        <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-110 transition-transform">
+                                            <Package size={48} />
+                                        </div>
+                                        <div className="relative">
+                                            <div className="text-[10px] font-black uppercase tracking-widest opacity-60">Total Esperado</div>
+                                            <div className="text-3xl font-black">{dashboardStats.total}</div>
+                                            <div className="text-[10px] font-bold mt-1 opacity-80 uppercase tracking-tighter">Mangas en despacho</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white border border-navy/10 p-4 rounded-2xl shadow-sm relative overflow-hidden group">
+                                        <div className="absolute top-0 right-0 p-2 text-navy opacity-5 group-hover:scale-110 transition-transform">
+                                            <Truck size={48} />
+                                        </div>
+                                        <div className="relative">
+                                            <div className="text-[10px] font-black text-navy/40 uppercase tracking-widest">Tienda (Físico)</div>
+                                            <div className="text-3xl font-black text-navy">{dashboardStats.tienda}</div>
+                                            <div className="text-[10px] font-bold text-navy/60 mt-1 uppercase tracking-tighter">Para stock libre</div>
+                                        </div>
+                                    </div>
+
+                                    {Object.entries(dashboardStats.porVendedor).sort((a, b) => b[1] - a[1]).map(([vName, qty]) => (
+                                        <div key={vName} className="bg-white border border-border/40 p-4 rounded-2xl shadow-sm relative overflow-hidden group">
+                                            <div className="absolute top-0 right-0 p-2 text-secondary opacity-5 group-hover:scale-110 transition-transform">
+                                                <Users size={40} />
+                                            </div>
+                                            <div className="relative">
+                                                <div className="text-[10px] font-black text-muted uppercase tracking-widest truncate pr-6">{vName}</div>
+                                                <div className="text-3xl font-black text-secondary">{qty}</div>
+                                                <div className="text-[10px] font-bold text-secondary/60 mt-1 uppercase tracking-tighter">Para clientes</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
 
                             {/* Items Table */}
                             <div className="glass rounded-2xl overflow-hidden border border-border/40">
