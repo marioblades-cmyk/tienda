@@ -1084,14 +1084,42 @@ export default function ReceptionManagement() {
                                                         </td>
                                                         <td className="p-4">
                                                             <div className="flex flex-wrap gap-1">
-                                                                {breakdown.map((b, bIdx) => (
-                                                                    <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                        {b.tipo === 'tienda' 
-                                                                            ? (showTiendaNames ? `STOCK (${b.vendedor}): ${b.cantidad}` : `STOCK: ${b.cantidad}`)
-                                                                            : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
+                                                                {(() => {
+                                                                    // Calcular distribución real:
+                                                                    // 1. Clientes / Vendedores tienen prioridad absoluta
+                                                                    // 2. El "STOCK" es simplemente lo que sobra del CONFIRMADO, no importa cuánto se pidió originalmente para la tienda
+                                                                    
+                                                                    const realBreakdown = [];
+                                                                    let used = 0;
+                                                                    
+                                                                    // Primero, añadir todas las demandas reales de vendedores/socios
+                                                                    breakdown.forEach(b => {
+                                                                        if (b.tipo !== 'tienda') {
+                                                                            realBreakdown.push(b);
+                                                                            used += b.cantidad;
                                                                         }
-                                                                    </span>
-                                                                ))}
+                                                                    });
+                                                                    
+                                                                    // Segundo, calcular el stock libre matemáticamente
+                                                                    const leftover = Math.max(0, confirmedQty - used);
+                                                                    if (leftover > 0) {
+                                                                        realBreakdown.push({
+                                                                            tipo: 'tienda',
+                                                                            cantidad: leftover,
+                                                                            vendedor: 'Tienda' // placeholder
+                                                                        });
+                                                                    }
+                                                                    
+                                                                    // Mostrar el resultado limpio
+                                                                    return realBreakdown.map((b, bIdx) => (
+                                                                        <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
+                                                                            {b.tipo === 'tienda' 
+                                                                                ? `STOCK LIBRE: ${b.cantidad}`
+                                                                                : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
+                                                                            }
+                                                                        </span>
+                                                                    ));
+                                                                })()}
                                                             </div>
                                                             {(() => {
                                                                 const forTitle = clientItems.filter(ci => normalizeTitle(ci.titulo) === key);
