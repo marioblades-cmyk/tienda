@@ -2269,7 +2269,7 @@ export default function ClientOrdersView() {
                                                                 {!isCompact && <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>}
                                                                 <td className={`${isCompact ? 'py-1 px-1' : 'py-2 px-2'} text-right`}>
                                                                     <div className="flex items-center justify-end gap-0.5">
-                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
+                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
                                                                         className="text-muted hover:text-primary p-1 transition-colors opacity-0 group-hover:opacity-100">
                                                                         <Edit2 size={isCompact ? 12 : 14}/>
                                                                     </button>
@@ -2598,7 +2598,7 @@ export default function ClientOrdersView() {
                                                 <td className="px-6 py-4 text-center">
                                                     <div className="flex items-center justify-center gap-2">
                                                         <button 
-                                                            onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: it.estado.split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
+                                                            onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
                                                             className="p-2 bg-primary/10 text-primary rounded-xl hover:bg-primary hover:text-white transition-all shadow-sm border border-primary/20"
                                                             title="Editar ítem"
                                                         >

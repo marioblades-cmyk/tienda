@@ -808,6 +808,8 @@ const CatalogUpdatedView = () => {
                 stock_fisico: parseInt(f.stock_fisico) || 0,
                 stock_minimo: parseInt(f.stock_minimo) || 0,
                 es_reimpresion: f.es_reimpresion || false,
+                imagen_url: f.imagen_url || null,
+                origen: f.origen || null
             };
             const { data, error } = await supabase.from('catalogo_productos').insert([payload]).select('*').single();
             if (error) throw error;
@@ -829,12 +831,12 @@ const CatalogUpdatedView = () => {
             if (!data) throw new Error('No se detectó información válida de Panini. Asegúrate de copiar todo el contenido (Ctrl+A) de la página del producto.');
 
             setNewItemForm({
-                titulo: data.titulo || '',
+                titulo: (data.titulo || '').toString(),
                 editorial: 'Panini España',
                 categoria: 'Manga Importado',
-                ean_oficial: data.ean || '',
+                ean_oficial: (data.ean || '').toString(),
                 ean_interno: '',
-                precio_tapa: data.precio_eur || '',
+                precio_tapa: data.precio_eur ? data.precio_eur.toString() : '',
                 precio_venta_bs: '',
                 precio_n2_bs: '',
                 precio_n3_bs: '',
@@ -842,7 +844,7 @@ const CatalogUpdatedView = () => {
                 stock_fisico: '',
                 stock_minimo: '',
                 es_reimpresion: false,
-                imagen_url: data.imagen || '',
+                imagen_url: (data.imagen || '').toString(),
                 origen: 'España',
                 _isCopy: false
             });
