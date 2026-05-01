@@ -584,8 +584,6 @@ function MovimientosTab({ turnoActivo }) {
 function ConciliacionTab() {
     const [dateFrom, setDateFrom] = useState(firstOfMonth);
     const [dateTo, setDateTo] = useState(today);
-    const [histDateFrom, setHistDateFrom] = useState(firstOfMonth);
-    const [histDateTo, setHistDateTo] = useState(today);
     const [movimientos, setMovimientos] = useState([]);
     const [saldosIniciales, setSaldosIniciales] = useState({});   // { metodo: saldo_inicial }
     const [saldosReales, setSaldosReales] = useState({});          // { metodo: saldo_real ingresado manualmente }
@@ -602,7 +600,7 @@ function ConciliacionTab() {
 
     useEffect(() => {
         fetchAll();
-    }, [dateFrom, dateTo, histDateFrom, histDateTo]);
+    }, [dateFrom, dateTo]);
 
     const fetchAll = async () => {
         setLoading(true);
@@ -615,8 +613,8 @@ function ConciliacionTab() {
                 supabase.from('conciliacion_config').select('*'),
                 supabase.from('conciliacion_historial')
                     .select('*')
-                    .gte('created_at', histDateFrom + 'T00:00:00-04:00')
-                    .lte('created_at', histDateTo + 'T23:59:59-04:00')
+                    .gte('created_at', dateFrom + 'T00:00:00-04:00')
+                    .lte('created_at', dateTo + 'T23:59:59-04:00')
                     .order('created_at', { ascending: false }),
                 supabase.from('turnos_caja')
                     .select('monto_inicial, abierto_at')
@@ -742,15 +740,7 @@ function ConciliacionTab() {
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
                         className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden mb-4">
                         <div className="p-4 border-b border-border bg-background flex flex-wrap items-center justify-between gap-3">
-                            <span className="text-[11px] font-black uppercase text-muted tracking-widest">Historial de Conciliaciones</span>
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-[10px] text-muted font-bold">BUSCAR POR FECHAS:</span>
-                                <input type="date" value={histDateFrom} onChange={e => setHistDateFrom(e.target.value)}
-                                    className="bg-surface border border-border rounded-lg px-2 py-1 text-[11px] font-bold outline-none focus:border-primary" />
-                                <span className="text-muted text-[10px]">→</span>
-                                <input type="date" value={histDateTo} onChange={e => setHistDateTo(e.target.value)}
-                                    className="bg-surface border border-border rounded-lg px-2 py-1 text-[11px] font-bold outline-none focus:border-primary" />
-                            </div>
+                            <span className="text-[11px] font-black uppercase text-muted tracking-widest">Historial de Conciliaciones del período</span>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-xs min-w-[700px]">
