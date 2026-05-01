@@ -112,6 +112,9 @@ export default function ReceptionManagement() {
             console.log(`Buscando ${allPendingItems.length} items pendientes...`);
 
             const matchedByStatus = allPendingItems.filter(ci => {
+                // 0. REGLA DE ORO: Si ya está asignado explícitamente a OTRA semana en la base de datos, NO lo tocamos.
+                if (ci.semana_id && ci.semana_id !== semanaId) return false;
+
                 const normEstado = normalizeTitle(ci.estado);
                 const normTitle = normalizeTitle(ci.titulo);
                 
@@ -210,6 +213,9 @@ export default function ReceptionManagement() {
                     }
                     
                     const healedMatchedByStatus = allHealedPendingItems.filter(ci => {
+                        // 0. REGLA DE ORO: Si ya está asignado explícitamente a OTRA semana en la base de datos, NO lo tocamos.
+                        if (ci.semana_id && ci.semana_id !== semanaId) return false;
+
                         const normEstado = normalizeTitle(ci.estado);
                         // 1. Si el estado contiene explícitamente la semana actual
                         if (semanaName && normEstado.includes(weekSearchKey)) return true;
