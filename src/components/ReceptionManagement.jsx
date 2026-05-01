@@ -223,40 +223,71 @@ export default function ReceptionManagement() {
                 setAlreadyReceived({});
             }
 
-            // Build breakdown agrupado para evitar saturación visual
+            // Build breakdown agrupado y deduplicado (Lógica Math.max)
             const breakdown = {};
-            // 1. Semanas / Pedidos directos
+            
+            // Recolectar la demanda por vendedor
+            const vendorDemand = {}; // { [key]: { [vendedor]: { pedido: 0, cliente: 0 } } }
+            
+            // 1. Demandas de Pedidos Directos (Mayorista)
             (orders || []).forEach(item => {
                 const key = normalizeTitle(item.titulo);
-                if (!breakdown[key]) breakdown[key] = [];
+                if (!vendorDemand[key]) vendorDemand[key] = {};
                 
-                const existing = breakdown[key].find(b => b.vendedor === item.pedido.vendedor_nombre && b.tipo === item.pedido.tipo);
-                if (existing) {
-                    existing.cantidad += item.cantidad;
-                } else {
-                    breakdown[key].push({
-                        vendedor: item.pedido.vendedor_nombre,
-                        cantidad: item.cantidad,
-                        tipo: item.pedido.tipo
-                    });
+                if (item.pedido.tipo !== 'tienda') {
+                    const vendName = item.pedido.vendedor_nombre;
+                    if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { pedido: 0, cliente: 0 };
+                    vendorDemand[key][vendName].pedido += item.cantidad;
                 }
             });
-            // 2. Pedidos de Clientes (Manuales/Reservas)
+            
+            // 2. Demandas de Clientes (Manuales/Reservas)
             cItems.forEach(ci => {
                 const key = normalizeTitle(ci.titulo);
-                if (!breakdown[key]) breakdown[key] = [];
+                if (!vendorDemand[key]) vendorDemand[key] = {};
                 
-                // Buscar nombre del vendedor
                 const vendName = vList.find(v => v.id === ci.vendedor_id)?.nombre || 'Desconocido';
+                if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { pedido: 0, cliente: 0 };
+                vendorDemand[key][vendName].cliente += 1;
+            });
+            
+            // 3. Consolidar el breakdown usando Math.max y asignar sobrantes a la Tienda
+            const confirmedMap = {};
+            (master?.datos_json || []).forEach(it => {
+                confirmedMap[normalizeTitle(it.titulo)] = it.cantidad || 0;
+            });
+
+            // Iterar sobre todos los títulos que tienen demanda o están en el master
+            const allKeys = new Set([...Object.keys(vendorDemand), ...Object.keys(confirmedMap)]);
+            
+            allKeys.forEach(key => {
+                breakdown[key] = [];
+                const confirmedQty = confirmedMap[key] || 0;
+                let usedByVendors = 0;
                 
-                const existing = breakdown[key].find(b => b.vendedor === vendName && b.tipo === 'cliente');
-                if (existing) {
-                    existing.cantidad += 1;
-                } else {
+                // Asignar a vendedores usando la regla del Math.max
+                if (vendorDemand[key]) {
+                    Object.entries(vendorDemand[key]).forEach(([vendName, demands]) => {
+                        // El vendedor necesita el máximo entre lo que pidió en el Excel y lo que le pidieron sus clientes
+                        const trueDemand = Math.max(demands.pedido, demands.cliente);
+                        if (trueDemand > 0) {
+                            breakdown[key].push({
+                                vendedor: vendName,
+                                cantidad: trueDemand,
+                                tipo: 'vendedor' // generic seller type
+                            });
+                            usedByVendors += trueDemand;
+                        }
+                    });
+                }
+                
+                // Lo que sobra del camión va para la tienda (Stock Libre)
+                const leftover = Math.max(0, confirmedQty - usedByVendors);
+                if (leftover > 0) {
                     breakdown[key].push({
-                        vendedor: vendName,
-                        cantidad: 1, // Cada registro en cliente_items es una unidad
-                        tipo: 'cliente'
+                        vendedor: 'Tienda',
+                        cantidad: leftover,
+                        tipo: 'tienda'
                     });
                 }
             });
@@ -1084,42 +1115,14 @@ export default function ReceptionManagement() {
                                                         </td>
                                                         <td className="p-4">
                                                             <div className="flex flex-wrap gap-1">
-                                                                {(() => {
-                                                                    // Calcular distribución real:
-                                                                    // 1. Clientes / Vendedores tienen prioridad absoluta
-                                                                    // 2. El "STOCK" es simplemente lo que sobra del CONFIRMADO, no importa cuánto se pidió originalmente para la tienda
-                                                                    
-                                                                    const realBreakdown = [];
-                                                                    let used = 0;
-                                                                    
-                                                                    // Primero, añadir todas las demandas reales de vendedores/socios
-                                                                    breakdown.forEach(b => {
-                                                                        if (b.tipo !== 'tienda') {
-                                                                            realBreakdown.push(b);
-                                                                            used += b.cantidad;
+                                                                {breakdown.map((b, bIdx) => (
+                                                                    <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
+                                                                        {b.tipo === 'tienda' 
+                                                                            ? `STOCK LIBRE: ${b.cantidad}`
+                                                                            : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
                                                                         }
-                                                                    });
-                                                                    
-                                                                    // Segundo, calcular el stock libre matemáticamente
-                                                                    const leftover = Math.max(0, confirmedQty - used);
-                                                                    if (leftover > 0) {
-                                                                        realBreakdown.push({
-                                                                            tipo: 'tienda',
-                                                                            cantidad: leftover,
-                                                                            vendedor: 'Tienda' // placeholder
-                                                                        });
-                                                                    }
-                                                                    
-                                                                    // Mostrar el resultado limpio
-                                                                    return realBreakdown.map((b, bIdx) => (
-                                                                        <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                            {b.tipo === 'tienda' 
-                                                                                ? `STOCK LIBRE: ${b.cantidad}`
-                                                                                : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
-                                                                            }
-                                                                        </span>
-                                                                    ));
-                                                                })()}
+                                                                    </span>
+                                                                ))}
                                                             </div>
                                                             {(() => {
                                                                 const forTitle = clientItems.filter(ci => normalizeTitle(ci.titulo) === key);
