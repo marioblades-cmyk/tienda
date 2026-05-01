@@ -584,6 +584,8 @@ function MovimientosTab({ turnoActivo }) {
 function ConciliacionTab() {
     const [dateFrom, setDateFrom] = useState(firstOfMonth);
     const [dateTo, setDateTo] = useState(today);
+    const [histDateFrom, setHistDateFrom] = useState(firstOfMonth);
+    const [histDateTo, setHistDateTo] = useState(today);
     const [movimientos, setMovimientos] = useState([]);
     const [saldosIniciales, setSaldosIniciales] = useState({});   // { metodo: saldo_inicial }
     const [saldosReales, setSaldosReales] = useState({});          // { metodo: saldo_real ingresado manualmente }
@@ -600,7 +602,7 @@ function ConciliacionTab() {
 
     useEffect(() => {
         fetchAll();
-    }, [dateFrom, dateTo]);
+    }, [dateFrom, dateTo, histDateFrom, histDateTo]);
 
     const fetchAll = async () => {
         setLoading(true);
@@ -611,7 +613,11 @@ function ConciliacionTab() {
                     .gte('created_at', dateFrom + 'T00:00:00-04:00')
                     .lte('created_at', dateTo + 'T23:59:59-04:00'),
                 supabase.from('conciliacion_config').select('*'),
-                supabase.from('conciliacion_historial').select('*').order('created_at', { ascending: false }).limit(30),
+                supabase.from('conciliacion_historial')
+                    .select('*')
+                    .gte('created_at', histDateFrom + 'T00:00:00-04:00')
+                    .lte('created_at', histDateTo + 'T23:59:59-04:00')
+                    .order('created_at', { ascending: false }),
                 supabase.from('turnos_caja')
                     .select('monto_inicial, abierto_at')
                     .gte('abierto_at', dateFrom + 'T00:00:00-04:00')
@@ -633,6 +639,10 @@ function ConciliacionTab() {
         } catch (e) { console.error(e); }
         finally { setLoading(false); }
     };
+
+    const totalCalculadoHist = useMemo(() => historial.reduce((sum, h) => sum + (parseFloat(h.saldo_calculado) || 0), 0), [historial]);
+    const totalRealHist = useMemo(() => historial.reduce((sum, h) => sum + (parseFloat(h.saldo_real) || 0), 0), [historial]);
+    const totalDiferenciaHist = useMemo(() => historial.reduce((sum, h) => sum + (parseFloat(h.diferencia) || 0), 0), [historial]);
 
     // Calcular por método
     const resumen = useMemo(() => METODOS.map(met => {
@@ -730,9 +740,17 @@ function ConciliacionTab() {
             <AnimatePresence>
                 {showHistorial && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                        className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-                        <div className="p-4 border-b border-border bg-background">
+                        className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden mb-4">
+                        <div className="p-4 border-b border-border bg-background flex flex-wrap items-center justify-between gap-3">
                             <span className="text-[11px] font-black uppercase text-muted tracking-widest">Historial de Conciliaciones</span>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] text-muted font-bold">BUSCAR POR FECHAS:</span>
+                                <input type="date" value={histDateFrom} onChange={e => setHistDateFrom(e.target.value)}
+                                    className="bg-surface border border-border rounded-lg px-2 py-1 text-[11px] font-bold outline-none focus:border-primary" />
+                                <span className="text-muted text-[10px]">→</span>
+                                <input type="date" value={histDateTo} onChange={e => setHistDateTo(e.target.value)}
+                                    className="bg-surface border border-border rounded-lg px-2 py-1 text-[11px] font-bold outline-none focus:border-primary" />
+                            </div>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-xs min-w-[700px]">
@@ -774,6 +792,19 @@ function ConciliacionTab() {
                                         ))
                                     }
                                 </tbody>
+                                {historial.length > 0 && (
+                                    <tfoot className="bg-slate-50 border-t-2 border-border font-bold">
+                                        <tr className="bg-slate-100/80">
+                                            <td colSpan="3" className="px-4 py-3 text-right uppercase text-[10px] font-black tracking-widest text-muted">Totales Históricos</td>
+                                            <td className="px-4 py-3 text-right font-mono font-black text-text">BS {formatS(totalCalculadoHist)}</td>
+                                            <td className="px-4 py-3 text-right font-mono font-black text-text">BS {formatS(totalRealHist)}</td>
+                                            <td className={`px-4 py-3 text-right font-mono font-black ${totalDiferenciaHist >= 0 ? 'text-success' : 'text-error'}`}>
+                                                {totalDiferenciaHist >= 0 ? '+' : ''}{formatS(totalDiferenciaHist)}
+                                            </td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                )}
                             </table>
                         </div>
                     </motion.div>
