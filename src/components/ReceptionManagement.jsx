@@ -190,7 +190,12 @@ export default function ReceptionManagement() {
                 }
                 if (toHeal.length > 0) {
                     console.log(`🔧 Auto-heal: marcando ${toHeal.length} cliente_items como EN TIENDA. IDs: ${toHeal.join(', ')}`); // FIX BUG #6: logging
-                    await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', toHeal);
+                    for (const id of toHeal) {
+                        const it = cItems.find(c => c.id === id);
+                        const tag = `[ENTIENDA_AT:${new Date().toISOString()}]`;
+                        const finalNota = it?.nota ? `${it.nota} ${tag}` : tag;
+                        await supabase.from('cliente_items').update({ estado: 'EN TIENDA', nota: finalNota }).eq('id', id);
+                    }
                     // Re-fetch cItems frescos después del heal (usando la nueva lógica)
                     const healedByIdRes = await supabase.from('cliente_items').select('*, clientes(nombre)').eq('semana_id', semanaId);
                     
@@ -583,7 +588,7 @@ export default function ReceptionManagement() {
         const idToKey = {};
         allProds.forEach(p => { idToKey[p.id] = normalizeTitle(p.titulo); });
 
-        const allPreAllocatedIds = [];
+        const allPreAllocatedItems = [];
         const stockDeltas = {};
         const missingFromCatalog = [];
 
@@ -603,8 +608,7 @@ export default function ReceptionManagement() {
             // PRIORIDAD 1: Clientes. Ellos "toman" primero de lo que llegó.
             const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
             const preAllocated = pendingForTitle.slice(0, clientSliceLimit);
-            const preAllocatedIds = preAllocated.map(p => p.id);
-            allPreAllocatedIds.push(...preAllocatedIds);
+            allPreAllocatedItems.push(...preAllocated);
 
             // PRIORIDAD 2: Tienda. Se queda con lo que sobre después de cubrir clientes.
             let calcForStore = Math.max(0, qtyRec - clientSliceLimit);
@@ -619,8 +623,12 @@ export default function ReceptionManagement() {
             }
         }
 
-        if (allPreAllocatedIds.length > 0) {
-            await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', allPreAllocatedIds);
+        if (allPreAllocatedItems.length > 0) {
+            for (const it of allPreAllocatedItems) {
+                const tag = `[ENTIENDA_AT:${new Date().toISOString()}]`;
+                const finalNota = it.nota ? `${it.nota} ${tag}` : tag;
+                await supabase.from('cliente_items').update({ estado: 'EN TIENDA', nota: finalNota }).eq('id', it.id);
+            }
         }
 
         const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({

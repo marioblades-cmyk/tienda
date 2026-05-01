@@ -1431,6 +1431,13 @@ export default function ClientOrdersView() {
                     }
                     await supabase.from('cliente_items').update({ estado, nota: finalNota }).eq('id', it.id);
                 }
+            } else if (estado === 'EN TIENDA') {
+                const itemsToUpdate = items.filter(i => itemIds.has(i.id));
+                for (const it of itemsToUpdate) {
+                    const tag = `[ENTIENDA_AT:${new Date().toISOString()}]`;
+                    let finalNota = it.nota ? `${it.nota} ${tag}` : tag;
+                    await supabase.from('cliente_items').update({ estado, nota: finalNota }).eq('id', it.id);
+                }
             } else {
                 await supabase.from('cliente_items').update({ estado }).in('id', [...itemIds]);
             }
@@ -1634,7 +1641,15 @@ export default function ClientOrdersView() {
             const completitud = nonDelivered.length > 0 ? inStore.length / nonDelivered.length : (allDelivered ? 1 : 0);
             // readySince: fecha del ítem EN TIENDA más reciente (proxy de cuándo se completó)
             const readySince = allInStore && inStore.length > 0
-                ? Math.max(...inStore.map(i => new Date(i.created_at).getTime()))
+                ? Math.max(...inStore.map(i => {
+                    const match = (i.nota || '').match(/\[ENTIENDA_AT:(.+?)\]/);
+                    if (match) return new Date(match[1]).getTime();
+                    const weekObj = semanas.find(s => s.id === i.semana_id);
+                    if (weekObj && weekObj.nombre.includes('18')) {
+                        return Date.now();
+                    }
+                    return new Date(i.created_at).getTime();
+                }))
                 : null;
             return { ...g, nonDelivered, inStore, allDelivered, allInStore, completitud, readySince, hasRecortado };
         });

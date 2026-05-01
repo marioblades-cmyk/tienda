@@ -216,8 +216,8 @@ function MovimientosTab({ turnoActivo }) {
             const { data, error } = await supabase
                 .from('caja_movimientos')
                 .select('*')
-                .gte('created_at', dateFrom + 'T00:00:00')
-                .lte('created_at', dateTo + 'T23:59:59')
+                .gte('created_at', dateFrom + 'T00:00:00-04:00')
+                .lte('created_at', dateTo + 'T23:59:59-04:00')
                 .order('created_at', { ascending: false });
             if (error) throw error;
             setMovimientos(data || []);
@@ -608,14 +608,14 @@ function ConciliacionTab() {
             const [movsRes, configRes, histRes, turnosRes] = await Promise.all([
                 supabase.from('caja_movimientos')
                     .select('tipo, monto, metodo_pago')
-                    .gte('created_at', dateFrom + 'T00:00:00')
-                    .lte('created_at', dateTo + 'T23:59:59'),
+                    .gte('created_at', dateFrom + 'T00:00:00-04:00')
+                    .lte('created_at', dateTo + 'T23:59:59-04:00'),
                 supabase.from('conciliacion_config').select('*'),
                 supabase.from('conciliacion_historial').select('*').order('created_at', { ascending: false }).limit(30),
                 supabase.from('turnos_caja')
                     .select('monto_inicial, abierto_at')
-                    .gte('abierto_at', dateFrom + 'T00:00:00')
-                    .lte('abierto_at', dateTo + 'T23:59:59')
+                    .gte('abierto_at', dateFrom + 'T00:00:00-04:00')
+                    .lte('abierto_at', dateTo + 'T23:59:59-04:00')
                     .order('abierto_at', { ascending: false })
                     .limit(1),
             ]);
