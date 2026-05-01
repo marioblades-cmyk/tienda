@@ -1914,12 +1914,28 @@ export default function ClientOrdersView() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-center lg:justify-end">
-                        {selectedItems.size > 0 ? (
-                            <div className="flex items-center gap-3 bg-error/10 border border-error/20 px-4 py-2 rounded-xl animate-in zoom-in-95">
-                                <span className="text-[10px] font-black text-error uppercase whitespace-nowrap">{selectedItems.size} SELECCIONADOS</span>
+                         {selectedItems.size > 0 ? (
+                            <div className="flex flex-wrap items-center gap-3 bg-primary/10 border border-primary/20 px-4 py-2 rounded-xl animate-in zoom-in-95">
+                                <span className="text-[10px] font-black text-primary uppercase whitespace-nowrap">{selectedItems.size} SELECCIONADOS</span>
+                                <div className="flex items-center gap-2">
+                                    <select value={bulkEstadoTarget} onChange={e => setBulkEstadoTarget(e.target.value)}
+                                        className="bg-background border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-bold text-text outline-none focus:border-primary">
+                                        <option value="PEDIDO">PEDIDO</option>
+                                        <option value="CONFIRMADO">CONFIRMADO</option>
+                                        <option value="EN TIENDA">EN TIENDA</option>
+                                        <option value="ENTREGADO">ENTREGADO</option>
+                                    </select>
+                                    <button 
+                                        onClick={() => handleBulkEstado(selectedItems)}
+                                        className="bg-primary text-white px-3 py-2 rounded-xl text-xs font-black uppercase hover:bg-primary/80 transition-all flex items-center gap-2"
+                                    >
+                                        Cambiar Estado
+                                    </button>
+                                </div>
+                                <div className="h-4 w-[1px] bg-border mx-1 hidden sm:block" />
                                 <button 
                                     onClick={handleBulkDelete}
-                                    className="bg-error text-white px-4 py-2 rounded-lg text-xs font-black uppercase hover:bg-error/80 transition-all flex items-center gap-2"
+                                    className="bg-error text-white px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-error/80 transition-all flex items-center gap-2"
                                 >
                                     <Trash2 size={14} /> Eliminar Lote
                                 </button>
