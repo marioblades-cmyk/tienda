@@ -582,7 +582,7 @@ function MovimientosTab({ turnoActivo }) {
 // TAB 2: CONCILIACIÓN
 // ─────────────────────────────────────────────
 function ConciliacionTab() {
-    const [dateFrom, setDateFrom] = useState(firstOfMonth);
+    const [dateFrom, setDateFrom] = useState('2024-01-01');
     const [dateTo, setDateTo] = useState(today);
     const [movimientos, setMovimientos] = useState([]);
     const [saldosIniciales, setSaldosIniciales] = useState({});   // { metodo: saldo_inicial }
