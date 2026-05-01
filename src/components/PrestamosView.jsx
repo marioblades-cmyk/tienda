@@ -533,7 +533,17 @@ function DeudorRow({ grupo, onPago, onPagoGlobal, onEdit, onDelete, onRefresh })
                 <td className="px-4 py-3.5 text-sm font-black text-right whitespace-nowrap text-orange-500">
                     {saldoPendiente > 0 ? `Bs ${formatS(saldoPendiente)}` : '—'}
                 </td>
-                <td className="px-4 py-3.5 text-center">{estadoBadge}</td>
+                <td className="px-4 py-3.5 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                        {estadoBadge}
+                        {saldoPendiente > 0 && (
+                            <button onClick={(e) => { e.stopPropagation(); onPagoGlobal(grupo); }}
+                                className="px-3 py-1.5 rounded-lg bg-success text-white text-[10px] font-black hover:bg-success/90 transition-all flex items-center gap-1 shadow-md shadow-success/10 hover:scale-105">
+                                <Plus size={11} /> Pago Global
+                            </button>
+                        )}
+                    </div>
+                </td>
             </tr>
             {/* Barra de progreso */}
             <tr>
