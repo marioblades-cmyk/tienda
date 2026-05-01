@@ -333,8 +333,125 @@ function PagoModal({ prestamo, saldoPendiente, onClose, onDone }) {
     );
 }
 
+// ── MODAL: REGISTRAR PAGO GLOBAL ─────────────────────────────────────────────
+function PagoGlobalModal({ grupo, onClose, onDone }) {
+    const [form, setForm] = useState({ monto: '', fecha: today(), metodo_pago: 'Efectivo', nota: '' });
+    const [saving, setSaving] = useState(false);
+    const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+    const handleSave = async () => {
+        const montoTotal = parseFloat(form.monto);
+        if (!montoTotal || montoTotal <= 0) return alert('Ingresa un monto válido.');
+        if (montoTotal > grupo.saldoPendiente + 0.01) {
+            return alert(`El monto a pagar (Bs ${formatS(montoTotal)}) supera el saldo pendiente total (Bs ${formatS(grupo.saldoPendiente)}).`);
+        }
+        setSaving(true);
+        try {
+            // Sort active loans from oldest to newest
+            const prestamosActivos = grupo.prestamos
+                .filter(p => p.estado === 'ACTIVO')
+                .sort((a, b) => new Date(a.fecha_prestamo) - new Date(b.fecha_prestamo));
+
+            let montoRestante = montoTotal;
+            for (const p of prestamosActivos) {
+                if (montoRestante <= 0) break;
+                const pPagado = p.totalPagado || 0;
+                const pPendiente = p.monto_original - pPagado;
+                if (pPendiente <= 0) continue;
+
+                const montoAPagar = Math.min(montoRestante, pPendiente);
+
+                const concepto = `Cobro préstamo — ${grupo.deudor_nombre}${form.nota ? ' — ' + form.nota : ''} (Abono Global)`;
+                const { data: movData, error: movError } = await supabase
+                    .from('caja_movimientos')
+                    .insert([{
+                        turno_id: null,
+                        tipo: 'INGRESO',
+                        categoria: 'Cobro Préstamo',
+                        concepto,
+                        monto: montoAPagar,
+                        metodo_pago: form.metodo_pago,
+                        origen: 'Préstamos',
+                    }])
+                    .select('id')
+                    .single();
+                if (movError) throw movError;
+
+                const { error: pagoError } = await supabase.from('prestamos_pagos').insert([{
+                    prestamo_id: p.id,
+                    monto: montoAPagar,
+                    fecha: form.fecha,
+                    metodo_pago: form.metodo_pago,
+                    nota: form.nota.trim() || null,
+                    caja_mov_id: movData.id,
+                }]);
+                if (pagoError) throw pagoError;
+
+                const nuevoPagado = pPagado + montoAPagar;
+                if (nuevoPagado >= p.monto_original - 0.01) {
+                    await supabase.from('prestamos').update({ estado: 'CERRADO' }).eq('id', p.id);
+                }
+
+                montoRestante -= montoAPagar;
+            }
+
+            onDone();
+            onClose();
+        } catch (e) {
+            alert('Error: ' + e.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <Modal title={`Pago Global — ${grupo.deudor_nombre}`} icon={Wallet} onClose={onClose}>
+            <div className="space-y-3">
+                <div className="bg-background border border-border rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-xs text-muted font-bold uppercase tracking-widest">Saldo total pendiente</span>
+                    <span className="text-lg font-black text-orange-500">Bs {formatS(grupo.saldoPendiente)}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-muted tracking-widest">Monto a abonar (Bs) *</label>
+                        <input type="number" min="0" step="0.01"
+                            className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-primary mt-1"
+                            placeholder="0.00" value={form.monto} onChange={e => set('monto', e.target.value)} />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-muted tracking-widest">Fecha *</label>
+                        <input type="date"
+                            className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-primary mt-1"
+                            value={form.fecha} onChange={e => set('fecha', e.target.value)} />
+                    </div>
+                </div>
+                <div>
+                    <label className="text-[10px] font-black uppercase text-muted tracking-widest">Entra a la cuenta *</label>
+                    <select className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-primary mt-1 cursor-pointer"
+                        value={form.metodo_pago} onChange={e => set('metodo_pago', e.target.value)}>
+                        {METODOS.map(m => <option key={m}>{m}</option>)}
+                    </select>
+                    <p className="text-[10px] text-muted mt-1">Se registrará un INGRESO en contabilidad por este monto.</p>
+                </div>
+                <div>
+                    <label className="text-[10px] font-black uppercase text-muted tracking-widest">Nota</label>
+                    <input className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary mt-1"
+                        placeholder="Nota opcional..." value={form.nota} onChange={e => set('nota', e.target.value)} />
+                </div>
+                <div className="flex gap-2 pt-2">
+                    <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-border text-muted text-sm font-bold hover:bg-background">Cancelar</button>
+                    <button onClick={handleSave} disabled={saving}
+                        className="flex-1 py-2.5 rounded-xl bg-success text-white text-sm font-black hover:opacity-90 disabled:opacity-50">
+                        {saving ? 'Guardando...' : 'Registrar Abono'}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 // ── FILA DE DEUDOR (agrupada) ────────────────────────────────────────────────
-function DeudorRow({ grupo, onPago, onEdit, onDelete, onRefresh }) {
+function DeudorRow({ grupo, onPago, onPagoGlobal, onEdit, onDelete, onRefresh }) {
     const [expanded, setExpanded] = useState(false);
     const [pagosMap, setPagosMap] = useState({});
     const [expandedLoan, setExpandedLoan] = useState(null);
@@ -434,10 +551,16 @@ function DeudorRow({ grupo, onPago, onEdit, onDelete, onRefresh }) {
                         <td colSpan={6} className="px-4 pb-4 pt-1">
                             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
                                 className="bg-background border border-border rounded-xl overflow-hidden">
-                                <div className="px-4 py-2.5 border-b border-border bg-background">
+                                <div className="px-4 py-2.5 border-b border-border bg-background flex justify-between items-center">
                                     <span className="text-[10px] font-black uppercase text-muted tracking-widest">
                                         Historial de préstamos — {deudor_nombre}
                                     </span>
+                                    {saldoPendiente > 0 && (
+                                        <button onClick={(e) => { e.stopPropagation(); onPagoGlobal(grupo); }}
+                                            className="px-2.5 py-1 rounded-lg bg-success text-white text-[10px] font-black hover:bg-success/90 transition-colors flex items-center gap-1 shadow">
+                                            <Plus size={11} /> Pago Global (Abonar hasta donde alcance)
+                                        </button>
+                                    )}
                                 </div>
                                 {loadingPagos ? (
                                     <div className="p-6 text-center text-xs text-muted">Cargando...</div>
@@ -574,6 +697,7 @@ export default function PrestamosView() {
     const [modalNuevo, setModalNuevo] = useState(false);
     const [modalEditar, setModalEditar] = useState(null);
     const [modalPago, setModalPago] = useState(null);
+    const [modalPagoGlobal, setModalPagoGlobal] = useState(null);
 
     const toast = (msg, type = 'success') => {
         const id = Date.now();
@@ -750,6 +874,7 @@ export default function PrestamosView() {
                                         key={grupo.deudor_nombre}
                                         grupo={grupo}
                                         onPago={(pr, saldo) => setModalPago({ prestamo: pr, saldo })}
+                                        onPagoGlobal={g => setModalPagoGlobal(g)}
                                         onEdit={pr => setModalEditar(pr)}
                                         onDelete={handleDelete}
                                         onRefresh={fetchPrestamos}
@@ -783,6 +908,13 @@ export default function PrestamosView() {
                         saldoPendiente={modalPago.saldo}
                         onClose={() => setModalPago(null)}
                         onDone={() => { fetchPrestamos(); toast('Pago registrado. Ingreso registrado en contabilidad.'); }}
+                    />
+                )}
+                {modalPagoGlobal && (
+                    <PagoGlobalModal
+                        grupo={modalPagoGlobal}
+                        onClose={() => setModalPagoGlobal(null)}
+                        onDone={() => { fetchPrestamos(); toast('Abono global registrado. Ingresos registrados en contabilidad.'); }}
                     />
                 )}
             </AnimatePresence>
