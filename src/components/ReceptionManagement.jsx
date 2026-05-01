@@ -124,12 +124,30 @@ export default function ReceptionManagement() {
                     console.log(`- Esta en Master?: ${masterTitlesNormalized.has(normTitle)}`);
                 }
 
-                // 1. Si el estado contiene explícitamente la semana
+                // 1. Si el estado contiene explícitamente la semana actual
                 if (semanaName && normEstado.includes(weekSearchKey)) return true;
-                // 2. Si el estado es genéricamente pendiente (PEDIDO/ADJUDICADO/CONFIRMADO) y el título coincide
-                if (normEstado === 'pedido' || normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
+                
+                // 2. Si es un PEDIDO nuevo (no asignado a nadie), es libre para que lo tomemos
+                if (normEstado === 'pedido') {
                     if (masterTitlesNormalized.has(normTitle)) return true;
                 }
+                
+                // 3. Si es ADJUDICADO o CONFIRMADO
+                if (normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
+                    // CUIDADO: Si tiene el nombre de otra semana, NO lo robamos.
+                    // Identificadores comunes de que está asignado a un Excel específico:
+                    const isAssignedToOtherWeek = normEstado.includes('semana') || 
+                                                  normEstado.includes('distribucion') || 
+                                                  normEstado.includes('entelequia') || 
+                                                  normEstado.includes('ivrea') || 
+                                                  normEstado.includes('panini');
+                    
+                    if (isAssignedToOtherWeek) return false;
+                    
+                    // Si es genérico, lo tomamos
+                    if (masterTitlesNormalized.has(normTitle)) return true;
+                }
+                
                 return false;
             });
             
@@ -193,8 +211,24 @@ export default function ReceptionManagement() {
                     
                     const healedMatchedByStatus = allHealedPendingItems.filter(ci => {
                         const normEstado = normalizeTitle(ci.estado);
+                        // 1. Si el estado contiene explícitamente la semana actual
                         if (semanaName && normEstado.includes(weekSearchKey)) return true;
-                        if (normEstado === 'pedido' || normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
+                        
+                        // 2. Si es un PEDIDO nuevo
+                        if (normEstado === 'pedido') {
+                            if (masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
+                        }
+                        
+                        // 3. Si es ADJUDICADO o CONFIRMADO
+                        if (normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
+                            const isAssignedToOtherWeek = normEstado.includes('semana') || 
+                                                          normEstado.includes('distribucion') || 
+                                                          normEstado.includes('entelequia') || 
+                                                          normEstado.includes('ivrea') || 
+                                                          normEstado.includes('panini');
+                            
+                            if (isAssignedToOtherWeek) return false;
+                            
                             if (masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
                         }
                         return false;
