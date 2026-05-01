@@ -79,6 +79,7 @@ export default function ClientOrdersView() {
     const [histSemana, setHistSemana] = useState(''); // semana_id para modo histórico
     const [editItem, setEditItem] = useState(null); // { id, titulo, precio_venta, estado, nota, semana_id }
     const [bulkEstadoTarget, setBulkEstadoTarget] = useState('ENTREGADO');
+    const [bulkSemanaTarget, setBulkSemanaTarget] = useState('');
     const [distribuirMontos, setDistribuirMontos] = useState({}); // { itemId: monto }
     const [cartSelected, setCartSelected] = useState(new Set()); // índices seleccionados en el carrito histórico
     const [cartBulkSemana, setCartBulkSemana] = useState('');
@@ -1412,10 +1413,11 @@ export default function ClientOrdersView() {
         }
     };
 
-    const handleBulkEstado = async (itemIds, statusParam = null) => {
+    const handleBulkEstado = async (itemIds, statusParam = null, semanaIdParam = null) => {
         if (!itemIds || itemIds.size === 0) return;
         const baseEstado = statusParam || bulkEstadoTarget;
         const estado = baseEstado === 'CONFIRMADO' ? 'ADJUDICADO' : baseEstado;
+        const semanaId = semanaIdParam || bulkSemanaTarget;
         try {
             setLoading(true);
             
@@ -1429,17 +1431,23 @@ export default function ClientOrdersView() {
                     if (it.vendedor_id !== user?.id) {
                         finalNota = it.nota ? `${it.nota} ${auditNote}` : auditNote;
                     }
-                    await supabase.from('cliente_items').update({ estado, nota: finalNota }).eq('id', it.id);
+                    const updateObj = { estado, nota: finalNota };
+                    if (semanaId) updateObj.semana_id = semanaId;
+                    await supabase.from('cliente_items').update(updateObj).eq('id', it.id);
                 }
             } else if (estado === 'EN TIENDA') {
                 const itemsToUpdate = items.filter(i => itemIds.has(i.id));
                 for (const it of itemsToUpdate) {
                     const tag = `[ENTIENDA_AT:${new Date().toISOString()}]`;
                     let finalNota = it.nota ? `${it.nota} ${tag}` : tag;
-                    await supabase.from('cliente_items').update({ estado, nota: finalNota }).eq('id', it.id);
+                    const updateObj = { estado, nota: finalNota };
+                    if (semanaId) updateObj.semana_id = semanaId;
+                    await supabase.from('cliente_items').update(updateObj).eq('id', it.id);
                 }
             } else {
-                await supabase.from('cliente_items').update({ estado }).in('id', [...itemIds]);
+                const updateObj = { estado };
+                if (semanaId) updateObj.semana_id = semanaId;
+                await supabase.from('cliente_items').update(updateObj).in('id', [...itemIds]);
             }
             
             setSelectedItems(new Set());
@@ -1917,7 +1925,7 @@ export default function ClientOrdersView() {
                          {selectedItems.size > 0 ? (
                             <div className="flex flex-wrap items-center gap-3 bg-primary/10 border border-primary/20 px-4 py-2 rounded-xl animate-in zoom-in-95">
                                 <span className="text-[10px] font-black text-primary uppercase whitespace-nowrap">{selectedItems.size} SELECCIONADOS</span>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                     <select value={bulkEstadoTarget} onChange={e => setBulkEstadoTarget(e.target.value)}
                                         className="bg-background border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-bold text-text outline-none focus:border-primary">
                                         <option value="PEDIDO">PEDIDO</option>
@@ -1925,6 +1933,13 @@ export default function ClientOrdersView() {
                                         <option value="EN TIENDA">EN TIENDA</option>
                                         <option value="ENTREGADO">ENTREGADO</option>
                                     </select>
+                                    {bulkEstadoTarget === 'CONFIRMADO' && (
+                                        <select value={bulkSemanaTarget} onChange={e => setBulkSemanaTarget(e.target.value)}
+                                            className="bg-background border border-primary/30 px-3 py-1.5 rounded-xl text-xs font-bold text-text outline-none focus:border-primary">
+                                            <option value="">(SIN CAMBIAR SEMANA)</option>
+                                            {semanas.map(s => <option key={s.id} value={s.id}>Semana: {s.nombre}</option>)}
+                                        </select>
+                                    )}
                                     <button 
                                         onClick={() => handleBulkEstado(selectedItems)}
                                         className="bg-primary text-white px-3 py-2 rounded-xl text-xs font-black uppercase hover:bg-primary/80 transition-all flex items-center gap-2"
