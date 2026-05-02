@@ -464,7 +464,7 @@ export default function FlujoCajaView({ user, profile }) {
                 monto,
                 vendedor_id: user?.id,
                 metodo_pago: 'Efectivo',
-                origen: 'Tienda',
+                origen: 'Transferencia',
             }]).select().single();
             if (egresoError) throw egresoError;
 
@@ -477,7 +477,7 @@ export default function FlujoCajaView({ user, profile }) {
                 monto,
                 vendedor_id: user?.id,
                 metodo_pago: retiroForm.destino,
-                origen: 'Tienda',
+                origen: 'Transferencia',
             }]).select().single();
             if (ingresoError) throw ingresoError;
 

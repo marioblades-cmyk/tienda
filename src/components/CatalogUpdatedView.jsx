@@ -163,24 +163,48 @@ const CatalogUpdatedView = () => {
             const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false }).limit(10);
             const weekIds = (weeks || []).map(w => w.id);
 
-            const [masters, receptions, allOrders, { data: floatingSummary }, clientItems] = await Promise.all([
+            const [masters, receptions, { data: floatingSummary }] = await Promise.all([
                 supabase.from('master_confirmaciones').select('semana_id, datos_json').in('semana_id', weekIds),
                 supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').in('semana_id', weekIds),
-                supabase.from('pedido_items')
-                    .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)')
-                    .in('pedido.semana_id', weekIds)
-                    .order('id', { ascending: false })
-                    .limit(5000),
-                supabase.rpc('get_floating_stock_summary'),
-                supabase.from('cliente_items').select('semana_id, titulo, estado').in('semana_id', weekIds).limit(5000)
+                supabase.rpc('get_floating_stock_summary')
             ]);
 
+            // Fetch order items per week to completely bypass the Supabase 1000 records limit
+            const [allOrdersResults, clientItemsResults] = await Promise.all([
+                Promise.all(
+                    weekIds.map(id => supabase.from('pedido_items')
+                        .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)')
+                        .eq('pedido.semana_id', id)
+                        .order('id', { ascending: false })
+                        .limit(2000)
+                    )
+                ),
+                Promise.all(
+                    weekIds.map(id => supabase.from('cliente_items')
+                        .select('semana_id, titulo, estado')
+                        .eq('semana_id', id)
+                        .limit(2000)
+                    )
+                )
+            ]);
+
+            const allOrdersData = allOrdersResults.flatMap(res => res.data || []);
+            const clientItemsData = clientItemsResults.flatMap(res => res.data || []);
+
+            console.log("FETCHED DATA DEBUG:", {
+                weeksLength: weeks?.length,
+                mastersLength: masters.data?.length,
+                receptionsLength: receptions.data?.length,
+                allOrdersLength: allOrdersData.length,
+                clientItemsLength: clientItemsData.length
+            });
+            console.log("ALL ORDERS RAW FOR ALICE:", allOrdersData.filter(o => (o.titulo || '').toLowerCase().includes('alice')));
             const weekStats = (weeks || []).map(w => {
                 const master = masters.data?.find(m => m.semana_id === w.id);
                 const weekReceptions = (receptions.data || []).filter(r => r.semana_id === w.id);
-                const weekAllOrders = (allOrders.data || []).filter(o => o.pedido.semana_id === w.id);
+                const weekAllOrders = allOrdersData.filter(o => o.pedido.semana_id === w.id);
                 const weekFloatingSummary = (floatingSummary || []).filter(c => c.semana_id === w.id);
-                const weekClientItems = (clientItems.data || []).filter(ci => ci.semana_id === w.id);
+                const weekClientItems = clientItemsData.filter(ci => ci.semana_id === w.id);
                 
                 const totalConfirmed = (master?.datos_json || []).reduce((sum, it) => sum + (it.cantidad || 0), 0);
                 const totalReceived = weekReceptions.reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
@@ -205,9 +229,11 @@ const CatalogUpdatedView = () => {
 
             setActiveWeeks(weekStats);
 
+            const normalizeTitle = (str) => (str || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
             // Enrich catalog items with floating data
             const enrichedResults = results.map(prod => {
-                const prodTitle = (prod.titulo || '').toLowerCase().trim();
+                const prodTitle = normalizeTitle(prod.titulo);
                 const floatingByWeek = {};
                 
                 weekStats.forEach(week => {
@@ -216,22 +242,22 @@ const CatalogUpdatedView = () => {
                     if (week.isConfirmed) {
                         // 1. Total confirmed by distributor (Total)
                         const totalConfirmedForTitle = week.masterData
-                            .filter(it => (it.titulo || '').toLowerCase().trim() === prodTitle)
+                            .filter(it => normalizeTitle(it.titulo) === prodTitle)
                             .reduce((s, i) => s + (i.cantidad || 0), 0);
                         
                         // 2. Units requested by Sellers (Personal) - These are NOT store stock
                         const sellerRequestedQty = week.allOrdersData
-                            .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'personal')
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'personal')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
                         
                         // 3. What we already received specifically for this week
                         const received = week.receptionData
-                            .filter(r => (r.titulo || '').toLowerCase().trim() === prodTitle)
+                            .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
                         
                         // 4. Client Reservations (Floating confirmed/allocated bounds) - From Anonymous RPC
                         const clientReserved = week.floatingSummary
-                            .filter(c => (c.titulo || '').toLowerCase().trim() === prodTitle)
+                            .filter(c => normalizeTitle(c.titulo) === prodTitle)
                             .reduce((s, c) => s + (c.reservado || 0), 0);
                         
                         // Store stock is ALL confirmed units MINUS what was for sellers, MINUS what arrived.
@@ -240,13 +266,13 @@ const CatalogUpdatedView = () => {
                     } else {
                         // Not confirmed yet: available = storeTotal minus store-assigned clients
                         const storeTotal = week.allOrdersData
-                            .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'tienda')
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'tienda')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
                         const personalTotal = week.allOrdersData
-                            .filter(p => (p.titulo || '').toLowerCase().trim() === prodTitle && p.pedido.tipo === 'personal')
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'personal')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
                         const clientWaitlist = (week.clientItemsData || [])
-                            .filter(it => (it.titulo || '').toLowerCase().trim() === prodTitle && (it.estado || '').includes('PEDIDO'))
+                            .filter(it => normalizeTitle(it.titulo) === prodTitle && (it.estado || '').includes('PEDIDO'))
                             .length;
                         const storeClientWaitlist = Math.max(0, clientWaitlist - personalTotal);
                         qty = Math.max(0, storeTotal - storeClientWaitlist);
@@ -736,7 +762,7 @@ const CatalogUpdatedView = () => {
 
             // 5. Filtro de Stock (Físico o Flotante)
             if (showOnlyWithStock) {
-                if ((item.stock_fisico || 0) <= 0) return false;
+                if ((item.stock_total || 0) <= 0) return false;
             }
 
             // 6. Filtro por Semana Específica

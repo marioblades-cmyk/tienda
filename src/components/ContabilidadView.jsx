@@ -4,9 +4,10 @@ import {
     TrendingUp, TrendingDown, Wallet, BarChart3,
     Search, X, CheckCircle2, AlertCircle, Clock,
     Save, History, ListFilter, ArrowRightLeft, Receipt,
-    Settings, Pencil, Trash2, Plus, HandCoins
+    Settings, Pencil, Trash2, Plus, HandCoins, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import * as XLSX from 'xlsx';
 
 // Efectivo Personal = billetera del admin para pagos del negocio
 const METODOS = ['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo Personal', 'Otros'];
@@ -284,22 +285,58 @@ function MovimientosTab({ turnoActivo }) {
         return true;
     }), [movimientos, filterMetodo, filterOrigen, filterTipo, search]);
 
-    const totalIngresos        = movimientos.filter(m => m.tipo === 'INGRESO' && m.origen !== 'Transferencia').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const handleExportExcel = () => {
+        if (!filtered || filtered.length === 0) {
+            alert('No hay movimientos para exportar.');
+            return;
+        }
+        const data = filtered.map(m => {
+            const esTransf = m.origen === 'Transferencia';
+            const esCobroPrest = m.tipo === 'INGRESO' && m.categoria === 'Cobro Préstamo';
+            const esPrestOtorg = m.tipo === 'EGRESO' && m.categoria === 'Préstamo Otorgado';
+            
+            const incluidoEnBalance = !esTransf && !esCobroPrest && !esPrestOtorg;
+            let motivoExclusion = '';
+            if (esTransf) motivoExclusion = 'Excluido por origen de Transferencia';
+            else if (esCobroPrest) motivoExclusion = 'Excluido por categoría Cobro Préstamo';
+            else if (esPrestOtorg) motivoExclusion = 'Excluido por categoría Préstamo Otorgado';
+
+            return {
+                'Fecha / Hora': m.created_at ? new Date(m.created_at).toLocaleString('es-BO') : '',
+                'Origen': m.origen || 'Tienda',
+                'Método': m.metodo_pago || 'Efectivo',
+                'Categoría': m.categoria || '',
+                'Concepto': m.concepto || '',
+                'Tipo': m.tipo,
+                'Monto (BS)': parseFloat(m.monto) || 0,
+                '¿Incluido en Balance Neto?': incluidoEnBalance ? 'SÍ' : 'NO',
+                'Motivo Exclusión': motivoExclusion
+            };
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
+        XLSX.writeFile(wb, `Movimientos_${dateFrom}_al_${dateTo}.xlsx`);
+    };
+
+    const totalIngresos        = movimientos.filter(m => m.tipo === 'INGRESO' && m.categoria !== 'Cobro Préstamo' && m.origen !== 'Transferencia').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
     const totalEgresos         = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria !== 'Préstamo Otorgado' && m.origen !== 'Transferencia').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
     const totalPrestamosOtorg  = movimientos.filter(m => m.tipo === 'EGRESO' && m.categoria === 'Préstamo Otorgado').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+    const totalPrestamosRecibidos = movimientos.filter(m => m.tipo === 'INGRESO' && m.categoria === 'Cobro Préstamo').reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
     const balanceNeto          = totalIngresos - totalEgresos;
 
     const porMetodo = METODOS.map(met => ({
         metodo: met,
         total: movimientos
-            .filter(m => m.tipo === 'INGRESO' && m.origen !== 'Transferencia' && (m.metodo_pago || 'Efectivo') === met)
+            .filter(m => m.tipo === 'INGRESO' && m.categoria !== 'Cobro Préstamo' && m.origen !== 'Transferencia' && (m.metodo_pago || 'Efectivo') === met)
             .reduce((s, m) => s + (parseFloat(m.monto) || 0), 0)
     })).filter(m => m.total > 0);
 
     const porOrigen = ORIGENES.filter(ori => ori !== 'Transferencia').map(ori => ({
         origen: ori,
         total: movimientos
-            .filter(m => m.tipo === 'INGRESO' && m.origen !== 'Transferencia' && (m.origen || 'Tienda') === ori)
+            .filter(m => m.tipo === 'INGRESO' && m.categoria !== 'Cobro Préstamo' && m.origen !== 'Transferencia' && (m.origen || 'Tienda') === ori)
             .reduce((s, m) => s + (parseFloat(m.monto) || 0), 0)
     })).filter(o => o.total > 0);
 
@@ -379,12 +416,13 @@ function MovimientosTab({ turnoActivo }) {
             </AnimatePresence>
 
             {/* KPIs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
-                    { label: 'Total Ingresos',      value: totalIngresos,       icon: TrendingUp,   textCls: 'text-success',   bgCls: 'bg-success/10' },
-                    { label: 'Egresos Operativos',  value: totalEgresos,        icon: TrendingDown, textCls: 'text-error',     bgCls: 'bg-error/10' },
-                    { label: 'Prestado (pendiente)',value: totalPrestamosOtorg, icon: HandCoins,    textCls: 'text-orange-500',bgCls: 'bg-orange-100' },
-                    { label: 'Balance Neto',        value: balanceNeto,         icon: Wallet,       textCls: balanceNeto >= 0 ? 'text-success' : 'text-error', bgCls: balanceNeto >= 0 ? 'bg-success/10' : 'bg-error/10' },
+                    { label: 'Total Ingresos',       value: totalIngresos,            icon: TrendingUp,   textCls: 'text-success',    bgCls: 'bg-success/10' },
+                    { label: 'Egresos Operativos',   value: totalEgresos,             icon: TrendingDown, textCls: 'text-error',      bgCls: 'bg-error/10' },
+                    { label: 'Prestado (pendiente)', value: totalPrestamosOtorg,      icon: HandCoins,    textCls: 'text-orange-500', bgCls: 'bg-orange-100' },
+                    { label: 'Cobrado (préstamos)',  value: totalPrestamosRecibidos,  icon: HandCoins,    textCls: 'text-blue-500',   bgCls: 'bg-blue-50 border-blue-200/30' },
+                    { label: 'Balance Neto',         value: balanceNeto,              icon: Wallet,       textCls: balanceNeto >= 0 ? 'text-success' : 'text-error', bgCls: balanceNeto >= 0 ? 'bg-success/10' : 'bg-error/10' },
                 ].map((k, i) => (
                     <motion.div key={k.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                         className="bg-surface border border-border rounded-xl p-5 shadow-sm flex items-center gap-4">
@@ -458,6 +496,10 @@ function MovimientosTab({ turnoActivo }) {
                             <button onClick={() => setShowTransferModal(true)}
                                 className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-black hover:brightness-105 shadow-lg shadow-primary/20 transition-all shrink-0">
                                 <ArrowRightLeft size={14} /> Transferir
+                            </button>
+                            <button onClick={handleExportExcel}
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-black hover:brightness-105 shadow-lg shadow-emerald-500/20 transition-all shrink-0">
+                                <Download size={14} /> Exportar
                             </button>
                             <div className="w-px h-6 bg-border mx-1" />
                             <div className="flex items-center gap-2 bg-surface border border-border rounded-xl px-2 py-1 shadow-sm">
@@ -1150,7 +1192,7 @@ function IngresosTab({ turnoActivo }) {
             .from('caja_movimientos')
             .select('*')
             .eq('tipo', 'INGRESO')
-            .in('categoria', ['Otro ingreso', 'Transferencia recibida'])
+            .in('categoria', ['Otro ingreso', 'Transferencia recibida', 'Transferencia Recibida'])
             .order('created_at', { ascending: false })
             .limit(10);
         setRecientes(data || []);
@@ -1176,7 +1218,7 @@ function IngresosTab({ turnoActivo }) {
                 concepto: concepto || categoria,
                 monto: amt,
                 metodo_pago: metodo,
-                origen: 'Tienda',
+                origen: (categoria === 'Transferencia recibida' || categoria === 'Transferencia Recibida') ? 'Transferencia' : 'Tienda',
             }]);
             if (error) throw error;
             showMsg('Ingreso registrado correctamente.');
@@ -1205,7 +1247,7 @@ function IngresosTab({ turnoActivo }) {
 
     const incomeCategories = [
         { nombre: 'Otro ingreso', icono: '💰' },
-        { nombre: 'Transferencia recibida', icono: '🏦' }
+        { nombre: 'Transferencia Recibida', icono: '🏦' }
     ];
 
     return (
