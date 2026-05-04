@@ -29,6 +29,7 @@ import FlujoCajaView from './components/FlujoCajaView';
 import ContabilidadView from './components/ContabilidadView';
 import PrestamosView from './components/PrestamosView';
 import StockHistorialView from './components/StockHistorialView';
+import PublicSalesView from './components/PublicSalesView';
 
 // --- Nav item ---
 function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
@@ -175,7 +176,7 @@ const TAB_TITLES = {
     entelequia: 'Herramienta Editorial',
 };
 
-function Main() {
+function Main({ onGoToPublic }) {
     const { user, profile, loading, isAdmin, isSocio } = useAuth();
     const { hasPendingChanges } = useCatalogStatus();
     const [showRegister, setShowRegister] = useState(false);
@@ -191,7 +192,9 @@ function Main() {
     }, [loading, isAdmin, user, initialized]);
 
     // --- Loading ---
+
     if (loading) {
+
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-background">
                 <motion.div
@@ -248,7 +251,7 @@ function Main() {
                         </motion.div>
                     </AnimatePresence>
 
-                    <div className="text-center mt-6">
+                    <div className="text-center mt-6 flex flex-col gap-3">
                         <button
                             onClick={() => setShowRegister(!showRegister)}
                             className="text-primary font-medium text-sm hover:underline transition-all"
@@ -257,7 +260,15 @@ function Main() {
                                 ? '¿Ya tienes cuenta? Inicia sesión'
                                 : '¿No tienes cuenta? Regístrate'}
                         </button>
+                        <button
+                            onClick={() => onGoToPublic()}
+                            className="text-white/60 font-medium text-xs hover:text-primary transition-all bg-white/5 px-4 py-2.5 rounded-xl border border-white/5 shadow-sm mt-1"
+                        >
+                            Ver Catálogo Público de Ventas
+                        </button>
+
                     </div>
+
                 </motion.div>
             </div>
         );
@@ -402,11 +413,20 @@ class ErrorBoundary extends React.Component {
 }
 
 export default function App() {
+    const [isPublicCatalog, setIsPublicCatalog] = useState(
+        window.location.search.includes('view=catalogo') || window.location.hash.includes('#catalogo')
+    );
+
     return (
         <ErrorBoundary>
-            <AuthProvider>
-                <Main />
-            </AuthProvider>
+            {isPublicCatalog ? (
+                <PublicSalesView />
+            ) : (
+                <AuthProvider>
+                    <Main onGoToPublic={() => setIsPublicCatalog(true)} />
+                </AuthProvider>
+            )}
         </ErrorBoundary>
     );
 }
+

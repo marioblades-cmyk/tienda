@@ -590,11 +590,23 @@ export default function ReceptionManagement() {
 
         const allPreAllocatedItems = [];
         const stockDeltas = {};
+        const stockDeltasDetails = {};
         const missingFromCatalog = [];
 
         for (const item of itemsToSave) {
             const key = normalizeTitle(item.titulo);
             const qtyRec = item.cantidad_recibida;
+            const bd = orderBreakdown[key] || [];
+
+            // Construir el string de destinos para el Kardex
+            let destInfo = [];
+            bd.forEach(b => {
+                if (b.cantidad > 0) destInfo.push(`${b.vendedor}: ${b.cantidad}`);
+            });
+            const destText = destInfo.length > 0 ? ` [Destinos: ${destInfo.join(', ')}]` : '';
+
+            // Suma total de demanda de vendedores (incluye clientes finales + stock propio del vendedor)
+            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + b.cantidad, 0);
 
             // Buscamos cuántos clientes están esperando este título (independientemente de quién los pidió)
             const pendingForTitle = clientItems.filter(ci => {
@@ -605,18 +617,19 @@ export default function ReceptionManagement() {
                        normEstado === 'pedido';
             });
 
-            // PRIORIDAD 1: Clientes. Ellos "toman" primero de lo que llegó.
+            // PRIORIDAD 1: Clientes. Ellos "toman" primero de lo que llegó (solo para actualizar estado EN TIENDA).
             const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
             const preAllocated = pendingForTitle.slice(0, clientSliceLimit);
             allPreAllocatedItems.push(...preAllocated);
 
-            // PRIORIDAD 2: Tienda. Se queda con lo que sobre después de cubrir clientes.
-            let calcForStore = Math.max(0, qtyRec - clientSliceLimit);
+            // PRIORIDAD 2: Tienda. Se queda con lo que sobre después de cubrir a clientes Y vendedores.
+            let calcForStore = Math.max(0, qtyRec - sellerTotal);
 
             if (calcForStore > 0) {
                 const prod = prodMap[key];
                 if (prod) {
                     stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
+                    stockDeltasDetails[prod.id] = destText;
                 } else {
                     missingFromCatalog.push(item.titulo);
                 }
@@ -659,10 +672,11 @@ export default function ReceptionManagement() {
 
             const semanaName = semanas.find(s => s.id === selectedSemana)?.nombre || '';
             for (const row of stockRows) {
+                const extraDetail = stockDeltasDetails[row.id] || '';
                 await catalogService.logStockMovement({
                     productoId: row.id, titulo: prodMap[idToKey[row.id]]?.titulo || '',
                     delta: stockDeltas[row.id], stockDespues: row.stock_fisico,
-                    motivo: 'RECEPCIÓN', detalle: semanaName,
+                    motivo: 'RECEPCIÓN', detalle: `${semanaName}${extraDetail}`,
                 });
             }
         }

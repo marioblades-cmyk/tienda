@@ -303,14 +303,14 @@ export default function ClientOrdersView() {
             let pagosQuery = supabase.from('cliente_pagos').select('*');
             let othersQuery = null;
 
-            // Apply seller isolation
             if (!isAdmin && user?.id) {
                 // Si el filtro es 'todos', permitimos ver ítems de otros socios
                 if (filterVendedor === 'todos') {
                     // No filtramos por vendedor_id en itemsQuery para que la búsqueda sea global
                 } else {
-                    itemsQuery = itemsQuery.eq('vendedor_id', user.id);
+                    itemsQuery = itemsQuery.or(`vendedor_id.eq.${user.id},vendedor_id.is.null,estado.eq.POR CONFIRMAR`);
                 }
+
                 
                 // IMPORTANTE: Pagos siempre deben ser globales para el cliente para calcular deuda real,
                 // pero por seguridad limitamos a los clientes que el vendedor puede ver.
@@ -498,8 +498,10 @@ export default function ClientOrdersView() {
             <div className={`flex flex-col ${compact ? 'items-start' : 'items-center'} gap-0.5`}>
                 <div className="flex items-center gap-1">
                     <span
-                        onClick={()=>setEditingState(it.id)}
+                        onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
                         className={`px-2 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-bold tracking-wide cursor-pointer border transition-colors whitespace-nowrap ${
+                            it.estado === 'POR CONFIRMAR' ? 'bg-orange-500/20 border-orange-500 text-orange-400 animate-pulse font-black' :
+
                             it.estado === 'DAÑADO' ? 'bg-orange-500/10 border-orange-500/30 text-orange-500' :
                             it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse' :
                             it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
@@ -508,6 +510,7 @@ export default function ClientOrdersView() {
                             it.estado.includes('TRÁNSITO') ? 'bg-orange-400/10 border-orange-400/30 text-orange-400 shadow-sm shadow-orange-500/20' :
                             (isAdjudicado || it.estado.startsWith('CONFIRMADO')) ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 shadow-sm shadow-blue-500/20' :
                             'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'
+
                         }`}
                     >
                         {displayEstado}
@@ -2945,10 +2948,11 @@ export default function ClientOrdersView() {
                                 <input type="number" value={editItem.precio_venta} onChange={e => setEditItem({...editItem, precio_venta: e.target.value})} onFocus={e => e.target.select()}
                                     className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm font-mono outline-none focus:border-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"/>
                             </div>
-                            <div>
+                             <div>
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Estado</label>
                                 <select value={editItem.estado} onChange={e => setEditItem({...editItem, estado: e.target.value})}
                                     className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary">
+                                    <option value="POR CONFIRMAR">POR CONFIRMAR</option>
                                     <option value="PEDIDO">PEDIDO</option>
                                     <option value="CONFIRMADO">CONFIRMADO</option>
                                     <option value="EN TIENDA">EN TIENDA</option>
