@@ -2439,8 +2439,8 @@ export default function ClientOrdersView() {
                                                                         className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
                                                                         <Edit2 size={11} />
                                                                     </button>
-                                                                    <button onClick={() => handleDeletePago(p)} title="Eliminar pago"
-                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all">
+                                                                    <button onClick={() => !loading && handleDeletePago(p)} title="Eliminar pago"
+                                                                        className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all ${loading ? 'cursor-not-allowed' : ''}`}>
                                                                         <Trash2 size={11} />
                                                                     </button>
                                                                 </div>
@@ -2977,7 +2977,9 @@ export default function ClientOrdersView() {
                         </div>
                         <div className="flex gap-2 pt-1">
                             <button onClick={() => setEditItem(null)} className="flex-1 py-2 rounded-xl text-sm font-bold text-muted bg-background border border-border hover:border-primary/40">Cancelar</button>
-                            <button onClick={handleUpdateItem} disabled={loading} className="flex-1 py-2 rounded-xl text-sm font-black text-white bg-primary hover:brightness-105 shadow disabled:opacity-50">Guardar</button>
+                            <button onClick={handleUpdateItem} disabled={loading} className="flex-1 py-2 rounded-xl text-sm font-black text-white bg-primary hover:brightness-105 shadow disabled:opacity-50">
+                                {loading ? "Guardando..." : "Guardar"}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -3824,8 +3826,8 @@ export default function ClientOrdersView() {
                                                                         className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
                                                                         <Edit2 size={11} />
                                                                     </button>
-                                                                    <button onClick={() => handleDeletePago(p)} title="Eliminar abono (también en Contabilidad)"
-                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all">
+                                                                    <button onClick={() => !loading && handleDeletePago(p)} title="Eliminar abono (también en Contabilidad)"
+                                                                        className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all ${loading ? 'cursor-not-allowed' : ''}`}>
                                                                         <Trash2 size={11} />
                                                                     </button>
                                                                 </>
@@ -3865,7 +3867,14 @@ export default function ClientOrdersView() {
                                         </button>
                                     );
                                 })() : (
-                                    <button onClick={()=>handleSavePayment(cli.id)} className="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-success/90 shadow-lg">Confirmar Pago</button>
+                                    <button 
+                                        onClick={()=>handleSavePayment(cli.id)} 
+                                        disabled={loading || !payMonto || payMonto <= 0}
+                                        className="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-success/90 shadow-lg disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {loading ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : null}
+                                        Confirmar Pago
+                                    </button>
                                 )}
                                 </div>
                             </div>
@@ -3912,7 +3921,9 @@ export default function ClientOrdersView() {
                         </div>
                         <div className="flex gap-2 pt-1">
                             <button onClick={() => setEditPago(null)} className="flex-1 py-2 rounded-xl text-sm font-bold text-muted bg-background border border-border">Cancelar</button>
-                            <button onClick={handleUpdatePago} className="flex-1 py-2 rounded-xl text-sm font-black text-white bg-[var(--primary)] hover:brightness-105 shadow">Guardar</button>
+                            <button onClick={handleUpdatePago} disabled={loading} className="flex-1 py-2 rounded-xl text-sm font-black text-white bg-[var(--primary)] hover:brightness-105 shadow disabled:opacity-50">
+                                {loading ? "Guardando..." : "Guardar"}
+                            </button>
                         </div>
                     </div>
                 </div>

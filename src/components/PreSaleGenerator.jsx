@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { catalogService } from '../services/catalogService';
-import { Search, Download, Trash2, Image as ImageIcon, CheckCircle2, AlertCircle, Loader2, Zap, Smartphone, MapPin, Facebook, Book, Save, Cloud } from 'lucide-react';
+import { Search, Download, Trash2, Image as ImageIcon, CheckCircle2, AlertCircle, Loader2, Zap, Smartphone, MapPin, Facebook, Book, Save, Cloud, Star, RefreshCw } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -300,6 +300,17 @@ export default function PreSaleGenerator() {
         }
     };
 
+    const calcularProximoSabado = () => {
+        const today = new Date();
+        const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
+        let daysToAdd = (6 - dayOfWeek + 7) % 7;
+        if (daysToAdd === 0) daysToAdd = 7; 
+        
+        const nextSaturday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysToAdd);
+        const monthNames = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+        return `${nextSaturday.getDate()} / ${monthNames[nextSaturday.getMonth()]}`;
+    };
+
     // Configuración global del póster
     const [config, setConfig] = useState({
         discountPercent: 20,
@@ -310,7 +321,7 @@ export default function PreSaleGenerator() {
         footerContact1: 'WHATSAPP: +591 XXXXXXXX',
         footerContact2: 'FACEBOOK: Mangas Comics Bolivia Store',
         footerContact3: 'LA PAZ, BOLIVIA',
-        deadlineDate: '',
+        deadlineDate: calcularProximoSabado(),
         deadlineTime: ''
     });
 
@@ -331,6 +342,17 @@ export default function PreSaleGenerator() {
 
     // NUEVO: Pre-cargar el logo en Base64 para garantizar su presencia en la exportación
     const [logoBase64, setLogoBase64] = useState("");
+
+    // --- EFECTO GUARDIÁN: Asegurar que la fecha nunca quede vacía ---
+    useEffect(() => {
+        if (!config.deadlineDate || config.deadlineDate.trim() === '') {
+            setConfig(prev => ({
+                ...prev,
+                deadlineDate: calcularProximoSabado()
+            }));
+        }
+    }, [config.deadlineDate]);
+
     useEffect(() => {
         const loadLogo = async () => {
             try {
@@ -384,7 +406,13 @@ export default function PreSaleGenerator() {
     useEffect(() => {
         if (selectedProjectId && savedProjects[selectedProjectId]) {
             const proj = savedProjects[selectedProjectId];
-            if (proj.config) setConfig(JSON.parse(JSON.stringify(proj.config)));
+            if (proj.config) {
+                const savedConfig = typeof proj.config === 'string' ? JSON.parse(proj.config) : proj.config;
+                setConfig({
+                    ...savedConfig,
+                    deadlineDate: calcularProximoSabado()
+                });
+            }
             if (proj.items) setSelectedItems(JSON.parse(JSON.stringify(proj.items)));
         }
     }, [selectedProjectId, savedProjects]);
@@ -396,6 +424,10 @@ export default function PreSaleGenerator() {
             
             setConfig(prev => {
                 const newConfig = { ...prev, ...tpl };
+                
+                // Forzar siempre la fecha actual independientemente de lo que diga la plantilla
+                newConfig.deadlineDate = calcularProximoSabado();
+
                 // Si la selección de plantilla fue provocada por la Automatización, 
                 // mantenemos la fecha calculada automáticamente y evitamos que la plantilla la sobreescriba.
                 if (skipTemplateDateRef.current) {
@@ -610,36 +642,57 @@ export default function PreSaleGenerator() {
         }
     };
 
-    const handleAutoLoad = (type) => { // type = 'NOVEDADES' | 'REIMPRESIONES'
-        const isReimpresion = type === 'REIMPRESIONES';
+    const handleAutoLoad = async (type) => { // type = 'NOVEDADES' | 'REIMPRESIONES' | 'CURADOS_NOVEDADES' | 'CURADOS_REIMPRESIONES'
+        const isReimpresion = type === 'REIMPRESIONES' || type === 'CURADOS_REIMPRESIONES';
+        const isCurados = type.startsWith('CURADOS');
         
-        // 1. Filtrar catálogo
-        const filteredItems = catalogData.filter(item => {
-            const ed = (item.editorial || '').toUpperCase();
+        const getIsItemReimpresion = (item) => {
             const cat = (item.categoria || '').toUpperCase();
-            if (!ed.includes('IVREA')) return false;
-            
-            if (isReimpresion) {
-                return cat.includes('REIMPRESI') || item.es_reimpresion === true;
-            } else {
-                return cat.includes('NOVEDAD');
+            return item.es_reimpresion === true || cat.includes('REIMPRESI');
+        };
+
+        // 1. Obtener items (intentar usar los actuales)
+        let itemsToFilter = catalogData;
+
+        // Si es CURADOS y no vemos nada, intentamos un refresco forzoso
+        let filteredItems = itemsToFilter.filter(item => {
+            if (isCurados) {
+                const itemIsReimp = getIsItemReimpresion(item);
+                const matchesType = isReimpresion ? itemIsReimp : !itemIsReimp;
+                return item.para_preventa === true && matchesType;
             }
+            const ed = (item.editorial || '').toUpperCase();
+            if (!ed.includes('IVREA')) return false;
+            return isReimpresion ? getIsItemReimpresion(item) : (item.categoria || '').toUpperCase().includes('NOVEDAD');
         });
 
-        if (filteredItems.length === 0) {
-            alert(`No se encontraron ${type.toLowerCase()} de Ivrea en el catálogo actual.`);
-            return;
+        if (filteredItems.length === 0 && isCurados) {
+            setStatusMessage("⏳ SINCRONIZANDO CON EL CURADOR...");
+            try {
+                const freshData = await catalogService.fetchFullCatalog(true); // Forzar descarga de Supabase
+                setCatalogData(freshData);
+                filteredItems = freshData.filter(item => {
+                    const itemIsReimp = getIsItemReimpresion(item);
+                    const matchesType = isReimpresion ? itemIsReimp : !itemIsReimp;
+                    return item.para_preventa === true && matchesType;
+                });
+            } catch (err) {
+                console.error("Error sincronizando:", err);
+            }
         }
 
-        // 2. Calcular próximo sábado
-        const today = new Date();
-        const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
-        let daysToAdd = (6 - dayOfWeek + 7) % 7;
-        if (daysToAdd === 0) daysToAdd = 7; 
-        
-        const nextSaturday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysToAdd);
-        const monthNames = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
-        const formattedDate = `${nextSaturday.getDate()} / ${monthNames[nextSaturday.getMonth()]}`;
+        if (filteredItems.length === 0) {
+            const msg = isCurados 
+                ? `No hay ${isReimpresion ? 'reimpresiones' : 'novedades'} marcadas para preventa en el Curador.` 
+                : `No se encontraron ${type.toLowerCase()} de Ivrea en el catálogo actual.`;
+            alert(msg);
+            setStatusMessage("");
+            return;
+        }
+        setStatusMessage("");
+
+        // 2. Calcular fecha automática usando la función central
+        const formattedDate = calcularProximoSabado();
 
         // 3. Buscar plantilla
         let targetTplId = null;
@@ -895,23 +948,39 @@ export default function PreSaleGenerator() {
                         </div>
                     )}
 
-                    {/* BOTONES DE CARGA RÁPIDA IVREA */}
-                    <div className="mb-4 bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm flex flex-col gap-2">
-                         <p className="text-[10px] font-bold uppercase tracking-widest text-blue-700 mb-1 text-center">Automatización Ivrea</p>
+                     <div className="mb-4 bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm flex flex-col gap-2">
+                         <p className="text-[10px] font-bold uppercase tracking-widest text-blue-700 mb-1 text-center font-display flex items-center justify-center gap-2">
+                            <Zap size={10} className="fill-blue-700" /> 
+                            Automatización de Carga
+                         </p>
+                         <div className="flex gap-2 mb-1">
+                             <button 
+                                 onClick={() => handleAutoLoad('CURADOS_NOVEDADES')}
+                                 className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-2.5 rounded-xl font-black text-[10px] transition-all flex items-center justify-center gap-2 shadow-lg ring-2 ring-blue-500/20"
+                             >
+                                 <Star size={14} className="fill-white" />
+                                 NOVEDADES CURADAS
+                             </button>
+                             <button 
+                                 onClick={() => handleAutoLoad('CURADOS_REIMPRESIONES')}
+                                 className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white py-2.5 rounded-xl font-black text-[10px] transition-all flex items-center justify-center gap-2 shadow-lg ring-2 ring-indigo-500/20"
+                             >
+                                 <RefreshCw size={14} />
+                                 REIMP. CURADAS
+                             </button>
+                         </div>
                          <div className="flex gap-2">
                              <button 
                                  onClick={() => handleAutoLoad('NOVEDADES')}
-                                 className="flex-1 bg-[#1b3a57] hover:bg-[#132a41] text-[#f5a800] py-2 rounded-lg font-black text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md"
+                                 className="flex-1 bg-white border border-blue-200 hover:bg-slate-50 text-[#1b3a57] py-2 rounded-lg font-black text-[10px] transition-colors flex items-center justify-center gap-1.5"
                              >
-                                 <Zap size={14} className="fill-[#f5a800]" />
-                                 NOVEDADES
+                                 NOVEDADES (IVREA)
                              </button>
                              <button 
                                  onClick={() => handleAutoLoad('REIMPRESIONES')}
-                                 className="flex-1 bg-[#f5a800] hover:bg-[#e69d00] text-[#1b3a57] py-2 rounded-lg font-black text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md"
+                                 className="flex-1 bg-white border border-blue-200 hover:bg-slate-50 text-[#1b3a57] py-2 rounded-lg font-black text-[10px] transition-colors flex items-center justify-center gap-1.5"
                              >
-                                 <Book size={14} />
-                                 REIMPRESIONES
+                                 REIMP. (IVREA)
                              </button>
                          </div>
                     </div>
@@ -962,7 +1031,7 @@ export default function PreSaleGenerator() {
                                          footerContact1: 'WHATSAPP: +591 XXXXXXXX',
                                          footerContact2: 'FACEBOOK: Mangas Comics Bolivia Store',
                                          footerContact3: 'LA PAZ, BOLIVIA',
-                                         deadlineDate: '',
+                                         deadlineDate: calcularProximoSabado(),
                                          deadlineTime: ''
                                      });
                                      setStatusMessage("NUEVO PROYECTO"); 

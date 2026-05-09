@@ -1338,7 +1338,7 @@ const ComicAnalysisTool = () => {
                                                                 {d.items.filter(i => i.comparison === 'nuevo').length > 0 && (
                                                                     <div className="comic-audit-section">
                                                                         <div className="comic-audit-section-title flex items-center gap-2">
-                                                                            <ArrowUpCircle size={12} /> NOVEDADES DETECTADAS ({d.items.filter(i => i.comparison === 'nuevo').length})
+                                                                            <ArrowUpCircle size={12} /> NUEVOS EN CATÁLOGO ({d.items.filter(i => i.comparison === 'nuevo').length})
                                                                         </div>
                                                                         <div className="comic-mini-table scrollable">
                                                                             {d.items.filter(i => i.comparison === 'nuevo').map((i, idx) => (
