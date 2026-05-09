@@ -13,7 +13,7 @@ import {
  */
 const SECTION_MARKERS = new Set([
     'NOVEDADES', 'REIMPRESIONES', 'MANGAS EN CURSO',
-    'MANGAS YA COMPLETOS', 'MANGAS DE TOMO ÚNICO', 'COMICS'
+    'MANGAS YA COMPLETOS', 'MANGAS DE TOMO UNICO', 'COMICS'
 ]);
 
 const SKIP_MARKERS = new Set([
@@ -37,7 +37,7 @@ export function processIvrea(sheetData) {
         const row = rows[i];
         if (!row) continue;
 
-        // START: Fila con único valor NOVEDADES
+        // START: Fila con unico valor NOVEDADES
         if (!started) {
             const nonNull = row.filter(v => v != null && String(v).trim() !== '');
             if (nonNull.length === 1 && String(nonNull[0]).trim().toUpperCase() === 'NOVEDADES') {
@@ -57,7 +57,7 @@ export function processIvrea(sheetData) {
         if (firstCell === 'POR FAVOR COMPLETAR LAS REEDICIONES ARRIBA. NO EN EL FONDO!') continue;
         if (isHeaderRow(row)) continue;
 
-        // Detectar cambio de sección
+        // Detectar cambio de seccion
         const sec = isSectionMarker(row);
         if (sec) { currentSection = sec; continue; }
 
@@ -83,7 +83,8 @@ export function processIvrea(sheetData) {
             eanRawStr: String(eanRaw ?? ''),
             precio,
             cantidad,
-            categoria: currentSection
+            categoria: currentSection,
+            agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -103,14 +104,13 @@ export function processIvrea(sheetData) {
         const reimprEntries = occurrences.filter(o => o.categoria === 'REIMPRESIONES');
         let mainEntries = occurrences.filter(o => o.categoria !== 'REIMPRESIONES');
 
-        // Deduplicate main (same Title + same EAN Crudo)
         const seen = new Set();
         const dedupedMain = [];
         for (const o of mainEntries) {
             const key = o.tituloNorm + '|' + String(o.eanRaw);
             if (seen.has(key)) {
                 exactDupesRemoved++;
-                eliminados.push({ titulo: o.titulo, ean: o.eanRawStr, motivo: 'Duplicado exacto (Título + ISBN)', categoria: o.categoria });
+                eliminados.push({ titulo: o.titulo, ean: o.eanRawStr, motivo: 'Duplicado exacto (Titulo + ISBN)', categoria: o.categoria });
             } else {
                 seen.add(key);
                 dedupedMain.push(o);
@@ -122,21 +122,21 @@ export function processIvrea(sheetData) {
         if (mainEntries.length > 0) {
             if (isReimprWeek) {
                 reimprMarked++;
-                reimprEntries.forEach(r => {
-                    eliminados.push({ titulo: r.titulo, ean: r.eanRawStr, motivo: 'REIMPRESIÓN UNIFICADA CON ENTRADA PRINCIPAL', categoria: 'REIMPRESIONES' });
-                });
             }
             const base = mainEntries[0];
-            finalItems.push({ ...base, isReimprWeek, soloReimpr: false });
+            finalItems.push({ 
+                ...base, 
+                isReimprWeek, 
+                soloReimpr: false,
+                agotado_distribuidor: isReimprWeek ? false : base.agotado_distribuidor
+            });
         } else if (isReimprWeek) {
-            // Solo existe en sección reimpresiones
             reimprSoloError++;
             const base = reimprEntries[0];
             finalItems.push({ ...base, categoria: null, isReimprWeek: true, soloReimpr: true });
         }
     }
 
-    // Phase 3: EAN resolution & final mapping
     const eanToTitles = {};
     for (const item of finalItems) {
         const eanStr = parseEAN(item.eanRaw);
@@ -169,7 +169,7 @@ export function processIvrea(sheetData) {
         }
 
         const _changes = [];
-        if (item.isReimprWeek) _changes.push({ type: 'reimpr', msg: 'Reimpresión semana' });
+        if (item.isReimprWeek) _changes.push({ type: 'reimpr', msg: 'Reimpresion semana' });
         if (eanRazon !== 'ok') _changes.push({ type: 'int', msg: eanRazon.replace(/_/g, ' ') });
 
         outputItems.push({
@@ -185,16 +185,11 @@ export function processIvrea(sheetData) {
             ean_razon: eanRazon,
             precio_tapa: item.precio,
             cantidad: item.cantidad,
+            agotado_distribuidor: item.agotado_distribuidor || false,
             _raw_ean: item.eanRawStr,
             _raw_titulo: item.titulo,
             _changes,
         });
-    }
-
-    const itemsPorCategoria = {};
-    for (const item of outputItems) {
-        const c = item.categoria_principal || 'Sin categoría';
-        itemsPorCategoria[c] = (itemsPorCategoria[c] || 0) + 1;
     }
 
     const report = {
@@ -206,7 +201,6 @@ export function processIvrea(sheetData) {
         ean_creados_total: eanCreatedTotal,
         ean_creados_por_razon: eanCreatedReasons,
         filas_ignoradas_antes_novedades: skippedBefore,
-        items_por_categoria: itemsPorCategoria,
         eliminados
     };
 
@@ -227,7 +221,6 @@ export function processOvnipress(rows) {
         const row = rows[i];
         if (!row) continue;
 
-        // START: Columna A = NOVEDADES
         if (!started) {
             if (row[0] && String(row[0]).trim().toUpperCase() === 'NOVEDADES') {
                 started = true;
@@ -241,21 +234,18 @@ export function processOvnipress(rows) {
         const nonNull = row.filter(v => v != null && String(v).trim() !== '');
         if (!nonNull.length) continue;
 
-        // PARADA: Primer string es TOTAL, SUBTOTAL o GRAN TOTAL
         const firstStr = nonNull.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (t === 'TOTAL' || t === 'SUBTOTAL' || t === 'GRAN TOTAL') break;
         }
 
-        // TRANSICIÓN DE CATEGORÍA: Col A vacía + Col C = ISBN (segundo encabezado)
         if (!row[0] && row[2] && String(row[2]).trim().toUpperCase() === 'ISBN') {
-            if (currentSection === 'NOVEDADES') currentSection = 'CATÁLOGO GENERAL';
+            if (currentSection === 'NOVEDADES') currentSection = 'CATALOGO GENERAL';
             continue;
         }
 
-        // SKIP Header
-        if (row[1] && String(row[1]).trim() === 'Título') continue;
+        if (row[1] && String(row[1]).trim().toLowerCase() === 'titulo') continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
         if (!titulo) continue;
@@ -271,7 +261,6 @@ export function processOvnipress(rows) {
             const c = parseInt(row[4]);
             if (!isNaN(c) && c > 0) cantidad = c;
         }
-        const paginas = row[0] && typeof row[0] === 'number' ? row[0] : null;
 
         rawItems.push({
             titulo,
@@ -280,8 +269,8 @@ export function processOvnipress(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            paginas,
-            categoria: currentSection
+            categoria: currentSection,
+            agotado_distribuidor: row.__isRed === true
         });
     }
 
@@ -306,11 +295,11 @@ export function processPanini(rows) {
 
         const nn = row.filter(v => v != null && String(v).trim() !== '');
 
-        // START: Fila con único valor NOVEDADES
         if (!started) {
-            if (nn.length === 1 && String(nn[0]).trim().toUpperCase() === 'NOVEDADES') {
+            const uniqueNonNull = [...new Set(nn.map(v => String(v).trim().toUpperCase()))];
+            if (uniqueNonNull.length === 1 && uniqueNonNull[0].includes('NOVEDADES')) {
                 started = true;
-                currentSection = 'NOVEDADES';
+                currentSection = uniqueNonNull[0];
             } else {
                 skippedBefore++;
             }
@@ -319,14 +308,12 @@ export function processPanini(rows) {
 
         if (!nn.length) continue;
 
-        // PARADA
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (STOP_WORDS.some(s => t === s)) break;
         }
 
-        // CATEGORÍAS (REGEX) / SALTAR CABECERA
         if (!row[0] && row[1]) {
             const b = String(row[1]).trim();
             const m = b.match(SECTION_RE);
@@ -339,15 +326,13 @@ export function processPanini(rows) {
                 continue;
             }
 
-            // CASOS OMITIDOS: C y D vacíos
             if (!row[2] && !row[3]) {
-                eliminados.push({ titulo: b, ean: '', motivo: 'SIN CÓDIGO NI ISBN — OMITIDO EN LECTURA', categoria: currentSection });
+                eliminados.push({ titulo: b, ean: '', motivo: 'SIN CODIGO NI ISBN', categoria: currentSection });
                 continue;
             }
         }
 
-        // SALTAR FILA: Col A = código
-        if (row[0] && String(row[0]).trim().toLowerCase() === 'código') continue;
+        if (row[0] && String(row[0]).trim().toLowerCase() === 'codigo') continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
         if (!titulo) continue;
@@ -373,7 +358,8 @@ export function processPanini(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: currentSection
+            categoria: currentSection,
+            agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -397,11 +383,11 @@ export function processPenguin(rows) {
 
         const nn = row.filter(v => v != null && String(v).trim() !== '');
 
-        // START: Fila con único valor que incluya NOVEDADES
         if (!started) {
-            if (nn.length === 1 && String(nn[0]).trim().toUpperCase().includes('NOVEDADES')) {
+            const uniqueNonNull = [...new Set(nn.map(v => String(v).trim().toUpperCase()))];
+            if (uniqueNonNull.length === 1 && uniqueNonNull[0].includes('NOVEDADES')) {
                 started = true;
-                currentSection = String(nn[0]).trim().toUpperCase();
+                currentSection = uniqueNonNull[0];
             } else {
                 skippedBefore++;
             }
@@ -410,20 +396,18 @@ export function processPenguin(rows) {
 
         if (!nn.length) continue;
 
-        // PARADA
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (STOP_WORDS.some(s => t === s)) break;
         }
 
-        // CATEGORÍA: Fila con exactamente 1 valor
-        if (nn.length === 1) {
-            currentSection = String(nn[0]).trim().toUpperCase();
+        const uniqueNonNullCat = [...new Set(nn.map(v => String(v).trim().toUpperCase()))];
+        if (uniqueNonNullCat.length === 1) {
+            currentSection = uniqueNonNullCat[0];
             continue;
         }
 
-        // SALTAR FILA: Col A = AUTOR
         if (row[0] && String(row[0]).trim().toUpperCase() === 'AUTOR') continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
@@ -450,7 +434,8 @@ export function processPenguin(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: currentSection
+            categoria: currentSection,
+            agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -474,11 +459,11 @@ export function processPlaneta(rows) {
 
         const nn = row.filter(v => v != null && String(v).trim() !== '');
 
-        // START: Fila con único valor que incluya NOVEDADES
         if (!started) {
-            if (nn.length === 1 && String(nn[0]).trim().toUpperCase().includes('NOVEDADES')) {
+            const uniqueNonNull = [...new Set(nn.map(v => String(v).trim().toUpperCase()))];
+            if (uniqueNonNull.length === 1 && uniqueNonNull[0].includes('NOVEDADES')) {
                 started = true;
-                currentSection = String(nn[0]).trim().toUpperCase();
+                currentSection = uniqueNonNull[0];
             } else {
                 skippedBefore++;
             }
@@ -487,23 +472,21 @@ export function processPlaneta(rows) {
 
         if (!nn.length) continue;
 
-        // PARADA
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (STOP_WORDS.some(s => t === s)) break;
         }
 
-        // CATEGORÍA: Fila con 1 valor (pero ignorar si el valor es '0')
-        if (nn.length === 1) {
-            const val = String(nn[0]).trim();
+        const uniqueNonNullCat = [...new Set(nn.map(v => String(v).trim().toUpperCase()))];
+        if (uniqueNonNullCat.length === 1) {
+            const val = uniqueNonNullCat[0];
             if (val !== '0') {
-                currentSection = val.toUpperCase();
+                currentSection = val;
             }
             continue;
         }
 
-        // SALTAR FILA: Col A = TITULO o TITLE
         if (row[0] && ['TITULO', 'TITLE'].includes(String(row[0]).trim().toUpperCase())) continue;
 
         const titulo = row[0] ? String(row[0]).trim() : null;
@@ -528,7 +511,8 @@ export function processPlaneta(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: currentSection
+            categoria: currentSection,
+            agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -554,7 +538,6 @@ export function processDeux(rows) {
         const colC = row[2] != null ? String(row[2]).trim() : null;
         const colD = row[3] != null ? row[3] : null;
 
-        // START: Col A incluye LANZAMIENTO
         if (!started) {
             if (colA && colA.toUpperCase().includes('LANZAMIENTO')) {
                 started = true;
@@ -564,15 +547,12 @@ export function processDeux(rows) {
             continue;
         }
 
-        // PARADA: Col A, B o C
         if (colA && STOP_WORDS.includes(colA.toUpperCase())) break;
         if (colB && STOP_WORDS.includes(colB.toUpperCase())) break;
         if (colC && STOP_WORDS.includes(colC.toUpperCase())) break;
 
-        // SALTAR FILA: PRODUCTO y SELLO al mismo tiempo
         if (colA && colA.toUpperCase() === 'PRODUCTO' && colB && colB.toUpperCase() === 'SELLO') continue;
 
-        // Limpieza CRÍTICA de Título (Col C): Borrar saltos de línea
         let titulo = colC || null;
         if (titulo) {
             titulo = titulo.split(String.fromCharCode(10)).join(' ')
@@ -603,7 +583,8 @@ export function processDeux(rows) {
             precio,
             cantidad,
             categoria: sello.toUpperCase(),
-            sello
+            sello,
+            agotado_distribuidor: (sello.toUpperCase() === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -615,8 +596,8 @@ export function processDeux(rows) {
  */
 export function processHotel(rows) {
     const rawItems = [];
-    let started = true; // Por defecto empezamos
-    let currentSection = 'CATÁLOGO';
+    let started = true; 
+    let currentSection = 'CATALOGO';
     const eliminados = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -626,12 +607,10 @@ export function processHotel(rows) {
         const nn = row.filter(v => v != null && String(v).trim() !== '');
         if (!nn.length) continue;
 
-        // PARADA: Primer string incluye TOTAL
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr && firstStr.trim().toUpperCase().includes('TOTAL')) break;
 
-        // SALTAR FILA: Col B = TÍTULO
-        if (row[1] && ['TITULO', 'TÍTULO'].includes(String(row[1]).trim().toUpperCase())) continue;
+        if (row[1] && ['TITULO', 'TITLE'].includes(String(row[1]).trim().toUpperCase())) continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
         if (!titulo) continue;
@@ -649,7 +628,6 @@ export function processHotel(rows) {
             if (!isNaN(c) && c > 0) cantidad = c;
         }
 
-        // Detección CRÍTICA de Novedad: Columna G (índice 6) incluye "NOVEDAD"
         let itemCat = currentSection;
         if (row[6] && String(row[6]).trim().toUpperCase().includes('NOVEDAD')) {
             itemCat = 'NOVEDADES';
@@ -663,7 +641,8 @@ export function processHotel(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: itemCat
+            categoria: itemCat,
+            agotado_distribuidor: (itemCat === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -686,14 +665,12 @@ export function processVR(rows) {
         const nn = row.filter(v => v != null && String(v).trim() !== '');
         if (!nn.length) continue;
 
-        // PARADA
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (STOP_WORDS.some(s => t === s)) break;
         }
 
-        // SALTAR FILA: Col A = AUTOR
         if (row[0] && String(row[0]).trim().toUpperCase() === 'AUTOR') continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
@@ -720,7 +697,8 @@ export function processVR(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: 'V&R'
+            categoria: 'V&R',
+            agotado_distribuidor: row.__isRed === true
         });
     }
 
@@ -743,8 +721,6 @@ export function processOtras(rows) {
         const nn = row.filter(v => v != null && String(v).trim() !== '');
         if (!nn.length) continue;
 
-        // Detectar cambio de sección (Subcategoría)
-        // Buscamos filas con un solo valor que no sea autor/nombre/subtotal/total
         if (nn.length === 1 && typeof nn[0] === 'string') {
             const val = nn[0].trim().toUpperCase();
             if (val !== 'SUBTOTAL' && val !== 'TOTAL' && val !== 'AUTOR' && val !== 'NOMBRE' && val !== 'PRODUCTO') {
@@ -753,14 +729,12 @@ export function processOtras(rows) {
             }
         }
 
-        // PARADA: SUBTOTAL o TOTAL
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (t === 'SUBTOTAL' || t === 'TOTAL') break;
         }
 
-        // SALTAR FILA: Col A = AUTOR o NOMBRE
         if (row[0] && ['AUTOR', 'NOMBRE'].includes(String(row[0]).trim().toUpperCase())) continue;
 
         const titulo = row[1] ? String(row[1]).trim() : null;
@@ -787,7 +761,8 @@ export function processOtras(rows) {
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
             cantidad,
-            categoria: currentSection
+            categoria: currentSection,
+            agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
         });
     }
 
@@ -809,14 +784,12 @@ export function processMerchandising(rows) {
         const nn = row.filter(v => v != null && String(v).trim() !== '');
         if (!nn.length) continue;
 
-        // PARADA: SUBTOTAL o TOTAL (primer string)
         const firstStr = nn.find(v => typeof v === 'string');
         if (firstStr) {
             const t = firstStr.trim().toUpperCase();
             if (t.startsWith('SUBTOTAL') || t.startsWith('TOTAL')) break;
         }
 
-        // SALTAR FILA: Col A = PRODUCTO
         if (row[0] && String(row[0]).trim().toUpperCase() === 'PRODUCTO') continue;
 
         const titulo = row[0] ? String(row[0]).trim() : null;
@@ -843,7 +816,8 @@ export function processMerchandising(rows) {
             precio,
             cantidad,
             descuento,
-            categoria: 'MERCHANDISING'
+            categoria: 'MERCHANDISING',
+            agotado_distribuidor: row.__isRed === true
         });
     }
 
@@ -867,11 +841,10 @@ export function buildResult(prefix, rawItems, eliminados) {
         const seen = new Set();
         const deduped = [];
         for (const o of occurrences) {
-            // Regla: Elimina duplicados exactos usando la clave Título Normalizado + '|' + ISBN Crudo Original.
             const key = o.tituloNorm + '|' + o.isbnRawStr;
             if (seen.has(key)) {
                 exactDupesRemoved++;
-                eliminados.push({ titulo: o.titulo, ean: o.isbnRawStr, motivo: 'DUPLICADO EXACTO (MISMO TITULO + ISBN)', categoria: o.categoria });
+                eliminados.push({ titulo: o.titulo, ean: o.isbnRawStr, motivo: 'DUPLICADO EXACTO', categoria: o.categoria });
             } else {
                 seen.add(key);
                 deduped.push(o);
@@ -932,6 +905,7 @@ export function buildResult(prefix, rawItems, eliminados) {
             ean_razon: eanRazon,
             precio_tapa: item.precio,
             cantidad: item.cantidad,
+            agotado_distribuidor: item.agotado_distribuidor || false,
             _raw_ean: item.isbnRawStr,
             _raw_titulo: item.titulo,
             _changes,
@@ -941,11 +915,11 @@ export function buildResult(prefix, rawItems, eliminados) {
     const itemsPorCategoria = {};
     const rawPorCategoria = {};
     for (const item of outputItems) {
-        const c = item.categoria_principal || 'Sin categoría';
+        const c = item.categoria_principal || 'Sin categoria';
         itemsPorCategoria[c] = (itemsPorCategoria[c] || 0) + 1;
     }
     for (const item of rawItems) {
-        const c = item.categoria || 'Sin categoría';
+        const c = item.categoria || 'Sin categoria';
         rawPorCategoria[c] = (rawPorCategoria[c] || 0) + 1;
     }
 
@@ -967,13 +941,11 @@ export function buildResult(prefix, rawItems, eliminados) {
     };
 }
 
-/**
- * SHARED HELPERS
- */
 function isSectionMarker(row) {
     const nonNull = row.filter(v => v != null && String(v).trim() !== '');
-    if (nonNull.length === 1 && typeof nonNull[0] === 'string') {
-        const t = nonNull[0].trim().toUpperCase();
+    const uniqueNonNull = [...new Set(nonNull.map(v => String(v).trim().toUpperCase()))];
+    if (uniqueNonNull.length === 1) {
+        const t = uniqueNonNull[0];
         if (SECTION_MARKERS.has(t)) return t;
     }
     return null;
@@ -986,16 +958,13 @@ function isSkipRow(row) {
     if (firstStr) {
         const t = firstStr.trim();
         if (SKIP_MARKERS.has(t)) return true;
-
-        // Regla Panini: Col A = código
-        if (t.toLowerCase() === 'código') return true;
+        if (t.toLowerCase() === 'codigo') return true;
     }
     return false;
 }
 
 function isHeaderRow(row) {
     const first = row[0] ? String(row[0]).trim().toUpperCase() : '';
-    const second = row[1] ? String(row[1]).trim().toUpperCase() : '';
     if (first === 'TITULO' || first === 'TITLE' || first === 'NOMBRE' || first === 'PRODUCTO' || first === 'AUTOR') {
         return true;
     }

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy, Star } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
+import LanzamientosCurator from './LanzamientosCurator';
 
 const CatalogUpdatedView = () => {
     const { isAdmin } = useAuth();
@@ -30,6 +31,10 @@ const CatalogUpdatedView = () => {
     const [isScanning, setIsScanning] = useState(false);
     const [scanningForItem, setScanningForItem] = useState(null);
     const [isSmartSyncOpen, setIsSmartSyncOpen] = useState(false);
+    const [isDeepScanOpen, setIsDeepScanOpen] = useState(false);
+    const [deepScanSlug, setDeepScanSlug] = useState('');
+    const [deepScanLoading, setDeepScanLoading] = useState(false);
+    const [deepScanError, setDeepScanError] = useState('');
     const [smartMatches, setSmartMatches] = useState([]);
     const [isSmartProcessing, setIsSmartProcessing] = useState(false);
     const [rawHtmlInput, setRawHtmlInput] = useState('');
@@ -54,6 +59,8 @@ const CatalogUpdatedView = () => {
     const [paniniModal, setPaniniModal] = useState(false);
     const [paniniHtml, setPaniniHtml] = useState('');
     const [paniniLoading, setPaniniLoading] = useState(false);
+    const [showAudit, setShowAudit] = useState(false);
+    const [isCuratorOpen, setIsCuratorOpen] = useState(false);
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -191,14 +198,6 @@ const CatalogUpdatedView = () => {
             const allOrdersData = allOrdersResults.flatMap(res => res.data || []);
             const clientItemsData = clientItemsResults.flatMap(res => res.data || []);
 
-            console.log("FETCHED DATA DEBUG:", {
-                weeksLength: weeks?.length,
-                mastersLength: masters.data?.length,
-                receptionsLength: receptions.data?.length,
-                allOrdersLength: allOrdersData.length,
-                clientItemsLength: clientItemsData.length
-            });
-            console.log("ALL ORDERS RAW FOR ALICE:", allOrdersData.filter(o => (o.titulo || '').toLowerCase().includes('alice')));
             const weekStats = (weeks || []).map(w => {
                 const master = masters.data?.find(m => m.semana_id === w.id);
                 const weekReceptions = (receptions.data || []).filter(r => r.semana_id === w.id);
@@ -289,6 +288,61 @@ const CatalogUpdatedView = () => {
 
             setCatalogData(enrichedResults);
             // --- END NEW ---
+
+            // ═══ REPORTE CATÁLOGO ADMIN ═══
+            const reporteAdmin = {};
+
+            enrichedResults.forEach(prod => {
+                const weeks = Object.keys(prod.floatingByWeek || {});
+                if (weeks.length === 0) return;
+                
+                weeks.forEach(weekId => {
+                    const weekData = weekStats.find(w => w.id === weekId);
+                    const semNombre = weekData?.nombre || weekId;
+                    const qty = prod.floatingByWeek[weekId]?.qty || 0;
+                    
+                    if (!reporteAdmin[semNombre]) {
+                        reporteAdmin[semNombre] = {
+                            semana: semNombre,
+                            fecha: weekData?.fechaArribo?.toLocaleDateString(
+                                'es-BO', {day:'numeric', month:'short'}
+                            ) || 'N/A',
+                            confirmada: weekData?.isConfirmed ? '✅' : '⏳',
+                            titulos: [],
+                            totalUnidades: 0
+                        };
+                    }
+                    reporteAdmin[semNombre].titulos.push({
+                        titulo: prod.titulo,
+                        qty
+                    });
+                    reporteAdmin[semNombre].totalUnidades += qty;
+                });
+            });
+
+            const fullReport = {
+                timestamp: new Date().toISOString(),
+                floatingStock: reporteAdmin,
+                resumen: Object.values(reporteAdmin).map(s => ({
+                    semana: s.semana,
+                    fecha: s.fecha,
+                    confirmada: s.confirmada,
+                    totalTitulos: s.titulos.length,
+                    totalUnidades: s.totalUnidades
+                })),
+                // Casos específicos para comparar
+                alice03: enrichedResults
+                    .find(p => p.titulo?.toLowerCase()
+                        .includes('alice on border road 03'))
+                    ?.floatingByWeek,
+                boticaria01: enrichedResults
+                    .find(p => p.titulo?.toLowerCase()
+                        .includes('boticaria 01'))
+                    ?.floatingByWeek
+            };
+
+            window.mcb_last_admin_report = fullReport; // Guardar para descarga
+            window.mcb_last_admin_report = fullReport; // Guardar para descarga
 
             const eds = [...new Set(results.map(i => i.editorial))].filter(Boolean).sort();
             setEditorialesList(eds);
@@ -599,6 +653,66 @@ const CatalogUpdatedView = () => {
         setSmartMatches(newMatches);
     };
 
+    const handleDeepScan = async () => {
+        if (!deepScanSlug.trim()) return;
+        setDeepScanLoading(true);
+        setDeepScanError('');
+        
+        try {
+          const SUPABASE_URL = 'https://lbraboujrajvzosmddtu.supabase.co';
+          const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+          
+          const res = await fetch(
+            `${SUPABASE_URL}/functions/v1/ivrea-proxy?slug=${deepScanSlug.trim()}`,
+            {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${ANON_KEY}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          
+          const html = await res.text();
+          
+          // Extraer volúmenes del HTML
+          const volumes = catalogService.extractVolumesFromHtml(html);
+          
+          if (volumes.length === 0) {
+            setDeepScanError('No se encontraron portadas. Verificá el slug.');
+            return;
+          }
+          
+          // Filtrar catálogo por Ivrea
+          const ivreaItems = catalogData.filter(
+            p => p.editorial?.toLowerCase() === 'ivrea'
+          );
+          
+          // Matchear
+          const matches = catalogService.matchVolumeToProducts(volumes, ivreaItems);
+          
+          // Usar la misma grilla del Sincronizador Experto
+          setSmartMatches(matches.map(m => ({
+            extUrl: m.url,
+            extLabel: m.filename,
+            catalogItem: m.catalogItem,
+            score: m.score,
+            confidence: m.confidence,
+            selected: m.selected
+          })));
+          
+          setIsDeepScanOpen(false);
+          setIsSmartSyncOpen(true); // Abrir la grilla existente
+          
+        } catch (err) {
+          setDeepScanError('Error: ' + err.message);
+        } finally {
+          setDeepScanLoading(false);
+        }
+      };
+
     const handleSmartPersist = () => {
         const toSync = smartMatches.filter(m => m.selected && m.catalogItem);
         if (toSync.length === 0) {
@@ -908,86 +1022,6 @@ const CatalogUpdatedView = () => {
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Gestión detallada de productos, precios en BS y etiquetas de reimpresión.</p>
                     </div>
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
-                        <button 
-                            onClick={() => loadCatalog(false)}
-                            disabled={isLoading}
-                            title="Actualizar vista (usa caché si existe)"
-                            style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '0.5rem', 
-                                padding: '0.625rem 1rem', 
-                                borderRadius: '12px', 
-                                border: '1px solid #e2e8f0', 
-                                background: 'white', 
-                                cursor: 'pointer', 
-                                fontWeight: 700, 
-                                fontSize: '0.875rem',
-                                transition: 'all 0.2s ease',
-                                color: '#475569'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
-                        >
-                            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-                            Refrescar
-                        </button>
-
-                        {isAdmin && (
-                            <button 
-                                onClick={() => loadCatalog(true)}
-                                disabled={isLoading}
-                                title="Forzar descarga completa desde el servidor"
-                                style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '0.5rem', 
-                                    padding: '0.625rem 1rem', 
-                                    borderRadius: '12px', 
-                                    border: '1px solid #fee2e2', 
-                                    background: '#fef2f2', 
-                                    cursor: 'pointer', 
-                                    fontWeight: 700, 
-                                    fontSize: '0.875rem',
-                                    transition: 'all 0.2s ease',
-                                    color: '#ef4444'
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.background = '#fee2e2'}
-                                onMouseLeave={(e) => e.currentTarget.style.background = '#fef2f2'}
-                            >
-                                <RotateCcw size={16} className={isLoading ? 'animate-spin' : ''} />
-                                Forzar Recarga
-                            </button>
-                        )}
-
-                        {isAdmin && (
-                            <button 
-                                onClick={handleGlobalStockReset}
-                                disabled={isLoading || isResetting}
-                                title="RESETEAR TODO EL STOCK A 0 (Acción Crítica)"
-                                style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '0.5rem', 
-                                    padding: '0.625rem 1rem', 
-                                    borderRadius: '12px', 
-                                    border: '1px solid #fee2e2', 
-                                    background: '#7f1d1d', 
-                                    cursor: 'pointer', 
-                                    fontWeight: 700, 
-                                    fontSize: '0.875rem',
-                                    transition: 'all 0.2s ease',
-                                    color: 'white',
-                                    boxShadow: '0 4px 12px rgba(127, 29, 29, 0.2)'
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.background = '#991b1b'}
-                                onMouseLeave={(e) => e.currentTarget.style.background = '#7f1d1d'}
-                            >
-                                <Zap size={16} style={{ fill: 'currentColor' }} />
-                                Reset Stock 0
-                            </button>
-                        )}
-
                         {isAdmin && (
                             <button
                                 onClick={() => openNewItem()}
@@ -997,45 +1031,6 @@ const CatalogUpdatedView = () => {
                                 onMouseLeave={(e) => e.currentTarget.style.background = '#f0fdf4'}
                             >
                                 <Plus size={16} /> Nuevo ítem
-                            </button>
-                        )}
-
-                        {isAdmin && (
-                            <button
-                                onClick={() => setPaniniModal(true)}
-                                title="Importar desde Panini España (Pegar HTML)"
-                                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem 1rem', borderRadius: '12px', border: '1px solid #fde68a', background: '#fffbeb', cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem', transition: 'all 0.2s ease', color: '#d97706' }}
-                                onMouseEnter={(e) => e.currentTarget.style.background = '#fef3c7'}
-                                onMouseLeave={(e) => e.currentTarget.style.background = '#fffbeb'}
-                            >
-                                <ShoppingCart size={16} /> Importar Panini ESP
-                            </button>
-                        )}
-
-                        {isAdmin && (
-                            <button
-                                onClick={handleClearReprints}
-                                disabled={isLoading}
-                                title="Borrar todas las marcas de reimpresión del catálogo"
-                                style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '0.5rem', 
-                                    padding: '0.625rem 1rem', 
-                                    borderRadius: '12px', 
-                                    border: '1px solid #ddd', 
-                                    background: '#f8fafc', 
-                                    cursor: 'pointer', 
-                                    fontWeight: 700, 
-                                    fontSize: '0.875rem',
-                                    transition: 'all 0.2s ease',
-                                    color: '#64748b'
-                                }}
-                                onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#1e293b'; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
-                            >
-                                <RotateCcw size={16} />
-                                Limpiar Filtro Semanal
                             </button>
                         )}
                     </div>
@@ -1065,12 +1060,31 @@ const CatalogUpdatedView = () => {
                     </div>
 
                     <button 
+                        onClick={() => setIsCuratorOpen(true)}
+                        className="bg-[#f59e0b] text-white px-6 py-3 rounded-xl font-black text-xs flex items-center gap-3 hover:bg-[#d97706] transition-all shadow-md group"
+                    >
+                        <Star size={16} className="group-hover:rotate-12 transition-transform fill-white" />
+                        ✨ Curar Lanzamientos
+                    </button>
+
+                    <button 
                         onClick={() => { setIsSmartSyncOpen(true); setShowExpertMode(true); }}
                         className="bg-[#1b3a57] text-[#f5a800] px-6 py-3 rounded-xl font-black text-xs flex items-center gap-3 hover:bg-[#132a41] transition-all shadow-md group"
                     >
                         <ImageIcon size={16} className="group-hover:scale-110 transition-transform" />
                         🚀 Sincronizador Experto (Bulk)
                     </button>
+
+                    <button
+                        onClick={() => setIsDeepScanOpen(true)}
+                        className="bg-[#1b3a57] text-green-400 px-6 py-3 
+                            rounded-xl font-black text-xs flex items-center 
+                            gap-3 hover:bg-[#132a41] transition-all shadow-md group"
+                    >
+                        <Search size={16} />
+                        🔍 Deep Scan Ivrea
+                    </button>
+
                     
                     <select 
                         value={editorialFilter}
@@ -1447,6 +1461,18 @@ const CatalogUpdatedView = () => {
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                             <div style={{ color: '#94a3b8', fontSize: '0.65rem', fontWeight: 600, fontFamily: 'monospace', width: '20px' }}>{idx + 1}</div>
                                             <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.95rem' }}>{item.titulo}</div>
+                                            {item.agotado_distribuidor && (
+                                                <span style={{ 
+                                                    background: '#fee2e2', 
+                                                    color: '#ef4444', 
+                                                    fontSize: '0.625rem', 
+                                                    fontWeight: 900, 
+                                                    padding: '2px 8px', 
+                                                    borderRadius: '6px',
+                                                    border: '1px solid #fecaca',
+                                                    textTransform: 'uppercase'
+                                                }}>AGOTADO DIST.</span>
+                                            )}
                                             {item.es_reimpresion && (
                                                 <span style={{ 
                                                     background: '#fff1f2', 
@@ -1740,6 +1766,63 @@ const CatalogUpdatedView = () => {
                         style={{ opacity: 0.5, cursor: 'pointer', background: 'none', border: 'none', color: 'white', fontSize: '16px' }}
                         title="Deseleccionar todo"
                     >✕</button>
+                </div>
+            )}
+
+
+            {isDeepScanOpen && (
+                <div className="fixed inset-0 bg-black/80 z-[10200] flex 
+                    items-center justify-center p-4">
+                    <div className="bg-[#1b3a57] rounded-2xl p-6 
+                    w-full max-w-md shadow-2xl border border-white/10 animate-in fade-in zoom-in duration-300">
+                    <h2 className="text-white font-black text-lg mb-4 flex items-center gap-3">
+                        <Search className="text-green-400" /> Deep Scan Ivrea
+                    </h2>
+                    <p className="text-gray-400 text-sm mb-4">
+                        Ingresá el slug del título en ivrea.com.ar<br/>
+                        Ej: para ivrea.com.ar/titulo/chainsaw-man/ 
+                        ingresá: <strong className="text-white">chainsaw-man</strong>
+                    </p>
+                    <input
+                        type="text"
+                        value={deepScanSlug}
+                        onChange={e => setDeepScanSlug(e.target.value)}
+                        placeholder="ej: chainsaw-man, btooom, d-gray-man"
+                        className="w-full bg-[#0f2438] text-white rounded-xl 
+                        px-4 py-3 text-sm mb-4 border border-white/10
+                        focus:outline-none focus:border-green-400 font-mono"
+                        onKeyDown={e => e.key === 'Enter' && handleDeepScan()}
+                        autoFocus
+                    />
+                    {deepScanError && (
+                        <p className="text-red-400 text-xs mb-4 font-bold">
+                        {deepScanError}
+                        </p>
+                    )}
+                    <div className="flex gap-3">
+                        <button
+                        onClick={() => setIsDeepScanOpen(false)}
+                        className="flex-1 bg-white/10 text-white py-3 
+                            rounded-xl text-sm font-bold hover:bg-white/20 transition-colors"
+                        >
+                        Cancelar
+                        </button>
+                        <button
+                        onClick={handleDeepScan}
+                        disabled={deepScanLoading || !deepScanSlug.trim()}
+                        className="flex-1 bg-green-500 text-white py-3 
+                            rounded-xl font-black text-sm
+                            disabled:opacity-50 flex items-center 
+                            justify-center gap-2 hover:bg-green-400 transition-colors shadow-lg"
+                        >
+                        {deepScanLoading ? (
+                            <><div className="animate-spin w-4 h-4 
+                            border-2 border-white border-t-transparent 
+                            rounded-full"/> Escaneando...</>
+                        ) : '🔍 Escanear'}
+                        </button>
+                    </div>
+                    </div>
                 </div>
             )}
 
@@ -2663,6 +2746,13 @@ const CatalogUpdatedView = () => {
             )}
             </>
             )}
+            {/* CURADOR DE LANZAMIENTOS */}
+            <LanzamientosCurator 
+                isOpen={isCuratorOpen}
+                onClose={() => setIsCuratorOpen(false)}
+                catalogData={catalogData}
+                onRefresh={loadCatalog}
+            />
         </div>
     );
 };

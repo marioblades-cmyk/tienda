@@ -1,10 +1,11 @@
 import { supabase } from './supabase';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { SHEET_PROCESSORS } from '../utils/excelProcessors';
 
 const CACHE_KEY = 'mcb_catalog_full_cache';
 const CACHE_TIME_KEY = 'mcb_catalog_cache_time';
-const CACHE_DURATION = 1000 * 60 * 60; // 1 hora de caché
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos de caché local
 
 export const catalogService = {
     /**
@@ -31,7 +32,12 @@ export const catalogService = {
             created_at: 'ca',
             imagen_url: 'img',
             stock_fisico: 'sf',
-            stock_minimo: 'sm'
+            stock_minimo: 'sm',
+            visible_web: 'vw',
+            para_preventa: 'pp',
+            es_novedad_semana: 'ens',
+            es_novedad: 'en',
+            agotado_distribuidor: 'ad'
         };
         const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
 
@@ -65,7 +71,7 @@ export const catalogService = {
 
         // 2. Si no hay caché o expiró, descargar de Supabase (SOLO COLUMNAS NECESARIAS)
         console.log('🚀 Descargando catálogo optimizado desde Supabase...');
-        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,created_at,imagen_url,stock_fisico,stock_minimo';
+        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,created_at,imagen_url,stock_fisico,stock_minimo,visible_web,para_preventa,es_novedad_semana,es_novedad,agotado_distribuidor';
         
         let allItems = [];
         let from = 0;
@@ -114,6 +120,32 @@ export const catalogService = {
         return allItems;
     },
 
+    /**
+     * Obtiene solo los items marcados como novedad o para preventa (muy rápido)
+     */
+    async fetchFeaturedOnly() {
+        console.log('⚡ Cargando destacados prioritarios...');
+        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,created_at,imagen_url,stock_fisico,stock_minimo,visible_web,para_preventa,es_novedad_semana,es_novedad';
+        
+        const { data, error } = await supabase
+            .from('catalogo_productos')
+            .select(columns)
+            .or('es_novedad_semana.eq.true,para_preventa.eq.true')
+            .order('titulo', { ascending: true });
+
+        if (error) throw error;
+        return data || [];
+    },
+
+    /**
+     * Limpia la caché local para forzar una descarga fresca en la próxima carga
+     */
+    clearCache() {
+        console.log('🧹 Limpiando caché local del catálogo...');
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.removeItem(CACHE_TIME_KEY);
+    },
+
     /*
      * [x] **Fase 2: Procesamiento Automático al subir el archivo**
      *   - [x] Crear `catalogService.js` para manejo de datos y caché.
@@ -126,100 +158,150 @@ export const catalogService = {
      * @param {File|Blob} file 
      */
     async processAndAnalyze(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    console.log('--- DEPURACIÓN EXCEL ---');
-                    const data = new Uint8Array(e.target.result);
-                    const wb = XLSX.read(data, { type: 'array' });
+        try {
+            console.log('--- DEPURACIÓN EXCEL (EXCELJS) ---');
+            const arrayBuffer = await file.arrayBuffer();
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(arrayBuffer);
+            
+            // 1. Cargar catálogo actual (usando caché si existe)
+            const catalog = await this.fetchFullCatalog();
+            console.log('📚 Catálogo cargado:', catalog.length, 'ítems');
+            
+            const indexedCatalog = {};
+            const eanIndex = {};
+            
+            catalog.forEach(item => {
+                const pid = item.product_id;
+                if (pid) indexedCatalog[pid] = item;
+                if (item.ean_oficial) eanIndex[item.ean_oficial] = item;
+                if (item.ean_interno) eanIndex[item.ean_interno] = item;
+            });
+
+            // Función para detectar rojos
+            const isRed = (cell, isDebug = false) => {
+                if (!cell) return false;
+                const checkColor = (c) => {
+                    if (!c || typeof c !== 'string') return false;
+                    const val = c.toUpperCase();
+                    if (isDebug) console.log('   🎨 Color check:', val);
+                    return val.includes('FF0000') || val.includes('C00000') || val.endsWith('FF0000');
+                };
+                
+                let foundRed = false;
+                if (cell.font?.color?.argb && checkColor(cell.font.color.argb)) foundRed = true;
+                if (!foundRed && cell.fill?.fgColor?.argb && checkColor(cell.fill.fgColor.argb)) foundRed = true;
+                if (!foundRed && cell.fill?.bgColor?.argb && checkColor(cell.fill.bgColor.argb)) foundRed = true;
+
+                return foundRed;
+            };
+
+            // 2. Procesar pestañas disponibles (Insensible a mayúsculas/minúsculas)
+            const wbSheetNames = workbook.worksheets.map(ws => ws.name);
+            console.log('📄 Pestañas encontradas en Excel:', wbSheetNames);
+            const processorKeys = Object.keys(SHEET_PROCESSORS);
+            
+            const analysisResult = {};
+
+            for (const processorKey of processorKeys) {
+                const normKey = processorKey.trim().toUpperCase();
+                const ws = workbook.worksheets.find(n => n.name.trim().toUpperCase() === normKey);
+                
+                if (ws) {
+                    console.log(`✅ [MATCH] Pestaña "${ws.name}" coincide con procesador "${processorKey}"`);
+                    console.log(`🔄 Procesando pestaña: "${ws.name}" como "${processorKey}"...`);
                     
-                    // 1. Cargar catálogo actual (usando caché si existe)
-                    const catalog = await this.fetchFullCatalog();
-                    console.log('📚 Catálogo cargado:', catalog.length, 'ítems');
-                    
-                    const indexedCatalog = {};
-                    const eanIndex = {};
-                    
-                    catalog.forEach(item => {
-                        const pid = item.product_id;
-                        if (pid) indexedCatalog[pid] = item;
-                        if (item.ean_oficial) eanIndex[item.ean_oficial] = item;
-                        if (item.ean_interno) eanIndex[item.ean_interno] = item;
+                    // Convertir a formato rows (array de arrays) para SHEET_PROCESSORS
+                    const rows = [];
+                    ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+                        const rowValues = [];
+                        let rowIsRed = false;
+                        
+                        // Recorremos hasta 20 columnas para asegurar que no falten datos 
+                        // en filas con celdas vacías intercaladas.
+                        for (let c = 1; c <= 20; c++) {
+                            const cell = row.getCell(c);
+                            const val = cell.value;
+                            
+                            let finalVal = val;
+                            if (val && typeof val === 'object') {
+                                if (val.richText) finalVal = val.richText.map(t => t.text).join('');
+                                else if (val.text) finalVal = val.text;
+                                else if (val.result !== undefined) finalVal = val.result;
+                                else if (val.hyperlink) finalVal = val.text || val.hyperlink;
+                            }
+                            
+                            rowValues[c-1] = finalVal;
+                            
+                            // Verificamos rojos en las primeras 5 columnas (A-E)
+                            const isDebug = processorKey === 'IVREA' && rowValues[0];
+                            if (c <= 5 && isRed(cell, isDebug)) {
+                                rowIsRed = true;
+                                if (processorKey === 'IVREA') {
+                                    console.log('🔴 ROJO DETECTADO:', 
+                                        rowValues[0] || 'S/T', 
+                                        'col:', c,
+                                        'font:', cell.font?.color?.argb,
+                                        'fill:', cell.fill?.fgColor?.argb
+                                    );
+                                }
+                            }
+                        }
+                        
+                        rowValues.__isRed = rowIsRed;
+                        rows.push(rowValues);
                     });
 
-                    // 2. Procesar pestañas disponibles (Insensible a mayúsculas/minúsculas)
-                    console.log('📄 Pestañas encontradas en Excel:', wb.SheetNames);
-                    const wbSheetNamesNorm = wb.SheetNames.map(s => s.trim().toUpperCase());
-                    console.log('📄 Pestañas normalizadas:', wbSheetNamesNorm);
-                    const processorKeys = Object.keys(SHEET_PROCESSORS);
-                    console.log('🔧 Procesadores disponibles:', processorKeys.map(k => k.toUpperCase()));
-                    
-                    const analysisResult = {};
+                    const processed = SHEET_PROCESSORS[processorKey](rows);
 
-                    for (const processorKey of processorKeys) {
-                        const normKey = processorKey.trim().toUpperCase();
-                        const actualSheetName = wb.SheetNames.find(n => n.trim().toUpperCase() === normKey);
-                        
-                        if (actualSheetName) {
-                            console.log(`🔄 Procesando pestaña: "${actualSheetName}" como "${processorKey}"...`);
-                            const ws = wb.Sheets[actualSheetName];
-                            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-                            const processed = SHEET_PROCESSORS[processorKey](rows);
+                    if (processed.items) {
+                        console.log(`📊 Items procesados en "${processorKey}": ${processed.items.length}`);
+                        processed.items = processed.items.map(item => {
+                            const dbMatch = indexedCatalog[item.product_id] || (item.ean_final ? eanIndex[item.ean_final] : null);
+                            let comparison = 'sin_cambios';
+                            
+                            if (!dbMatch) {
+                                comparison = 'nuevo';
+                            } else {
+                                const priceChanged = item.precio_tapa != null && dbMatch.precio_tapa != null && Number(item.precio_tapa) !== Number(dbMatch.precio_tapa);
+                                const currentDbEan = dbMatch.ean_oficial || dbMatch.ean_interno;
+                                const eanChanged = item.ean_final && item.ean_final !== currentDbEan;
+                                const catChanged = item.categoria_principal && dbMatch.categoria && item.categoria_principal !== dbMatch.categoria;
 
-                            if (processed.items) {
-                                console.log(`📊 Items procesados en "${processorKey}": ${processed.items.length}`);
-                                processed.items = processed.items.map(item => {
-                                    const dbMatch = indexedCatalog[item.product_id] || (item.ean_final ? eanIndex[item.ean_final] : null);
-                                    let comparison = 'sin_cambios';
-                                    
-                                    if (!dbMatch) {
-                                        comparison = 'nuevo';
-                                    } else {
-                                        const priceChanged = item.precio_tapa != null && dbMatch.precio_tapa != null && Number(item.precio_tapa) !== Number(dbMatch.precio_tapa);
-                                        const currentDbEan = dbMatch.ean_oficial || dbMatch.ean_interno;
-                                        const eanChanged = item.ean_final && item.ean_final !== currentDbEan;
-                                        const catChanged = item.categoria_principal && dbMatch.categoria && item.categoria_principal !== dbMatch.categoria;
-
-                                        if (priceChanged) comparison = 'cambio_precio';
-                                        else if (eanChanged) comparison = 'cambio_ean';
-                                        else if (catChanged) comparison = 'cambio_categoria';
-                                    }
-
-                                    return {
-                                        ...item,
-                                        editorial: processorKey, // Usamos la key estandarizada
-                                        comparison,
-                                        db_price: dbMatch?.precio_tapa,
-                                        db_ean: dbMatch?.ean_oficial || dbMatch?.ean_interno,
-                                        db_category: dbMatch?.categoria
-                                    };
-                                });
-
-                                // Actualizar resumen de cambios
-                                if (!processed.report) processed.report = {};
-                                processed.report.cambios = {
-                                    nuevos: processed.items.filter(i => i.comparison === 'nuevo').length,
-                                    precios: processed.items.filter(i => i.comparison === 'cambio_precio').length,
-                                    eans: processed.items.filter(i => i.comparison === 'cambio_ean').length,
-                                    categorias: processed.items.filter(i => i.comparison === 'cambio_categoria').length
-                                };
+                                if (priceChanged) comparison = 'cambio_precio';
+                                else if (eanChanged) comparison = 'cambio_ean';
+                                else if (catChanged) comparison = 'cambio_categoria';
                             }
-                            analysisResult[processorKey] = processed;
-                        }
-                    }
 
-                    console.log('🏁 Resultado final del análisis:', Object.keys(analysisResult));
-                    analysisResult._filename = file.name; // GUARDAR REFERENCIA
-                    resolve(analysisResult);
-                } catch (err) {
-                    console.error('❌ ERROR CRÍTICO EN PROCESAMIENTO:', err);
-                    reject(err);
+                            return {
+                                ...item,
+                                editorial: processorKey,
+                                comparison,
+                                db_price: dbMatch?.precio_tapa,
+                                db_ean: dbMatch?.ean_oficial || dbMatch?.ean_interno,
+                                db_category: dbMatch?.categoria
+                            };
+                        });
+
+                        if (!processed.report) processed.report = {};
+                        processed.report.cambios = {
+                            nuevos: processed.items.filter(i => i.comparison === 'nuevo').length,
+                            precios: processed.items.filter(i => i.comparison === 'cambio_precio').length,
+                            eans: processed.items.filter(i => i.comparison === 'cambio_ean').length,
+                            categorias: processed.items.filter(i => i.comparison === 'cambio_categoria').length
+                        };
+                    }
+                    analysisResult[processorKey] = processed;
                 }
-            };
-            reader.onerror = reject;
-            reader.readAsArrayBuffer(file);
-        });
+            }
+
+            console.log('🏁 Resultado final del análisis:', Object.keys(analysisResult));
+            analysisResult._filename = file.name;
+            return analysisResult;
+        } catch (err) {
+            console.error('❌ ERROR CRÍTICO EN PROCESAMIENTO:', err);
+            throw err;
+        }
     },
 
     /**
@@ -573,9 +655,38 @@ export const catalogService = {
         const seenIds = new Set();
         let totalStats = { procesados: 0, nuevos: 0, precios: 0 };
 
+        // 1.5 Reset global de "es_novedad" y categoria NOVEDADES
+        console.log('🧹 Limpiando marcas de NOVEDAD antiguas globalmente...');
+        try {
+            // Reset del flag booleano (para tienda pública)
+            await supabase
+                .from('catalogo_productos')
+                .update({ es_novedad: false })
+                .eq('es_novedad', true);
+            
+            // Reset del campo de texto (para filtros en Admin)
+            const { error: catError } = await supabase
+                .from('catalogo_productos')
+                .update({ categoria: 'CATÁLOGO GENERAL' })
+                .eq('categoria', 'NOVEDADES');
+            
+            if (catError) throw catError;
+            console.log('🧹 Categoría NOVEDADES reseteada a CATÁLOGO GENERAL');
+        } catch (err) {
+            console.error('❌ Error al resetear marcas de novedad:', err);
+        }
+
         // 2. Consolidar items y aplicar cálculos
-        Object.entries(analysis).forEach(([edName, data]) => {
-            if (!data.items) return;
+        for (const [edName, data] of Object.entries(analysis)) {
+            if (!data.items) continue;
+            
+            // Reset de agotados para esta editorial antes de sincronizar
+            console.log(`🧹 Reseteando agotados para editorial: ${edName}...`);
+            await supabase
+                .from('catalogo_productos')
+                .update({ agotado_distribuidor: false })
+                .ilike('editorial', edName);
+
             totalStats.procesados += data.items.length;
 
             data.items.forEach(item => {
@@ -583,7 +694,9 @@ export const catalogService = {
                 if (item.comparison === 'nuevo') totalStats.nuevos++;
                 if (item.comparison === 'cambio_precio') totalStats.precios++;
 
-                const tieneCambios = item.comparison !== 'sin_cambios' || esReimpresion;
+                const esNovedad = item.categoria_principal === 'NOVEDADES';
+                const esAgotado = item.agotado_distribuidor === true;
+                const tieneCambios = item.comparison !== 'sin_cambios' || esReimpresion || esNovedad || esAgotado;
 
                 if (tieneCambios && !seenIds.has(item.product_id)) {
                     seenIds.add(item.product_id);
@@ -603,6 +716,7 @@ export const catalogService = {
                         categoria: item.categoria_principal,
                         precio_tapa: item.precio_tapa || 0,
                         es_reimpresion: esReimpresion || false,
+                        agotado_distribuidor: item.agotado_distribuidor || false,
                         // Precios inteligentes
                         precio_venta_bs: calculated?.retail || 0,
                         precio_n2_bs: calculated?.n2 || 0,
@@ -612,7 +726,7 @@ export const catalogService = {
                     });
                 }
             });
-        });
+        }
 
         if (itemsToSync.length === 0) {
             console.log('✅ No hay cambios para sincronizar.');
@@ -1145,5 +1259,114 @@ export const catalogService = {
             console.error('Error parsing Panini HTML:', err);
             return null;
         }
+    },
+
+    extractVolumesFromHtml(html) {
+        const pattern = /photo-gallery\/imported_from_media_libray\/([^"'\s?]+\.jpg)/g;
+        const results = [];
+        let match;
+        const seen = new Set();
+        
+        while ((match = pattern.exec(html)) !== null) {
+            const filename = match[1].split('?')[0];
+            const url = `https://www.ivrea.com.ar/storage/photo-gallery/imported_from_media_libray/${filename}`;
+            
+            if (seen.has(url)) continue;
+            seen.add(url);
+            
+            // Extraer número del final: chainsawman09 → 9
+            const nameWithoutExt = filename.replace('.jpg', '');
+            const numMatch = nameWithoutExt.match(/(\d+)$/);
+            
+            results.push({
+                url,
+                filename: nameWithoutExt,
+                numero: numMatch ? parseInt(numMatch[1]) : null,
+                numeroStr: numMatch ? numMatch[1] : null,
+                label: nameWithoutExt
+            });
+        }
+        
+        return results;
+    },
+    
+    matchVolumeToProducts(volumes, catalogItems) {
+        return volumes
+          .filter(vol => !vol.filename.startsWith('thumb'))
+          .map(vol => {
+            if (!vol.numero) return null;
+            
+            const numStr0 = String(vol.numero).padStart(2, '0');
+            const numStr2 = String(vol.numero);
+            
+            // Paso 1: filtrar por número de tomo
+            const byNumber = catalogItems.filter(item => {
+              if (!item.titulo) return false;
+              const t = item.titulo.toUpperCase().trim();
+              return t.endsWith(' ' + numStr0) || 
+                     t.endsWith(' ' + numStr2) ||
+                     t.endsWith(numStr0) ||
+                     t.endsWith(numStr2);
+            });
+            
+            if (byNumber.length === 0) return null;
+            if (byNumber.length === 1) {
+              return {
+                ...vol,
+                catalogItem: byNumber[0],
+                score: 95,
+                confidence: 'high',
+                selected: !byNumber[0].imagen_url
+              };
+            }
+            
+            // Paso 2: entre múltiples candidatos,
+            // comparar filename SIN el número
+            // contra título normalizado SIN número
+            const filenameSinNum = vol.filename
+              .replace(/\d+$/, '')
+              .toLowerCase()
+              .replace(/[-_]/g, '');
+            
+            let best = null;
+            let topScore = 0;
+            
+            byNumber.forEach(item => {
+              const tituloNorm = item.titulo
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, '');
+              
+              // Calcular cuántos caracteres del
+              // filename están en el título
+              let matches = 0;
+              for (let i = 0; i < filenameSinNum.length; i++) {
+                if (tituloNorm.includes(filenameSinNum[i])) matches++;
+              }
+              
+              // También usar calculateMatchScore
+              const fuzzyScore = this.calculateMatchScore(
+                filenameSinNum, tituloNorm
+              );
+              
+              const score = (matches / filenameSinNum.length * 50) + fuzzyScore;
+              
+              if (score > topScore) {
+                topScore = score;
+                best = item;
+              }
+            });
+            
+            const confidence = topScore > 40 ? 'high' : 
+                               topScore > 20 ? 'medium' : 'low';
+            
+            return {
+              ...vol,
+              catalogItem: best,
+              score: Math.round(topScore),
+              confidence,
+              selected: confidence === 'high' && !best?.imagen_url
+            };
+          })
+          .filter(v => v !== null && v.catalogItem !== null);
     }
 };
