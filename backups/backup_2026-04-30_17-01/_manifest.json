@@ -1,0 +1,50 @@
+{
+  "generatedAt": "2026-04-30T21:01:05.621Z",
+  "tables": {
+    "catalogo_productos": {
+      "rowCount": 8819,
+      "file": "catalogo_productos.json",
+      "label": "📦 Catálogo (stock_fisico)"
+    },
+    "pedido_items_recepcion": {
+      "rowCount": 0,
+      "file": "pedido_items_recepcion.json",
+      "label": "📋 Recepciones registradas"
+    },
+    "cliente_items": {
+      "rowCount": 0,
+      "file": "cliente_items.json",
+      "label": "👤 Items de clientes (estados)"
+    },
+    "app_state": {
+      "rowCount": 7,
+      "file": "app_state.json",
+      "label": "⚙️  App state (reception_delta)"
+    },
+    "semanas": {
+      "rowCount": 9,
+      "file": "semanas.json",
+      "label": "📅 Semanas"
+    },
+    "pedidos": {
+      "rowCount": 39,
+      "file": "pedidos.json",
+      "label": "📄 Pedidos"
+    },
+    "pedido_items": {
+      "rowCount": 1085,
+      "file": "pedido_items.json",
+      "label": "📄 Items de pedidos"
+    },
+    "clientes": {
+      "rowCount": 0,
+      "file": "clientes.json",
+      "label": "🧑 Clientes"
+    },
+    "stock_movimientos": {
+      "rowCount": 0,
+      "file": "stock_movimientos.json",
+      "label": "📊 Historial de movimientos"
+    }
+  }
+}

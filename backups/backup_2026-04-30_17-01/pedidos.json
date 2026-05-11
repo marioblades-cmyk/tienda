@@ -1,0 +1,353 @@
+[
+  {
+    "id": "8f42ee04-df1b-4429-843e-b46d7f6c6509",
+    "semana_id": "2a61ddf3-c405-46d7-916a-ea99376bcca9",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 15 20-3_Mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-21T16:14:42.803272+00:00"
+  },
+  {
+    "id": "83932a0d-492b-4b22-8854-69de29a822b9",
+    "semana_id": "2a61ddf3-c405-46d7-916a-ea99376bcca9",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 15 20-3_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-21T17:36:23.969129+00:00"
+  },
+  {
+    "id": "9c267688-ea73-4565-85a7-6bb9de5f9127",
+    "semana_id": "2127ce77-94c9-4fc1-8c58-d0653768001a",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 27-2 MARIO.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-07T13:47:02.049807+00:00"
+  },
+  {
+    "id": "1e11748c-960e-4199-ae82-b631e17fdfae",
+    "semana_id": "2127ce77-94c9-4fc1-8c58-d0653768001a",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 27-2 MARITO.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-07T13:47:25.873813+00:00"
+  },
+  {
+    "id": "2858ebec-55a9-45c3-a52a-49a84c56c4ec",
+    "semana_id": "2127ce77-94c9-4fc1-8c58-d0653768001a",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 27-2 MAURI.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-07T13:47:43.617989+00:00"
+  },
+  {
+    "id": "8cf324d5-2883-495b-ba0b-df5ae4b5fcd0",
+    "semana_id": "c0de87e2-cdef-4194-9c85-7a8d08415fa9",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "PEDIDO PREVENTAS MAURI 7 3 2026.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-07T15:40:20.927789+00:00"
+  },
+  {
+    "id": "9c7d26b8-8dd3-4002-ad8c-7452cb067a6c",
+    "semana_id": "c0de87e2-cdef-4194-9c85-7a8d08415fa9",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 13 6-3_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-07T16:06:30.291997+00:00"
+  },
+  {
+    "id": "f6435320-71ed-4390-b60e-3d1a68faa596",
+    "semana_id": "c0de87e2-cdef-4194-9c85-7a8d08415fa9",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 13 6-3_Marito .xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-07T16:31:05.904276+00:00"
+  },
+  {
+    "id": "2b636bfc-e9db-4b4c-b28c-46d91a31cef6",
+    "semana_id": "c0de87e2-cdef-4194-9c85-7a8d08415fa9",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 13 6-3_mauricio (1).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-03-07T17:03:45.755753+00:00"
+  },
+  {
+    "id": "c787f611-2179-415b-a8b1-4c41e8294819",
+    "semana_id": "e5d16e84-e4e7-46e3-9745-307fa9a57048",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 14 13-3_mauricio.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-14T15:46:05.596219+00:00"
+  },
+  {
+    "id": "995e2470-22f8-49de-98db-4c6e303c31af",
+    "semana_id": "e5d16e84-e4e7-46e3-9745-307fa9a57048",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 13-3 MARITO.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-14T16:03:49.289236+00:00"
+  },
+  {
+    "id": "f1de9a2a-909a-4c71-821a-5046adf2dfc3",
+    "semana_id": "e5d16e84-e4e7-46e3-9745-307fa9a57048",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 14 13-3_mario.xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-03-14T16:51:45.29149+00:00"
+  },
+  {
+    "id": "6876c21a-2c43-41a2-aec3-e9d5cd1a5cd4",
+    "semana_id": "e5d16e84-e4e7-46e3-9745-307fa9a57048",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 14 13-3_mario (1).xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-14T16:53:51.850107+00:00"
+  },
+  {
+    "id": "d1258977-bf9d-4b13-a527-846b757f03ae",
+    "semana_id": "2a61ddf3-c405-46d7-916a-ea99376bcca9",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 15 20-3_mauricio (3).xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-21T16:09:23.629825+00:00"
+  },
+  {
+    "id": "65c380e1-cad5-4db6-b9a0-be203ed03fbc",
+    "semana_id": "2a61ddf3-c405-46d7-916a-ea99376bcca9",
+    "vendedor_id": "a9d1de4c-115f-4aac-9659-af336a71f843",
+    "vendedor_nombre": "pepe caso",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 15 20-3_pepe.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-21T17:42:06.879552+00:00"
+  },
+  {
+    "id": "24243251-6497-4024-b57f-dc330f5d3061",
+    "semana_id": "2a61ddf3-c405-46d7-916a-ea99376bcca9",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 15 20-3_mauricio (2).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-03-21T18:11:14.937587+00:00"
+  },
+  {
+    "id": "d86f6745-2ffe-4cdf-ba14-2ad77f826762",
+    "semana_id": "cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 16 27-3_Mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-28T15:55:41.226614+00:00"
+  },
+  {
+    "id": "75c40fd9-0d0b-454d-a5d8-d59236a927ba",
+    "semana_id": "cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 16 27-3_mauricio.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-28T16:30:19.631545+00:00"
+  },
+  {
+    "id": "9ff68770-3e59-4cac-989d-69a8d89a5233",
+    "semana_id": "cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 16 27-3_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-03-28T16:35:00.83087+00:00"
+  },
+  {
+    "id": "aabeaef3-94d1-41a0-9f4a-4e6262c7d545",
+    "semana_id": "cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 16 27-3_mauricio (1).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-03-28T16:38:17.101479+00:00"
+  },
+  {
+    "id": "8f078263-adeb-47df-b273-ffda08cfb61f",
+    "semana_id": "cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 16 27-3_mario (1).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-03-28T16:43:59.482042+00:00"
+  },
+  {
+    "id": "c6229fe6-2f93-4e3b-ada3-2577131a459b",
+    "semana_id": "d43e985e-d3cb-4875-be8e-c8470a28e290",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 17 2-4_mauricio (2).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-04-04T16:00:23.63154+00:00"
+  },
+  {
+    "id": "c9611ad8-382c-4015-b154-d914d801796d",
+    "semana_id": "d43e985e-d3cb-4875-be8e-c8470a28e290",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 17 2-4_mauricio (1).xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-04T16:03:46.814757+00:00"
+  },
+  {
+    "id": "70dab6d2-d3e9-47ed-8e0e-4bac0caafd1d",
+    "semana_id": "d43e985e-d3cb-4875-be8e-c8470a28e290",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 17 2-4_Mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-04T07:56:22.563482+00:00"
+  },
+  {
+    "id": "29e0bbb6-06bf-4aed-8f22-1a9e8b7328af",
+    "semana_id": "d43e985e-d3cb-4875-be8e-c8470a28e290",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 17 2-4_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-04T17:14:34.561727+00:00"
+  },
+  {
+    "id": "e387e1c3-9921-4194-89e9-787757b5d3bc",
+    "semana_id": "d43e985e-d3cb-4875-be8e-c8470a28e290",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 17 2-4_mario (1).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-04-04T17:19:03.913208+00:00"
+  },
+  {
+    "id": "71feedea-e03d-45a4-b4f2-9f5bce4334f6",
+    "semana_id": "f3c6d099-3652-43c0-94cf-5f259b9a1f4d",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 18 10-4_mauricio.xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-04-11T15:01:13.198797+00:00"
+  },
+  {
+    "id": "03beca76-3c5a-4569-bfaa-ac23aa30ad87",
+    "semana_id": "8fac85cb-4ab6-4417-9fff-503f42479e15",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 19 17-4_mauricio (2).xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-04-18T16:57:38.229284+00:00"
+  },
+  {
+    "id": "53ec0003-a9b5-47f7-8c47-ffe98530c6b8",
+    "semana_id": "f3c6d099-3652-43c0-94cf-5f259b9a1f4d",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 18 10-4_Mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-11T12:45:58.832433+00:00"
+  },
+  {
+    "id": "cacac50f-d70a-4b10-8079-a850ffd416b9",
+    "semana_id": "f3c6d099-3652-43c0-94cf-5f259b9a1f4d",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 18 10-4_mauricio (1).xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-11T16:13:11.823077+00:00"
+  },
+  {
+    "id": "56153e98-5043-4edd-adb8-7295ff1553b9",
+    "semana_id": "f3c6d099-3652-43c0-94cf-5f259b9a1f4d",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 18 10-4_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-11T18:18:06.576016+00:00"
+  },
+  {
+    "id": "9fa3bb53-e476-449e-a52f-f1100bc2f3bc",
+    "semana_id": "f3c6d099-3652-43c0-94cf-5f259b9a1f4d",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 18 10-4_mario.xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-04-11T18:20:22.735132+00:00"
+  },
+  {
+    "id": "1789e719-0e25-447f-98c4-cb2077a2df3e",
+    "semana_id": "8fac85cb-4ab6-4417-9fff-503f42479e15",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 19 17-4_Mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-18T16:17:07.478421+00:00"
+  },
+  {
+    "id": "b90a80d5-8ffd-45c0-a7dc-2400276994c7",
+    "semana_id": "8fac85cb-4ab6-4417-9fff-503f42479e15",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 19 17-4_mauricio (1).xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-18T16:58:08.436747+00:00"
+  },
+  {
+    "id": "1f08d96b-ccf7-433c-bcc8-054f18371f10",
+    "semana_id": "8fac85cb-4ab6-4417-9fff-503f42479e15",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 19 17-4_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-18T17:40:30.274343+00:00"
+  },
+  {
+    "id": "ced020aa-6fc7-4b10-913b-e594cc768bdc",
+    "semana_id": "c9bce42d-790a-4953-a2be-3c77500b0710",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "PEDIDO_CLIENTES_ENTELEQUIA DISTRIBUCIÓN 20 24-4_mauricio.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-25T16:06:42.293751+00:00"
+  },
+  {
+    "id": "2c8b8d33-26dc-4222-90bc-5c55b9c148f0",
+    "semana_id": "c9bce42d-790a-4953-a2be-3c77500b0710",
+    "vendedor_id": "e32003a1-4ddc-4054-b4af-9b44662d1bd5",
+    "vendedor_nombre": "Mario Andrés Angulo Rivera ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 20 24-4_Mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-25T16:04:57.724828+00:00"
+  },
+  {
+    "id": "90abdf9a-a85f-49b7-9b7e-707c161f9173",
+    "semana_id": "c9bce42d-790a-4953-a2be-3c77500b0710",
+    "vendedor_id": "159c2549-e6b3-4326-8b09-7eb8b1a7e671",
+    "vendedor_nombre": "mauricio ",
+    "archivo_nombre": "MANGAS_COMICS_BOLIVIA_STORE_ENTELEQUIA DISTRIBUCIÓN 20 24-4_mauricio.xlsx",
+    "tipo": "tienda",
+    "created_at": "2026-04-25T16:39:36.597632+00:00"
+  },
+  {
+    "id": "85857e43-3bfc-462c-ac6e-3f3d3ffe1f9a",
+    "semana_id": "c9bce42d-790a-4953-a2be-3c77500b0710",
+    "vendedor_id": "278c0c3d-29d3-494e-94e1-e5108204917f",
+    "vendedor_nombre": "mario andres blades",
+    "archivo_nombre": "PEDIDO_CLIENTES_ENTELEQUIA DISTRIBUCIÓN 20 24-4_mario.xlsx",
+    "tipo": "personal",
+    "created_at": "2026-04-25T17:25:19.895996+00:00"
+  }
+]

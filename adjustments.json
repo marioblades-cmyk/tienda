@@ -1,0 +1,1067 @@
+[
+  {
+    "producto_id": "d4c7d943-117f-44c2-9196-e958540da67e",
+    "delta": 2,
+    "created_at": "2026-04-30T22:12:15.922365+00:00"
+  },
+  {
+    "producto_id": "2863e7fb-b590-4cb2-9be6-fdcd25c7f78a",
+    "delta": 2,
+    "created_at": "2026-04-30T22:12:16.124913+00:00"
+  },
+  {
+    "producto_id": "bc634912-770e-4d7d-a71a-9c49ee54db15",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:16.33202+00:00"
+  },
+  {
+    "producto_id": "ce6a5153-7d9e-4932-a087-4caef7d82617",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:16.516148+00:00"
+  },
+  {
+    "producto_id": "e7e72427-ec6e-492b-b47b-a9686ced0b47",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:16.696534+00:00"
+  },
+  {
+    "producto_id": "50d9196c-1894-448a-bf06-bf5cdc289689",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:16.869709+00:00"
+  },
+  {
+    "producto_id": "8634f49b-9a8b-4ad7-9144-f9a3c46ad153",
+    "delta": 2,
+    "created_at": "2026-04-30T22:12:17.081212+00:00"
+  },
+  {
+    "producto_id": "12efb7fd-5095-4560-81bd-550a136ca48a",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:17.260509+00:00"
+  },
+  {
+    "producto_id": "7b5519cb-3781-4170-8afc-8e2ce8e32552",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:17.451623+00:00"
+  },
+  {
+    "producto_id": "c0b9268b-402b-42eb-8634-68555eac0641",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:17.628446+00:00"
+  },
+  {
+    "producto_id": "7b3db228-a407-4db8-bb6b-df3d43fad052",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:18.14936+00:00"
+  },
+  {
+    "producto_id": "d47efba3-de3f-4bc4-9b48-0cb62c221bcc",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:18.332081+00:00"
+  },
+  {
+    "producto_id": "04f9e0f2-7aa2-4cea-979c-3aa1b61d79be",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:18.510037+00:00"
+  },
+  {
+    "producto_id": "3ae3cb55-f929-4d8c-add7-ff886a056950",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:18.687982+00:00"
+  },
+  {
+    "producto_id": "11b81a29-be56-4165-90e7-3eceb40777e2",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:18.86356+00:00"
+  },
+  {
+    "producto_id": "a542fdd4-a0e5-404a-b789-ff05e5ade47c",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:19.076+00:00"
+  },
+  {
+    "producto_id": "13ed758c-a23b-4068-8ec5-999b2511f78a",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:19.280225+00:00"
+  },
+  {
+    "producto_id": "7462f817-0f68-4635-8a0d-e3f8c6faac78",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:19.456679+00:00"
+  },
+  {
+    "producto_id": "0ca07f66-cd01-4b3e-adab-f4942682aded",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:19.991007+00:00"
+  },
+  {
+    "producto_id": "c9064678-5377-40a1-87bd-ce42698b5d8f",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:20.177635+00:00"
+  },
+  {
+    "producto_id": "3e49a2e0-c677-4ae5-a349-75e3ec0bff95",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:20.397449+00:00"
+  },
+  {
+    "producto_id": "4fd0867e-af0a-47de-8a53-28c6b46d23b8",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:20.594863+00:00"
+  },
+  {
+    "producto_id": "bd97d793-89aa-4eb8-bd70-00a8210beb21",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:20.802641+00:00"
+  },
+  {
+    "producto_id": "f117224b-2690-454d-b4e5-34351fcc939a",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:21.027741+00:00"
+  },
+  {
+    "producto_id": "ebd96828-d25d-4eaf-967c-83aa69c47bfa",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:21.202798+00:00"
+  },
+  {
+    "producto_id": "8711d25b-34e8-4d60-9e4c-34e39d42ba32",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:21.384745+00:00"
+  },
+  {
+    "producto_id": "cb90dbb5-389e-458d-bfe4-3f50d87cccbe",
+    "delta": 2,
+    "created_at": "2026-04-30T22:12:21.966263+00:00"
+  },
+  {
+    "producto_id": "9679b0e7-4c01-459e-a39e-cbc04fd15333",
+    "delta": 2,
+    "created_at": "2026-04-30T22:12:22.152967+00:00"
+  },
+  {
+    "producto_id": "7667f511-a57f-4565-86be-fde7bae55976",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:22.351242+00:00"
+  },
+  {
+    "producto_id": "46a90665-ef50-464d-8b2f-63a290ad856c",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:22.541324+00:00"
+  },
+  {
+    "producto_id": "7343bdc3-6e79-4cac-9b37-e7b8ae3851a2",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:22.744074+00:00"
+  },
+  {
+    "producto_id": "10b9ccf9-af60-49c0-87f7-1009d2cbe203",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:22.928463+00:00"
+  },
+  {
+    "producto_id": "4212c22c-c4b0-4012-bdb5-e6d256520184",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:23.095895+00:00"
+  },
+  {
+    "producto_id": "70225a93-5c9b-4b96-abc8-b19932bbd266",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:23.30402+00:00"
+  },
+  {
+    "producto_id": "49befc72-d1f7-4019-ae1a-14f23b547878",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:23.899056+00:00"
+  },
+  {
+    "producto_id": "753f928c-6753-4f5a-8aa4-a387aac11b67",
+    "delta": 6,
+    "created_at": "2026-04-30T22:12:24.112944+00:00"
+  },
+  {
+    "producto_id": "95c1c5f5-d0d9-4fa9-b0fd-4d8196db42b2",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:17.805338+00:00"
+  },
+  {
+    "producto_id": "0ad0bbb8-6017-45fe-8eef-6b2b69cd1f63",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:19.640342+00:00"
+  },
+  {
+    "producto_id": "8fb74a3b-0b43-4eb3-bccc-239cf517d780",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:21.588992+00:00"
+  },
+  {
+    "producto_id": "fcfad7c4-5073-4413-89ef-985f23c6e5aa",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:23.523637+00:00"
+  },
+  {
+    "producto_id": "50774d89-c4fd-4b8d-82c1-dac09261a657",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:17.979999+00:00"
+  },
+  {
+    "producto_id": "4aa93f01-440b-4733-b7ab-c03776e77bf3",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:19.81438+00:00"
+  },
+  {
+    "producto_id": "7db6a1f0-cba2-4b17-a1c8-6db6223b0a35",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:21.790194+00:00"
+  },
+  {
+    "producto_id": "0211743d-f222-4aa9-b51b-0db32282c00e",
+    "delta": 1,
+    "created_at": "2026-04-30T22:12:23.717324+00:00"
+  },
+  {
+    "producto_id": "eba0a85d-0e98-4b23-a0a9-ae27ec1c49cb",
+    "delta": -1,
+    "created_at": "2026-04-30T22:13:35.665014+00:00"
+  },
+  {
+    "producto_id": "f660d4af-5639-492c-84dc-bdcfcfe7d783",
+    "delta": -1,
+    "created_at": "2026-04-30T22:37:09.995898+00:00"
+  },
+  {
+    "producto_id": "7c539b98-2406-44e5-950b-33c0b2d78afa",
+    "delta": -1,
+    "created_at": "2026-04-30T23:10:38.290203+00:00"
+  },
+  {
+    "producto_id": "0ad0bbb8-6017-45fe-8eef-6b2b69cd1f63",
+    "delta": -1,
+    "created_at": "2026-05-01T00:09:59.441592+00:00"
+  },
+  {
+    "producto_id": "4aa93f01-440b-4733-b7ab-c03776e77bf3",
+    "delta": -1,
+    "created_at": "2026-05-01T00:10:00.64791+00:00"
+  },
+  {
+    "producto_id": "11b81a29-be56-4165-90e7-3eceb40777e2",
+    "delta": -1,
+    "created_at": "2026-05-01T00:10:09.570107+00:00"
+  },
+  {
+    "producto_id": "95ebe0a5-45b9-4e87-94e0-b23b604d95af",
+    "delta": 3,
+    "created_at": "2026-05-01T01:02:51.103781+00:00"
+  },
+  {
+    "producto_id": "9459da51-da10-4ed2-804d-3e5d141c4e9e",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:51.274949+00:00"
+  },
+  {
+    "producto_id": "5e9368be-c104-4d47-97c5-034f477a4c18",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:51.450962+00:00"
+  },
+  {
+    "producto_id": "9dfb4ffd-f743-49fb-a5b3-15f7844437aa",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:51.623223+00:00"
+  },
+  {
+    "producto_id": "ff2a337d-b2ea-42b6-9304-7059e947f77a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:51.812272+00:00"
+  },
+  {
+    "producto_id": "82159b7a-00ad-4103-ac97-b36378287bf7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:52.001015+00:00"
+  },
+  {
+    "producto_id": "aa7072f2-af18-4f0c-9928-f8e5cc9935ad",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:52.175747+00:00"
+  },
+  {
+    "producto_id": "62f4a3c5-0fbe-424e-aa7c-603f884617f8",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:52.363812+00:00"
+  },
+  {
+    "producto_id": "a9fdf526-9289-4dc7-8e4c-08c786d383ff",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:52.560156+00:00"
+  },
+  {
+    "producto_id": "9902e173-9a9d-4ab0-ae23-eb26d177fe37",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:52.743516+00:00"
+  },
+  {
+    "producto_id": "90e48655-b80f-4cbb-81d0-b66adbcde48d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:52.923172+00:00"
+  },
+  {
+    "producto_id": "3d5fa5ca-00dd-4e8a-b3c9-75767f43ceb1",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:53.092523+00:00"
+  },
+  {
+    "producto_id": "222880e6-fb73-455c-ba04-b8781eecd16b",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:53.264613+00:00"
+  },
+  {
+    "producto_id": "e850652f-5374-42c6-87ef-b4e6605f85bb",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:53.432351+00:00"
+  },
+  {
+    "producto_id": "770c52fe-f8f8-411f-b483-4f402357a9f5",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:53.625975+00:00"
+  },
+  {
+    "producto_id": "18ddcae2-1407-472c-a81d-f34324630e00",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:53.80101+00:00"
+  },
+  {
+    "producto_id": "c1ca4518-9faf-4cb6-afca-54ed6f317cfe",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:53.969581+00:00"
+  },
+  {
+    "producto_id": "045fc673-75c7-4329-98cb-5ca32697700f",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:54.154546+00:00"
+  },
+  {
+    "producto_id": "ad8f327d-9481-476f-a4bd-1c312c48afb7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:54.330377+00:00"
+  },
+  {
+    "producto_id": "3883cd84-cf94-4323-9e9f-ee48b6f5c20e",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:54.511413+00:00"
+  },
+  {
+    "producto_id": "5530f9e3-aa8c-449a-8388-fb0a83668e6d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:54.712385+00:00"
+  },
+  {
+    "producto_id": "9f0fe736-b550-4d63-9689-5dde8f938a0e",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:54.894727+00:00"
+  },
+  {
+    "producto_id": "51aec2fc-527c-4554-8fe6-5b4c7723bba1",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:55.068891+00:00"
+  },
+  {
+    "producto_id": "e72d9ae8-7769-4126-812e-7d50858992b1",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:55.256704+00:00"
+  },
+  {
+    "producto_id": "013319fd-223d-4a4c-9e98-58457281ed76",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:55.433372+00:00"
+  },
+  {
+    "producto_id": "5b045591-adfa-492c-be4d-8148d1b70022",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:55.619009+00:00"
+  },
+  {
+    "producto_id": "694b1e3d-2639-47b5-88e8-f4ab36a01b64",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:55.788777+00:00"
+  },
+  {
+    "producto_id": "b77237aa-23dc-4203-bec5-fefa5b1eb835",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:55.963349+00:00"
+  },
+  {
+    "producto_id": "c2c3ed02-5cec-486b-9615-ae11cd74bd3e",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:56.139292+00:00"
+  },
+  {
+    "producto_id": "ae010653-afb8-4dac-907c-e32054a85958",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:56.307822+00:00"
+  },
+  {
+    "producto_id": "317fe52c-4cae-4996-9d9b-0fbbec89ec15",
+    "delta": 2,
+    "created_at": "2026-05-01T01:02:56.477548+00:00"
+  },
+  {
+    "producto_id": "6cfd95fd-f436-4d2f-adbe-bf4602a3b0a0",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:56.640393+00:00"
+  },
+  {
+    "producto_id": "a542fdd4-a0e5-404a-b789-ff05e5ade47c",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:56.805041+00:00"
+  },
+  {
+    "producto_id": "12efb7fd-5095-4560-81bd-550a136ca48a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:56.971841+00:00"
+  },
+  {
+    "producto_id": "ae7e52ca-78cb-4279-bf59-4e97b6cd8cfe",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:57.142398+00:00"
+  },
+  {
+    "producto_id": "aa59f220-3692-4a89-817e-89c7939c9aa7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:57.311017+00:00"
+  },
+  {
+    "producto_id": "a6ba3e7c-edcb-4e46-8992-56c22b3278a0",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:57.480982+00:00"
+  },
+  {
+    "producto_id": "13089f65-a196-45c2-9744-96dcb41a4034",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:57.642927+00:00"
+  },
+  {
+    "producto_id": "84af0c74-efc7-4920-ac9f-c8bfe3ffe350",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:57.815798+00:00"
+  },
+  {
+    "producto_id": "c171f348-ff14-4494-a87e-b8a3e5810bbf",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:57.984164+00:00"
+  },
+  {
+    "producto_id": "536c93e7-0a5d-4187-852b-31ccc8f54920",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:58.143302+00:00"
+  },
+  {
+    "producto_id": "ccecbefb-7deb-47bd-a3ce-670beab0f5b7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:58.322419+00:00"
+  },
+  {
+    "producto_id": "9ee82933-87b0-4cb7-9d3a-778ca31e145b",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:58.490734+00:00"
+  },
+  {
+    "producto_id": "b09f4377-2f8c-48a0-a36c-0bb78a31cb39",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:58.672328+00:00"
+  },
+  {
+    "producto_id": "6aa39566-3715-4e0b-b596-d43f54ecd1d7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:58.871422+00:00"
+  },
+  {
+    "producto_id": "57bb92c2-4798-46f3-945e-f7cf0f51bf5f",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:59.05924+00:00"
+  },
+  {
+    "producto_id": "22da72cd-f63d-4304-aca2-f7ad3818556c",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:59.236789+00:00"
+  },
+  {
+    "producto_id": "23a7074b-4f1b-4732-8fc8-ac1ab9b13e4c",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:59.413458+00:00"
+  },
+  {
+    "producto_id": "f0bb8350-5dcf-4ffe-9eaf-da8a60ffc1ec",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:01.149194+00:00"
+  },
+  {
+    "producto_id": "25ffadc0-1362-42f5-b2d9-7ae3965b06d3",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:02.986744+00:00"
+  },
+  {
+    "producto_id": "b3878846-fba8-46bb-8624-e5350dedecba",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:04.773674+00:00"
+  },
+  {
+    "producto_id": "fff0a7c4-242b-45bf-9710-13b25361a1e7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:06.551652+00:00"
+  },
+  {
+    "producto_id": "d58529bd-a08a-4961-8f31-de828d174cad",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:08.29649+00:00"
+  },
+  {
+    "producto_id": "0351c411-0d26-4c8d-9814-db2b7d267cff",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:10.117863+00:00"
+  },
+  {
+    "producto_id": "5a3a7217-4940-4c59-92ac-dfac939b3148",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:11.831765+00:00"
+  },
+  {
+    "producto_id": "140ec013-e917-429e-a4eb-e3b0de713315",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:59.578563+00:00"
+  },
+  {
+    "producto_id": "82032264-4159-484b-be5b-e08ab5fb6688",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:01.314518+00:00"
+  },
+  {
+    "producto_id": "31988959-edef-4ece-baed-bb83d43e647b",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:03.15923+00:00"
+  },
+  {
+    "producto_id": "86ca2dda-eb87-48bb-9453-a0c34aece167",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:04.960226+00:00"
+  },
+  {
+    "producto_id": "00457138-eacb-4f26-85d2-7ff612b97641",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:06.734792+00:00"
+  },
+  {
+    "producto_id": "a7cd86d0-f119-4cb8-81c5-2460a5ba9f1a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:08.484049+00:00"
+  },
+  {
+    "producto_id": "36b34a66-d3b9-4779-8647-5019ef864d9b",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:10.311863+00:00"
+  },
+  {
+    "producto_id": "7c86eb81-63b6-4954-b673-de435259c0cb",
+    "delta": 2,
+    "created_at": "2026-05-01T01:03:11.997633+00:00"
+  },
+  {
+    "producto_id": "b56ca8a2-d1c0-4939-a5f3-e854556c17da",
+    "delta": 1,
+    "created_at": "2026-05-01T01:02:59.7484+00:00"
+  },
+  {
+    "producto_id": "1b4d64b3-0373-4d5c-a407-d2692800849a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:01.518336+00:00"
+  },
+  {
+    "producto_id": "07fb2306-a762-416a-80c3-a3596f2829e6",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:03.351623+00:00"
+  },
+  {
+    "producto_id": "5d7b5e27-a872-4df4-b5cb-7fe098051e9d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:05.13716+00:00"
+  },
+  {
+    "producto_id": "a5b0565c-0887-4e61-942a-a2d9a7c68797",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:06.922302+00:00"
+  },
+  {
+    "producto_id": "2dd996f8-8753-4887-bd3f-57c025b607be",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:08.672062+00:00"
+  },
+  {
+    "producto_id": "fb586e1b-f226-471e-a116-b1866bf992f7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:10.485008+00:00"
+  },
+  {
+    "producto_id": "f97d1c71-af19-4cb0-b969-3dcbc753fd5f",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:12.183515+00:00"
+  },
+  {
+    "producto_id": "8634f49b-9a8b-4ad7-9144-f9a3c46ad153",
+    "delta": 2,
+    "created_at": "2026-05-01T01:02:59.925492+00:00"
+  },
+  {
+    "producto_id": "66517dcc-603f-4016-bd83-ebb18996d0a3",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:01.704059+00:00"
+  },
+  {
+    "producto_id": "88eedc9f-0658-4887-8fff-d6fcb3f0747f",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:03.515524+00:00"
+  },
+  {
+    "producto_id": "1de0d498-aa59-48b4-9f2b-926e74b61427",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:05.315767+00:00"
+  },
+  {
+    "producto_id": "1946e76f-804e-4659-b513-13f4294ac373",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:07.098988+00:00"
+  },
+  {
+    "producto_id": "a59a26d8-2ac8-4786-b028-14aaa38de7d8",
+    "delta": 4,
+    "created_at": "2026-05-01T01:03:08.842309+00:00"
+  },
+  {
+    "producto_id": "b49f9504-efa8-41fc-93f8-e5969cc83d7e",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:10.660434+00:00"
+  },
+  {
+    "producto_id": "4a85047c-4015-405c-af28-58bd9ddbfe99",
+    "delta": 2,
+    "created_at": "2026-05-01T01:03:12.350529+00:00"
+  },
+  {
+    "producto_id": "733fccf5-fbe1-4cbf-8948-832f54d59a2a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:00.11111+00:00"
+  },
+  {
+    "producto_id": "c06e16ae-7001-4db0-9833-11c0f25d4de9",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:01.890857+00:00"
+  },
+  {
+    "producto_id": "c2406067-fc83-4f9d-84f1-84ac76c80f44",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:03.706182+00:00"
+  },
+  {
+    "producto_id": "03fb679a-1e6f-4917-b87a-8d1b2474091a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:05.492485+00:00"
+  },
+  {
+    "producto_id": "14f89858-e707-4c47-ae89-bd14e6444ba9",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:07.279048+00:00"
+  },
+  {
+    "producto_id": "b7558db3-983a-4dfd-abf3-fe49d01f2af7",
+    "delta": 2,
+    "created_at": "2026-05-01T01:03:09.006742+00:00"
+  },
+  {
+    "producto_id": "f0aa3372-7571-4a47-8f56-faa7260a6e91",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:10.82973+00:00"
+  },
+  {
+    "producto_id": "5c1d8840-315d-4710-baac-6305d6f7f6a5",
+    "delta": 8,
+    "created_at": "2026-05-01T01:03:12.535147+00:00"
+  },
+  {
+    "producto_id": "1fe20552-605d-4b5b-9976-e9ec4960440d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:00.284644+00:00"
+  },
+  {
+    "producto_id": "30f1592f-88d9-4411-9880-4a0584de7f87",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:02.07093+00:00"
+  },
+  {
+    "producto_id": "4f9410a5-eb47-464c-a124-389202bca5d6",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:03.872644+00:00"
+  },
+  {
+    "producto_id": "18f85866-f16e-4c4c-840b-8d39dd52c2e8",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:05.669775+00:00"
+  },
+  {
+    "producto_id": "c2d9d8b5-a526-4bb9-a7ae-1f696e3a824d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:07.445673+00:00"
+  },
+  {
+    "producto_id": "64ac4c3f-181c-4b00-8cbf-015a8e6ecd31",
+    "delta": 5,
+    "created_at": "2026-05-01T01:03:09.168364+00:00"
+  },
+  {
+    "producto_id": "49b757ff-047a-4f56-bb98-88452ec7c450",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:10.99012+00:00"
+  },
+  {
+    "producto_id": "d60359ea-cd13-410a-8309-752f91687d04",
+    "delta": 8,
+    "created_at": "2026-05-01T01:03:12.70708+00:00"
+  },
+  {
+    "producto_id": "f734b1b2-68a3-4189-9793-48d724c297f8",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:00.463811+00:00"
+  },
+  {
+    "producto_id": "9e08db31-54e7-4755-b8f0-a089c52863e8",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:02.249483+00:00"
+  },
+  {
+    "producto_id": "6a65e570-7033-4aa6-a157-e4b45d50024c",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:04.045561+00:00"
+  },
+  {
+    "producto_id": "f5009ee4-6dbf-4941-a658-f89e7f5fdfd4",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:05.850949+00:00"
+  },
+  {
+    "producto_id": "3050415b-9bc5-42f8-8453-d0b98df4deb7",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:07.621721+00:00"
+  },
+  {
+    "producto_id": "9b0c135c-6e39-4daa-9904-7127eec644d3",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:09.346506+00:00"
+  },
+  {
+    "producto_id": "33e8ad2e-b83a-41b1-b06e-31267f6aeb02",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:11.160488+00:00"
+  },
+  {
+    "producto_id": "5eafbe5e-1ae7-4a79-b221-043429ac1214",
+    "delta": 5,
+    "created_at": "2026-05-01T01:03:12.878196+00:00"
+  },
+  {
+    "producto_id": "1e1d6550-0eeb-4cf2-b987-24517a51f308",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:00.633656+00:00"
+  },
+  {
+    "producto_id": "076df519-0bde-49e7-9460-80d9d0805ace",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:02.424907+00:00"
+  },
+  {
+    "producto_id": "cfbbf0c9-388c-4618-bd84-422c1bbaaee5",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:04.217242+00:00"
+  },
+  {
+    "producto_id": "e06ca072-0b9f-4883-802a-35bf5e767cb1",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:06.030215+00:00"
+  },
+  {
+    "producto_id": "cad434dd-5c8a-4e47-ba8a-7664bc09d383",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:07.788581+00:00"
+  },
+  {
+    "producto_id": "56a88d87-9b7b-4f28-b146-84ff5ca44bfa",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:09.517573+00:00"
+  },
+  {
+    "producto_id": "ed492750-167c-403d-8032-7ea9d27e014d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:11.333361+00:00"
+  },
+  {
+    "producto_id": "2412130c-26cb-4c3e-80e1-62b4e6242c60",
+    "delta": 2,
+    "created_at": "2026-05-01T01:03:13.053718+00:00"
+  },
+  {
+    "producto_id": "e2bcc362-48dd-421b-993a-9eddf3c536b0",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:00.811635+00:00"
+  },
+  {
+    "producto_id": "568e94ca-ce22-4ccc-afca-a14880dc2ffd",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:02.61106+00:00"
+  },
+  {
+    "producto_id": "0d7046a3-b202-4fc1-aa56-3fd83b280d4a",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:04.401283+00:00"
+  },
+  {
+    "producto_id": "f781842e-370c-4ce5-9d3a-e106afdaa50c",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:06.196443+00:00"
+  },
+  {
+    "producto_id": "cefd1211-f8b1-4a57-8de3-0bace83d5892",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:07.95655+00:00"
+  },
+  {
+    "producto_id": "97598267-1fa2-4bb1-aa54-46c0f539b33c",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:09.76934+00:00"
+  },
+  {
+    "producto_id": "92cbdf12-305b-4614-912d-2c5b39af46db",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:11.498229+00:00"
+  },
+  {
+    "producto_id": "8d8f4468-cd2f-4284-8b03-42a3abba49c9",
+    "delta": 3,
+    "created_at": "2026-05-01T01:03:13.218762+00:00"
+  },
+  {
+    "producto_id": "a1e4aa3b-c825-4ce0-afc3-09cd6f4222a4",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:00.984682+00:00"
+  },
+  {
+    "producto_id": "d2880862-4c11-4dcc-b2d5-1de50c4a253d",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:02.807293+00:00"
+  },
+  {
+    "producto_id": "acce8189-d873-4417-adfa-0a3b1985a5ca",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:04.588298+00:00"
+  },
+  {
+    "producto_id": "244abf15-d396-4fa4-bf2d-1aab2041c5f5",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:06.37398+00:00"
+  },
+  {
+    "producto_id": "820171f2-c538-42a0-aa2c-a789b6539102",
+    "delta": 3,
+    "created_at": "2026-05-01T01:03:08.12615+00:00"
+  },
+  {
+    "producto_id": "2c02994f-1957-4ddd-a443-e29ad3eba876",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:09.943024+00:00"
+  },
+  {
+    "producto_id": "7eb3dac9-2b0b-4d6e-9ea3-fa938a59cfca",
+    "delta": 1,
+    "created_at": "2026-05-01T01:03:11.665098+00:00"
+  },
+  {
+    "producto_id": "9459da51-da10-4ed2-804d-3e5d141c4e9e",
+    "delta": -1,
+    "created_at": "2026-05-01T14:03:44.646489+00:00"
+  },
+  {
+    "producto_id": "5e9368be-c104-4d47-97c5-034f477a4c18",
+    "delta": -1,
+    "created_at": "2026-05-01T14:03:45.744565+00:00"
+  },
+  {
+    "producto_id": "ce6a6b46-5d63-46b9-81fd-616741d1a09e",
+    "delta": -1,
+    "created_at": "2026-05-01T20:08:14.957439+00:00"
+  },
+  {
+    "producto_id": "4395b344-45ac-4194-82ab-2a702ddf8788",
+    "delta": -1,
+    "created_at": "2026-05-01T20:08:15.895113+00:00"
+  },
+  {
+    "producto_id": "0211743d-f222-4aa9-b51b-0db32282c00e",
+    "delta": -1,
+    "created_at": "2026-05-01T20:08:16.794198+00:00"
+  },
+  {
+    "producto_id": "9459da51-da10-4ed2-804d-3e5d141c4e9e",
+    "delta": 1,
+    "created_at": "2026-05-02T14:22:14.692673+00:00"
+  },
+  {
+    "producto_id": "5e9368be-c104-4d47-97c5-034f477a4c18",
+    "delta": 1,
+    "created_at": "2026-05-02T14:22:23.649178+00:00"
+  },
+  {
+    "producto_id": "95ebe0a5-45b9-4e87-94e0-b23b604d95af",
+    "delta": -1,
+    "created_at": "2026-05-02T14:31:46.303253+00:00"
+  },
+  {
+    "producto_id": "b0eda8cc-c32b-4294-b206-8681dbf23a12",
+    "delta": -1,
+    "created_at": "2026-05-02T14:56:35.426629+00:00"
+  },
+  {
+    "producto_id": "859df40e-7748-4d3d-b192-5fabdf538462",
+    "delta": -1,
+    "created_at": "2026-05-02T14:56:36.103775+00:00"
+  },
+  {
+    "producto_id": "5daf16d0-6888-459c-99de-bf142045460a",
+    "delta": -1,
+    "created_at": "2026-05-02T14:56:36.848711+00:00"
+  },
+  {
+    "producto_id": "cdd6bba4-c62f-43df-8e3b-ec4cc1558ed3",
+    "delta": -1,
+    "created_at": "2026-05-02T14:56:37.589539+00:00"
+  },
+  {
+    "producto_id": "50d9196c-1894-448a-bf06-bf5cdc289689",
+    "delta": -1,
+    "created_at": "2026-05-02T15:00:33.316528+00:00"
+  },
+  {
+    "producto_id": "b88b83e2-356a-486a-9fca-c4c7f5fbf8c4",
+    "delta": -1,
+    "created_at": "2026-05-02T15:34:03.163345+00:00"
+  },
+  {
+    "producto_id": "95ebe0a5-45b9-4e87-94e0-b23b604d95af",
+    "delta": -1,
+    "created_at": "2026-05-02T15:38:30.180215+00:00"
+  },
+  {
+    "producto_id": "eba0a85d-0e98-4b23-a0a9-ae27ec1c49cb",
+    "delta": 1,
+    "created_at": "2026-05-02T16:06:46.450807+00:00"
+  },
+  {
+    "producto_id": "eba0a85d-0e98-4b23-a0a9-ae27ec1c49cb",
+    "delta": 0,
+    "created_at": "2026-05-02T16:06:47.855756+00:00"
+  },
+  {
+    "producto_id": "568e94ca-ce22-4ccc-afca-a14880dc2ffd",
+    "delta": -1,
+    "created_at": "2026-05-02T16:23:48.586052+00:00"
+  },
+  {
+    "producto_id": "1f296974-9a3a-4138-9c55-22b230533581",
+    "delta": -1,
+    "created_at": "2026-05-02T16:35:42.674283+00:00"
+  },
+  {
+    "producto_id": "c32d1fee-c52d-4189-b115-ddf1b9782cb4",
+    "delta": -1,
+    "created_at": "2026-05-02T16:35:43.127631+00:00"
+  },
+  {
+    "producto_id": "bc634912-770e-4d7d-a71a-9c49ee54db15",
+    "delta": -1,
+    "created_at": "2026-05-02T16:35:43.495203+00:00"
+  },
+  {
+    "producto_id": "5d08c44c-f2da-4969-a99f-6e1fd660c5ff",
+    "delta": -1,
+    "created_at": "2026-05-02T16:36:03.545948+00:00"
+  },
+  {
+    "producto_id": "5f6db326-8dac-43f3-99df-8fcfeaea9c90",
+    "delta": -1,
+    "created_at": "2026-05-02T22:35:35.697145+00:00"
+  },
+  {
+    "producto_id": "82159b7a-00ad-4103-ac97-b36378287bf7",
+    "delta": 0,
+    "created_at": "2026-05-04T20:26:21.391601+00:00"
+  },
+  {
+    "producto_id": "82159b7a-00ad-4103-ac97-b36378287bf7",
+    "delta": -1,
+    "created_at": "2026-05-04T20:26:22.240809+00:00"
+  },
+  {
+    "producto_id": "59a800e8-b3a3-484d-8760-1f3708291b39",
+    "delta": -1,
+    "created_at": "2026-05-04T21:32:19.274955+00:00"
+  },
+  {
+    "producto_id": "0ca07f66-cd01-4b3e-adab-f4942682aded",
+    "delta": -1,
+    "created_at": "2026-05-04T22:13:59.6728+00:00"
+  },
+  {
+    "producto_id": "c9064678-5377-40a1-87bd-ce42698b5d8f",
+    "delta": -1,
+    "created_at": "2026-05-04T22:14:00.02921+00:00"
+  },
+  {
+    "producto_id": "b3413a26-ce10-4ebb-bf5b-2467914ff6d0",
+    "delta": 1,
+    "created_at": "2026-05-06T14:00:07.214666+00:00"
+  },
+  {
+    "producto_id": "c2503903-4eeb-433b-a718-2d82ad1162db",
+    "delta": 1,
+    "created_at": "2026-05-06T14:00:17.960539+00:00"
+  },
+  {
+    "producto_id": "a4092b15-bf4d-4376-bfd2-38fa52d8106c",
+    "delta": 1,
+    "created_at": "2026-05-06T14:00:26.779724+00:00"
+  },
+  {
+    "producto_id": "49b757ff-047a-4f56-bb98-88452ec7c450",
+    "delta": -1,
+    "created_at": "2026-05-06T14:06:10.981621+00:00"
+  },
+  {
+    "producto_id": "a7114078-bf44-47ce-a87a-774b5365e7c5",
+    "delta": -1,
+    "created_at": "2026-05-06T14:36:18.385816+00:00"
+  },
+  {
+    "producto_id": "4fd0867e-af0a-47de-8a53-28c6b46d23b8",
+    "delta": -1,
+    "created_at": "2026-05-06T15:56:57.562011+00:00"
+  },
+  {
+    "producto_id": "cfe5d056-35e9-47aa-8662-cb6a66aa8b6c",
+    "delta": -1,
+    "created_at": "2026-05-06T15:56:57.94963+00:00"
+  },
+  {
+    "producto_id": "630ddd1f-853a-4615-adb1-db54b4e5229e",
+    "delta": -1,
+    "created_at": "2026-05-06T15:56:58.302512+00:00"
+  },
+  {
+    "producto_id": "f7365845-f654-4ee5-9c2a-9686e1ddb8e2",
+    "delta": -1,
+    "created_at": "2026-05-06T22:34:00.273809+00:00"
+  }
+]

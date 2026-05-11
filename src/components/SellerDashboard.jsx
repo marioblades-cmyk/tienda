@@ -287,9 +287,51 @@ export default function SellerDashboard({ isAdmin }) {
                     }
 
                     const isRed = (cell) => {
-                        const checkColor = (c) => c && typeof c === 'string' && (c.includes('FF0000') || c.includes('C00000'));
-                        return (cell.font?.color?.argb && checkColor(cell.font.color.argb.toUpperCase())) ||
-                               (cell.fill?.fgColor?.argb && checkColor(cell.fill.fgColor.argb.toUpperCase()));
+                        const checkColor = (colorObj) => {
+                            if (!colorObj) return false;
+                            
+                            // 1. Check ARGB (Detección por rango cromático)
+                            if (colorObj.argb) {
+                                const argb = String(colorObj.argb).toUpperCase();
+                                // Un color es "rojo" si el canal R es dominante (R > 120) 
+                                // y los canales G y B son bajos (G < 100, B < 100)
+                                const r = parseInt(argb.substring(2, 4), 16);
+                                const g = parseInt(argb.substring(4, 6), 16);
+                                const b = parseInt(argb.substring(6, 8), 16);
+                                
+                                if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+                                    if (r > 120 && g < 100 && b < 100) return true;
+                                }
+                                
+                                // Hardcoded fallbacks para rojos comunes
+                                const commonReds = ['FF0000', 'C00000', 'FF3333', 'FE0000', 'E00000'];
+                                if (commonReds.some(red => argb.includes(red))) return true;
+                            }
+                            
+                            // 2. Check Theme (IDs 3 y 5 suelen ser acentos rojos en temas estándar)
+                            if (colorObj.theme !== undefined && (colorObj.theme === 3 || colorObj.theme === 5)) return true;
+
+                            // 3. Check Indexed (2 es el estándar para rojo en Excel antiguo)
+                            if (colorObj.indexed === 2) return true;
+
+                            return false;
+                        };
+
+                        // Escaneo de propiedades de la celda:
+                        
+                        // A. Color de fuente directo
+                        if (cell.font?.color && checkColor(cell.font.color)) return true;
+
+                        // B. Rich Text (Formatos mixtos dentro de la misma celda)
+                        if (cell.value && cell.value.richText) {
+                            if (cell.value.richText.some(rt => rt.font?.color && checkColor(rt.font.color))) return true;
+                        }
+
+                        // C. Color de fondo (Fill)
+                        if (cell.fill?.fgColor && checkColor(cell.fill.fgColor)) return true;
+                        if (cell.fill?.bgColor && checkColor(cell.fill.bgColor)) return true;
+
+                        return false;
                     };
 
                     if (matchedQty !== undefined && !filledProducts.has(productKey)) {

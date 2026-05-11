@@ -4,8 +4,7 @@ import { catalogService } from '../services/catalogService';
 import {
     Package, CheckCircle2, AlertCircle, Search,
     ChevronRight, ChevronDown, Save, Loader2,
-    Users, Info, Truck, ShieldAlert, Trash2,
-    ClipboardList, Printer
+    Users, Info, Truck, ShieldAlert, Trash2
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -24,7 +23,6 @@ export default function ReceptionManagement() {
     const [searchTerm, setSearchTerm] = useState('');
     const [vendorFilter, setVendorFilter] = useState('');
     const [hideComplete, setHideComplete] = useState(false);
-    const [showTiendaNames, setShowTiendaNames] = useState(false);
     const [skipStockUpdate, setSkipStockUpdate] = useState(false);
     const [clientItems, setClientItems] = useState([]);
     const [showVerify, setShowVerify] = useState(false);
@@ -35,8 +33,6 @@ export default function ReceptionManagement() {
     const [diagLoading, setDiagLoading] = useState(false);
     const [diagCatalogCount, setDiagCatalogCount] = useState(null);
     const [vendedoresList, setVendedoresList] = useState([]);
-    const [showSeparated, setShowSeparated] = useState(false);
-    const [separatedData, setSeparatedData] = useState({ tienda: [], clientes: {} });
     const { isAdmin, isSocio } = useAuth();
 
     useEffect(() => {
@@ -71,13 +67,15 @@ export default function ReceptionManagement() {
             // Obtener nombre de la semana para buscar por estado (CONFIRMADO {semana})
             const semanaName = semanas.find(s => s.id === semanaId)?.nombre || '';
 
-            // 1. Obtener la data inicial (Master, Pedidos Directos, Recepción Actual, Items hard-linked)
-            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, vendRes] = await Promise.all([
+            // Todas las queries en paralelo
+            const [masterRes, ordersRes, receptionRes, cItemsByIdRes, cItemsConfirmadosRes, vendRes] = await Promise.all([
                 supabase.from('master_confirmaciones').select('*').eq('semana_id', semanaId).maybeSingle(),
                 supabase.from('pedido_items').select('*, pedido:pedidos!inner(vendedor_nombre, tipo)').eq('pedido.semana_id', semanaId),
                 supabase.from('pedido_items_recepcion').select('*').eq('semana_id', semanaId),
-                // Por semana_id (items ya asignados a esta semana)
-                supabase.from('cliente_items').select('*, clientes(nombre)').eq('semana_id', semanaId),
+                // Por semana_id (items ADJUDICADO asignados a esta semana)
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
+                // Todos los CONFIRMADO (filtramos por semana en JS para evitar problemas de acentos en ILIKE)
+                supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', 'CONFIRMADO%'),
                 supabase.from('vendedores').select('id, nombre'),
             ]);
             const master = masterRes.data;
@@ -86,83 +84,17 @@ export default function ReceptionManagement() {
             const vList = vendRes.data || [];
             setVendedoresList(vList);
 
-            // 2. Fetch garantizado de TODO lo pendiente (Fuerza Bruta Paginada)
-            // Para asegurar que ningún pedido se pierda por espacios invisibles, acentos o límites de Supabase,
-            // descargamos todos los items pendientes en bloques y usamos JavaScript puro para emparejar.
-            let allPendingItems = [];
-            let from = 0;
-            let to = 999;
-            while(true) {
-                const { data, error } = await supabase.from('cliente_items')
-                    .select('*, clientes(nombre)')
-                    .neq('estado', 'ENTREGADO')
-                    .neq('estado', 'EN TIENDA')
-                    .neq('estado', 'DAÑADO')
-                    .range(from, to);
-                
-                if (error || !data || data.length === 0) break;
-                allPendingItems.push(...data);
-                if (data.length < 1000) break;
-                from += 1000;
-                to += 1000;
-            }
-
-            // 3. Filtrado inteligente en JS (normalizando para ignorar acentos y mayúsculas)
-            const weekSearchKey = normalizeTitle(semanaName);
-            const masterTitlesNormalized = new Set((master?.datos_json || []).map(it => normalizeTitle(it.titulo)).filter(Boolean));
-
-            console.log("=== DIAGNOSTICO DE RECEPCION ===");
-            console.log(`Buscando ${allPendingItems.length} items pendientes...`);
-
-            const matchedByStatus = allPendingItems.filter(ci => {
-                // 0. REGLA DE ORO: Si ya está asignado explícitamente a OTRA semana en la base de datos, NO lo tocamos.
-                if (ci.semana_id && ci.semana_id !== semanaId) return false;
-
-                const normEstado = normalizeTitle(ci.estado);
-                const normTitle = normalizeTitle(ci.titulo);
-                
-                // Diagnostic logging for JOJOLION 07
-                if (normTitle.includes('jojolion07')) {
-                    console.log(`[DEBUG] Encontrado Jojolion 07 en pendientes!`);
-                    console.log(`- Titulo Original: "${ci.titulo}"`);
-                    console.log(`- Estado Original: "${ci.estado}"`);
-                    console.log(`- Norm Estado: "${normEstado}"`);
-                    console.log(`- Esta en Master?: ${masterTitlesNormalized.has(normTitle)}`);
-                }
-
-                // 1. Si el estado contiene explícitamente la semana actual
-                if (semanaName && normEstado.includes(weekSearchKey)) return true;
-                
-                // 2. Si es un PEDIDO nuevo (no asignado a nadie), es libre para que lo tomemos
-                if (normEstado === 'pedido') {
-                    if (masterTitlesNormalized.has(normTitle)) return true;
-                }
-                
-                // 3. Si es ADJUDICADO o CONFIRMADO
-                if (normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
-                    // CUIDADO: Si tiene el nombre de otra semana, NO lo robamos.
-                    // Identificadores comunes de que está asignado a un Excel específico:
-                    const isAssignedToOtherWeek = normEstado.includes('semana') || 
-                                                  normEstado.includes('distribucion') || 
-                                                  normEstado.includes('entelequia') || 
-                                                  normEstado.includes('ivrea') || 
-                                                  normEstado.includes('panini');
-                    
-                    if (isAssignedToOtherWeek) return false;
-                    
-                    // Si es genérico, lo tomamos
-                    if (masterTitlesNormalized.has(normTitle)) return true;
-                }
-                
-                return false;
+            // Filtrar CONFIRMADO por semana en JS (maneja acentos correctamente)
+            const semanaNameLower = semanaName.toLowerCase();
+            const confirmadosDeSemana = (cItemsConfirmadosRes.data || []).filter(ci => {
+                if (!semanaName) return false;
+                const suffix = ci.estado.slice('CONFIRMADO '.length).trim().toLowerCase();
+                return suffix === semanaNameLower || suffix.startsWith(semanaNameLower);
             });
-            
-            console.log(`Items emparejados por estado/titulo: ${matchedByStatus.length}`);
-            console.log("================================");
 
-            // Combinar y deduplicar clientItems (semana_id + match por título)
+            // Combinar y deduplicar clientItems (semana_id + CONFIRMADO de esta semana)
             const seenIds = new Set();
-            const cItems = [...(cItemsByIdRes.data || []), ...matchedByStatus].filter(ci => {
+            const cItems = [...(cItemsByIdRes.data || []), ...confirmadosDeSemana].filter(ci => {
                 if (seenIds.has(ci.id)) return false;
                 seenIds.add(ci.id);
                 return true;
@@ -183,7 +115,7 @@ export default function ReceptionManagement() {
                 for (const ci of cItems) {
                     const key = normalizeTitle(ci.titulo);
                     const received = receptionMap[key] || 0;
-                    if (received > 0 && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO') || ci.estado === 'PEDIDO')) {
+                    if (received > 0 && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO'))) {
                         const already = healCount[key] || 0;
                         if (already < received) {
                             toHeal.push(ci.id);
@@ -193,63 +125,16 @@ export default function ReceptionManagement() {
                 }
                 if (toHeal.length > 0) {
                     console.log(`🔧 Auto-heal: marcando ${toHeal.length} cliente_items como EN TIENDA. IDs: ${toHeal.join(', ')}`); // FIX BUG #6: logging
-                    for (const id of toHeal) {
-                        const it = cItems.find(c => c.id === id);
-                        const tag = `[ENTIENDA_AT:${new Date().toISOString()}]`;
-                        const finalNota = it?.nota ? `${it.nota} ${tag}` : tag;
-                        await supabase.from('cliente_items').update({ estado: 'EN TIENDA', nota: finalNota }).eq('id', id);
-                    }
-                    // Re-fetch cItems frescos después del heal (usando la nueva lógica)
-                    const healedByIdRes = await supabase.from('cliente_items').select('*, clientes(nombre)').eq('semana_id', semanaId);
-                    
-                    let allHealedPendingItems = [];
-                    let hFrom = 0;
-                    let hTo = 999;
-                    while(true) {
-                        const { data, error } = await supabase.from('cliente_items')
-                            .select('*, clientes(nombre)')
-                            .neq('estado', 'ENTREGADO')
-                            .neq('estado', 'EN TIENDA')
-                            .neq('estado', 'DAÑADO')
-                            .range(hFrom, hTo);
-                        
-                        if (error || !data || data.length === 0) break;
-                        allHealedPendingItems.push(...data);
-                        if (data.length < 1000) break;
-                        hFrom += 1000;
-                        hTo += 1000;
-                    }
-                    
-                    const healedMatchedByStatus = allHealedPendingItems.filter(ci => {
-                        // 0. REGLA DE ORO: Si ya está asignado explícitamente a OTRA semana en la base de datos, NO lo tocamos.
-                        if (ci.semana_id && ci.semana_id !== semanaId) return false;
-
-                        const normEstado = normalizeTitle(ci.estado);
-                        // 1. Si el estado contiene explícitamente la semana actual
-                        if (semanaName && normEstado.includes(weekSearchKey)) return true;
-                        
-                        // 2. Si es un PEDIDO nuevo
-                        if (normEstado === 'pedido') {
-                            if (masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
-                        }
-                        
-                        // 3. Si es ADJUDICADO o CONFIRMADO
-                        if (normEstado.includes('adjudicado') || normEstado.includes('confirmado')) {
-                            const isAssignedToOtherWeek = normEstado.includes('semana') || 
-                                                          normEstado.includes('distribucion') || 
-                                                          normEstado.includes('entelequia') || 
-                                                          normEstado.includes('ivrea') || 
-                                                          normEstado.includes('panini');
-                            
-                            if (isAssignedToOtherWeek) return false;
-                            
-                            if (masterTitlesNormalized.has(normalizeTitle(ci.titulo))) return true;
-                        }
-                        return false;
-                    });
-                    
+                    await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', toHeal);
+                    // Re-fetch cItems frescos después del heal
+                    const [healed1, healed2] = await Promise.all([
+                        supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').eq('semana_id', semanaId),
+                        semanaName
+                            ? supabase.from('cliente_items').select('*, clientes(nombre, vendedor_id)').ilike('estado', `CONFIRMADO ${semanaName}%`)
+                            : Promise.resolve({ data: [] }),
+                    ]);
                     const seenIds2 = new Set();
-                    const cItemsHealed = [...(healedByIdRes.data || []), ...healedMatchedByStatus].filter(ci => {
+                    const cItemsHealed = [...(healed1.data || []), ...(healed2.data || [])].filter(ci => {
                         if (seenIds2.has(ci.id)) return false;
                         seenIds2.add(ci.id);
                         return true;
@@ -271,73 +156,31 @@ export default function ReceptionManagement() {
                 setAlreadyReceived({});
             }
 
-            // Build breakdown agrupado y deduplicado (Lógica Math.max)
+            // Build breakdown
             const breakdown = {};
-            
-            // Recolectar la demanda por vendedor
-            const vendorDemand = {}; // { [key]: { [vendedor]: { pedido: 0, cliente: 0 } } }
-            
-            // 1. Demandas de Pedidos Directos (Mayorista)
+            // 1. Semanas / Pedidos directos
             (orders || []).forEach(item => {
                 const key = normalizeTitle(item.titulo);
-                if (!vendorDemand[key]) vendorDemand[key] = {};
-                
-                if (item.pedido.tipo !== 'tienda') {
-                    const vendName = item.pedido.vendedor_nombre;
-                    if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { pedido: 0, cliente: 0 };
-                    vendorDemand[key][vendName].pedido += item.cantidad;
-                }
+                if (!breakdown[key]) breakdown[key] = [];
+                breakdown[key].push({
+                    vendedor: item.pedido.vendedor_nombre,
+                    cantidad: item.cantidad,
+                    tipo: item.pedido.tipo
+                });
             });
-            
-            // 2. Demandas de Clientes (Manuales/Reservas)
+            // 2. Pedidos de Clientes (Manuales/Reservas)
             cItems.forEach(ci => {
                 const key = normalizeTitle(ci.titulo);
-                if (!vendorDemand[key]) vendorDemand[key] = {};
+                if (!breakdown[key]) breakdown[key] = [];
                 
-                const vendName = vList.find(v => v.id === ci.vendedor_id)?.nombre || 'Desconocido';
-                if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { pedido: 0, cliente: 0 };
-                vendorDemand[key][vendName].cliente += 1;
-            });
-            
-            // 3. Consolidar el breakdown usando Math.max y asignar sobrantes a la Tienda
-            const confirmedMap = {};
-            (master?.datos_json || []).forEach(it => {
-                confirmedMap[normalizeTitle(it.titulo)] = it.cantidad || 0;
-            });
-
-            // Iterar sobre todos los títulos que tienen demanda o están en el master
-            const allKeys = new Set([...Object.keys(vendorDemand), ...Object.keys(confirmedMap)]);
-            
-            allKeys.forEach(key => {
-                breakdown[key] = [];
-                const confirmedQty = confirmedMap[key] || 0;
-                let usedByVendors = 0;
+                // Buscar nombre del vendedor
+                const vendName = vList.find(v => v.id === ci.clientes?.vendedor_id)?.nombre || 'Desconocido';
                 
-                // Asignar a vendedores usando la regla del Math.max
-                if (vendorDemand[key]) {
-                    Object.entries(vendorDemand[key]).forEach(([vendName, demands]) => {
-                        // El vendedor necesita el máximo entre lo que pidió en el Excel y lo que le pidieron sus clientes
-                        const trueDemand = Math.max(demands.pedido, demands.cliente);
-                        if (trueDemand > 0) {
-                            breakdown[key].push({
-                                vendedor: vendName,
-                                cantidad: trueDemand,
-                                tipo: 'vendedor' // generic seller type
-                            });
-                            usedByVendors += trueDemand;
-                        }
-                    });
-                }
-                
-                // Lo que sobra del camión va para la tienda (Stock Libre)
-                const leftover = Math.max(0, confirmedQty - usedByVendors);
-                if (leftover > 0) {
-                    breakdown[key].push({
-                        vendedor: 'Tienda',
-                        cantidad: leftover,
-                        tipo: 'tienda'
-                    });
-                }
+                breakdown[key].push({
+                    vendedor: vendName,
+                    cantidad: 1, // Cada registro en cliente_items es una unidad
+                    tipo: 'cliente'
+                });
             });
 
             setOrderBreakdown(breakdown);
@@ -362,64 +205,6 @@ export default function ReceptionManagement() {
         });
         return Array.from(vendors).sort();
     }, [orderBreakdown]);
-
-    const dashboardStats = useMemo(() => {
-        if (!selectedSemana || masterItems.length === 0) return null;
-        
-        const stats = {
-            tienda: 0,
-            clientes: 0,
-            total: 0,
-            porVendedor: {}
-        };
-
-        // Creamos un mapa de cantidades confirmadas por título para matching rápido
-        const confirmedMap = {};
-        masterItems.forEach(it => {
-            const key = normalizeTitle(it.titulo);
-            confirmedMap[key] = it.cantidad || 0;
-        });
-
-        Object.entries(orderBreakdown).forEach(([key, arr]) => {
-            const confirmedQty = confirmedMap[key] || 0;
-            if (confirmedQty <= 0) return; // Si no está confirmado en el Master, no cuenta para el dashboard
-
-            // Calculamos cuánto de lo confirmado le toca a cada uno en este ítem
-            let remaining = confirmedQty;
-            
-            // PRIORIDAD 1: Clientes / Vendedores (Incluso si el Excel decía Tienda)
-            const vendorOrders = arr.filter(b => b.tipo !== 'tienda');
-            vendorOrders.forEach(b => {
-                const take = Math.min(remaining, b.cantidad);
-                if (take > 0) {
-                    const vName = b.vendedor || 'Socio';
-                    stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + take;
-                    stats.clientes += take;
-                    stats.total += take;
-                    remaining -= take;
-                }
-            });
-
-            // PRIORIDAD 2: Tienda (Solo lo que sobre)
-            const tiendaOrders = arr.filter(b => b.tipo === 'tienda');
-            tiendaOrders.forEach(b => {
-                const take = Math.min(remaining, b.cantidad);
-                if (take > 0) {
-                    stats.tienda += take;
-                    stats.total += take;
-                    remaining -= take;
-                }
-            });
-
-            // Si sobran unidades que no estaban en ningún pedido pero sí en el Master
-            if (remaining > 0) {
-                stats.tienda += remaining;
-                stats.total += remaining;
-            }
-        });
-
-        return stats;
-    }, [orderBreakdown, selectedSemana, masterItems]);
 
     const filteredItems = useMemo(() => {
         let result = masterItems;
@@ -591,60 +376,40 @@ export default function ReceptionManagement() {
         const idToKey = {};
         allProds.forEach(p => { idToKey[p.id] = normalizeTitle(p.titulo); });
 
-        const allPreAllocatedItems = [];
+        const allPreAllocatedIds = [];
         const stockDeltas = {};
-        const stockDeltasDetails = {};
         const missingFromCatalog = [];
 
         for (const item of itemsToSave) {
             const key = normalizeTitle(item.titulo);
             const qtyRec = item.cantidad_recibida;
-            const bd = orderBreakdown[key] || [];
 
-            // Construir el string de destinos para el Kardex
-            let destInfo = [];
-            bd.forEach(b => {
-                if (b.cantidad > 0) destInfo.push(`${b.vendedor}: ${b.cantidad}`);
-            });
-            const destText = destInfo.length > 0 ? ` [Destinos: ${destInfo.join(', ')}]` : '';
+            const breakdown = orderBreakdown[key] || [];
+            const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
+            const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
 
-            // Suma total de demanda de vendedores (incluye clientes finales + stock propio del vendedor)
-            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + b.cantidad, 0);
-
-            // Buscamos cuántos clientes están esperando este título (independientemente de quién los pidió)
-            const pendingForTitle = clientItems.filter(ci => {
-                if (normalizeTitle(ci.titulo) !== key) return false;
-                const normEstado = normalizeTitle(ci.estado);
-                return normEstado.includes('adjudicado') || 
-                       normEstado.includes('confirmado') || 
-                       normEstado === 'pedido';
-            });
-
-            // PRIORIDAD 1: Clientes. Ellos "toman" primero de lo que llegó (solo para actualizar estado EN TIENDA).
-            const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
-            const preAllocated = pendingForTitle.slice(0, clientSliceLimit);
-            allPreAllocatedItems.push(...preAllocated);
-
-            // PRIORIDAD 2: Tienda. Se queda con lo que sobre después de cubrir a clientes Y vendedores.
-            let calcForStore = Math.max(0, qtyRec - sellerTotal);
+            let calcForStore = Math.min(tiendaOrdered, qtyRec);
+            if (calcForStore < 0) calcForStore = 0;
+            const availableForClients = Math.max(0, qtyRec - calcForStore);
+            const clientSliceLimit = Math.min(availableForClients, totalVendorOrdered);
+            
+            const preAllocated = clientItems
+                .filter(ci => normalizeTitle(ci.titulo) === key && (ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')))
+                .slice(0, clientSliceLimit);
+            allPreAllocatedIds.push(...preAllocated.map(p => p.id));
 
             if (calcForStore > 0) {
                 const prod = prodMap[key];
                 if (prod) {
                     stockDeltas[prod.id] = (stockDeltas[prod.id] || 0) + calcForStore;
-                    stockDeltasDetails[prod.id] = destText;
                 } else {
                     missingFromCatalog.push(item.titulo);
                 }
             }
         }
 
-        if (allPreAllocatedItems.length > 0) {
-            for (const it of allPreAllocatedItems) {
-                const tag = `[ENTIENDA_AT:${new Date().toISOString()}]`;
-                const finalNota = it.nota ? `${it.nota} ${tag}` : tag;
-                await supabase.from('cliente_items').update({ estado: 'EN TIENDA', nota: finalNota }).eq('id', it.id);
-            }
+        if (allPreAllocatedIds.length > 0) {
+            await supabase.from('cliente_items').update({ estado: 'EN TIENDA' }).in('id', allPreAllocatedIds);
         }
 
         const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
@@ -653,16 +418,8 @@ export default function ReceptionManagement() {
         }));
 
         if (stockRows.length > 0) {
-            // Usamos updates individuales para evitar errores con columnas NOT NULL (como product_id) que upsert requiere
-            const updatePromises = stockRows.map(row => 
-                supabase.from('catalogo_productos')
-                    .update({ stock_fisico: row.stock_fisico, updated_at: new Date().toISOString() })
-                    .eq('id', row.id)
-            );
-            
-            const results = await Promise.all(updatePromises);
-            const firstError = results.find(r => r.error)?.error;
-            if (firstError) throw new Error('Error al actualizar stock: ' + firstError.message);
+            const { error: upsertErr } = await supabase.from('catalogo_productos').upsert(stockRows, { onConflict: 'id' });
+            if (upsertErr) throw new Error('Error al actualizar stock: ' + upsertErr.message);
             
             catalogService.patchStockInCache(Object.entries(stockDeltas).map(([id, delta]) => ({ id, delta })));
 
@@ -675,11 +432,10 @@ export default function ReceptionManagement() {
 
             const semanaName = semanas.find(s => s.id === selectedSemana)?.nombre || '';
             for (const row of stockRows) {
-                const extraDetail = stockDeltasDetails[row.id] || '';
                 await catalogService.logStockMovement({
                     productoId: row.id, titulo: prodMap[idToKey[row.id]]?.titulo || '',
                     delta: stockDeltas[row.id], stockDespues: row.stock_fisico,
-                    motivo: 'RECEPCIÓN', detalle: `${semanaName}${extraDetail}`,
+                    motivo: 'RECEPCIÓN', detalle: semanaName,
                 });
             }
         }
@@ -914,73 +670,6 @@ export default function ReceptionManagement() {
         }
     };
 
-    const handleGenerateSeparatedOrder = () => {
-        console.log('handleGenerateSeparatedOrder called');
-        const tiendaItems = [];
-        const clientGroups = {};
-
-        // 1. Identificar títulos con recepción hoy
-        const activeTitles = Object.entries(receivedCounts)
-            .filter(([_, qty]) => parseInt(qty) > 0);
-
-        console.log('Active titles:', activeTitles);
-
-        if (activeTitles.length === 0) {
-            alert("⚠️ No hay cantidades ingresadas. Ingresa al menos una unidad en la columna 'LLEGARON (HOY)' antes de ver el pedido separado.");
-            return;
-        }
-
-        activeTitles.forEach(([titleKey, qtyStr]) => {
-            const qtyRec = parseInt(qtyStr);
-            const key = normalizeTitle(titleKey);
-            const originalItem = masterItems.find(it => normalizeTitle(it.titulo) === key);
-            const titleLabel = originalItem?.titulo || titleKey.toUpperCase();
-
-            // Lógica idéntica a performReceptionUpdates
-            const bd = orderBreakdown[key] || [];
-            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + (b.cantidad || 0), 0);
-            
-            const pendingForTitle = clientItems.filter(ci => {
-                if (normalizeTitle(ci.titulo) !== key) return false;
-                const normEstado = normalizeTitle(ci.estado);
-                return normEstado.includes('adjudicado') || normEstado.includes('confirmado') || normEstado === 'pedido';
-            });
-
-            // PRIORIDAD 1: Clientes (Reservas manuales)
-            const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
-            const preAllocated = pendingForTitle.slice(0, clientSliceLimit);
-
-            preAllocated.forEach(ci => {
-                const vendedor = vendedoresList.find(v => v.id === ci.vendedor_id);
-                const vendorName = vendedor ? `VENDEDOR: ${vendedor.nombre.toUpperCase()}` : 'VENDEDOR: DESCONOCIDO';
-
-                if (!clientGroups[vendorName]) clientGroups[vendorName] = {};
-                clientGroups[vendorName][titleLabel] = (clientGroups[vendorName][titleLabel] || 0) + 1;
-            });
-
-            // PRIORIDAD 2: Tienda (Sobrantes o Pedidos de Tienda)
-            const calcForStore = Math.max(0, qtyRec - sellerTotal);
-            if (calcForStore > 0) {
-                tiendaItems.push({ titulo: titleLabel, cantidad: calcForStore });
-            }
-        });
-
-        // Convertir grupos de clientes a array ordenado alfabéticamente
-        const sortedClients = Object.entries(clientGroups)
-            .map(([name, items]) => ({
-                name,
-                items: Object.entries(items).map(([t, c]) => ({ titulo: t, cantidad: c })),
-                totalItems: Object.values(items).reduce((a, b) => a + b, 0)
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name, 'es'));
-
-        setSeparatedData({
-            tienda: tiendaItems,
-            clientes: sortedClients
-        });
-        setShowSeparated(true);
-    };
-
     if (!semanas.length && !loading) return <div className="p-8 text-center text-muted">Cargando semanas...</div>;
 
     return (
@@ -1119,16 +808,6 @@ export default function ReceptionManagement() {
                                     <span className="text-sm font-bold text-navy select-none">Ocultar completos</span>
                                 </label>
 
-                                <label className="flex items-center gap-3 bg-white border border-border/40 px-5 py-4 rounded-2xl cursor-pointer hover:border-secondary/50 transition-colors">
-                                    <input
-                                        type="checkbox"
-                                        checked={showTiendaNames}
-                                        onChange={(e) => setShowTiendaNames(e.target.checked)}
-                                        className="accent-secondary w-5 h-5 rounded"
-                                    />
-                                    <span className="text-sm font-bold text-navy select-none">Ver solicitantes tienda</span>
-                                </label>
-
                                 <button
                                     onClick={handleDiagnostico}
                                     disabled={diagLoading}
@@ -1137,15 +816,6 @@ export default function ReceptionManagement() {
                                 >
                                     <Search size={18} />
                                     {diagLoading ? 'Cargando...' : 'Diagnosticar'}
-                                </button>
-                                <button
-                                    onClick={handleGenerateSeparatedOrder}
-                                    disabled={Object.keys(receivedCounts).length === 0}
-                                    className="flex items-center gap-2 bg-navy text-white px-5 py-4 rounded-2xl text-sm font-bold hover:bg-navy/90 transition-all shadow-md whitespace-nowrap"
-                                    title="Ver lista separada para tienda y clientes"
-                                >
-                                    <ClipboardList size={18} />
-                                    Ver Pedido Separado
                                 </button>
                                 {Object.keys(alreadyReceived).length > 0 && (
                                     <button
@@ -1159,46 +829,6 @@ export default function ReceptionManagement() {
                                     </button>
                                 )}
                             </div>
-
-                            {/* Dashboard Stats */}
-                            {dashboardStats && (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 border-2 border-green-500/30 p-2 rounded-3xl bg-green-50/50 mb-6">
-                                    <div className="bg-navy text-white p-4 rounded-2xl shadow-lg relative overflow-hidden group">
-                                        <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-110 transition-transform">
-                                            <Package size={48} />
-                                        </div>
-                                        <div className="relative">
-                                            <div className="text-[10px] font-black uppercase tracking-widest opacity-60">Total Esperado</div>
-                                            <div className="text-3xl font-black">{dashboardStats.total}</div>
-                                            <div className="text-[10px] font-bold mt-1 opacity-80 uppercase tracking-tighter">Mangas en despacho</div>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-white border border-navy/10 p-4 rounded-2xl shadow-sm relative overflow-hidden group">
-                                        <div className="absolute top-0 right-0 p-2 text-navy opacity-5 group-hover:scale-110 transition-transform">
-                                            <Truck size={48} />
-                                        </div>
-                                        <div className="relative">
-                                            <div className="text-[10px] font-black text-navy/40 uppercase tracking-widest">Tienda (Físico)</div>
-                                            <div className="text-3xl font-black text-navy">{dashboardStats.tienda}</div>
-                                            <div className="text-[10px] font-bold text-navy/60 mt-1 uppercase tracking-tighter">Para stock libre</div>
-                                        </div>
-                                    </div>
-
-                                    {Object.entries(dashboardStats.porVendedor).sort((a, b) => b[1] - a[1]).map(([vName, qty]) => (
-                                        <div key={vName} className="bg-white border border-border/40 p-4 rounded-2xl shadow-sm relative overflow-hidden group">
-                                            <div className="absolute top-0 right-0 p-2 text-secondary opacity-5 group-hover:scale-110 transition-transform">
-                                                <Users size={40} />
-                                            </div>
-                                            <div className="relative">
-                                                <div className="text-[10px] font-black text-muted uppercase tracking-widest truncate pr-6">{vName}</div>
-                                                <div className="text-3xl font-black text-secondary">{qty}</div>
-                                                <div className="text-[10px] font-bold text-secondary/60 mt-1 uppercase tracking-tighter">Para clientes</div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
 
                             {/* Items Table */}
                             <div className="glass rounded-2xl overflow-hidden border border-border/40">
@@ -1258,26 +888,20 @@ export default function ReceptionManagement() {
                                                             <div className="flex flex-wrap gap-1">
                                                                 {breakdown.map((b, bIdx) => (
                                                                     <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                        {b.tipo === 'tienda' 
-                                                                            ? `TIENDA: ${b.cantidad}`
-                                                                            : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
-                                                                        }
+                                                                        {b.tipo === 'tienda' ? '🏢' : '👤'} {b.vendedor}: {b.cantidad}
                                                                     </span>
                                                                 ))}
                                                             </div>
                                                             {(() => {
                                                                 const forTitle = clientItems.filter(ci => normalizeTitle(ci.titulo) === key);
-                                                                const pending = forTitle.filter(ci => {
-                                                                    const normEstado = normalizeTitle(ci.estado);
-                                                                    return normEstado.includes('adjudicado') || normEstado.includes('confirmado') || normEstado === 'pedido';
-                                                                }).length;
+                                                                const pending = forTitle.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado.startsWith('CONFIRMADO')).length;
                                                                 const inStore = forTitle.filter(ci => ci.estado === 'EN TIENDA').length;
                                                                 const total = forTitle.length;
                                                                 return (
                                                                     <div className="mt-1 text-[9px] font-bold uppercase">
                                                                         {total === 0
                                                                             ? <span className="text-red-400 animate-pulse">⚠ 0 clientes cargados</span>
-                                                                            : <span className="text-secondary">{pending > 0 ? `${pending} clientes esperan` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} listos en tienda` : ''}</span>
+                                                                            : <span className="text-secondary">{pending > 0 ? `${pending} pendientes` : ''}{pending > 0 && inStore > 0 ? ' · ' : ''}{inStore > 0 ? `${inStore} en tienda` : ''}</span>
                                                                         }
                                                                     </div>
                                                                 );
@@ -1470,120 +1094,6 @@ export default function ReceptionManagement() {
                                 )}
                             </div>
                             <button onClick={() => setShowDiag(false)} className="bg-orange-500 text-white font-bold text-xs py-2 px-5 rounded-xl hover:bg-orange-600 transition-all">Cerrar</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal de Pedido Separado */}
-            {showSeparated && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm print:bg-white print:p-0">
-                    <style>{`
-                        @media print {
-                            body * { visibility: hidden; }
-                            #printable-order, #printable-order * { visibility: visible; }
-                            #printable-order {
-                                position: absolute;
-                                left: 0;
-                                top: 0;
-                                width: 100%;
-                                padding: 20px;
-                                background: white !important;
-                                color: black !important;
-                                font-family: sans-serif;
-                            }
-                            .no-print { display: none !important; }
-                            .print-break-inside-avoid { break-inside: avoid; }
-                        }
-                    `}</style>
-                    <div id="printable-order" className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col print:shadow-none print:max-h-none print:rounded-none">
-                        <div className="flex items-center justify-between p-6 border-b border-border/40 no-print">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-navy/10 text-navy rounded-lg">
-                                    <ClipboardList size={20} />
-                                </div>
-                                <h3 className="text-xl font-black uppercase tracking-tight">Pedido Separado</h3>
-                            </div>
-                            <button onClick={() => setShowSeparated(false)} className="text-muted hover:text-navy p-2 rounded-xl hover:bg-navy/5 transition-all">✕</button>
-                        </div>
-
-                        <div className="overflow-auto flex-1 p-8 space-y-8 print:overflow-visible">
-                            <div className="hidden print:block border-b-2 border-black pb-4 mb-6">
-                                <h1 className="text-2xl font-black uppercase">PEDIDO SEPARADO — {semanas.find(s => s.id === selectedSemana)?.nombre}</h1>
-                                <p className="text-sm font-bold opacity-70">Fecha de recepción: {new Date().toLocaleDateString()}</p>
-                            </div>
-
-                            {/* Sección Tienda */}
-                            {separatedData.tienda.length > 0 && (
-                                <div className="print-break-inside-avoid">
-                                    <div className="flex items-center gap-2 mb-4 border-l-4 border-navy pl-4">
-                                        <Truck className="text-navy no-print" size={20} />
-                                        <h4 className="text-lg font-black uppercase tracking-wide">🏪 SECCIÓN 1 — TIENDA (Stock Físico)</h4>
-                                    </div>
-                                    <div className="bg-navy/5 p-6 rounded-2xl border border-navy/10 space-y-2 print:bg-white print:border-black print:p-0">
-                                        {separatedData.tienda.map((it, i) => (
-                                            <div key={i} className="flex justify-between items-center border-b border-navy/5 pb-2 last:border-0 print:border-black/10">
-                                                <span className="font-bold text-navy print:text-black">{it.titulo}</span>
-                                                <span className="font-black bg-navy text-white px-3 py-1 rounded-lg text-sm print:bg-transparent print:text-black print:p-0">× {it.cantidad}</span>
-                                            </div>
-                                        ))}
-                                        <div className="pt-4 flex justify-end">
-                                            <span className="text-sm font-black uppercase text-navy/60 print:text-black">Total Tienda: <span className="text-xl text-navy print:text-black">{separatedData.tienda.reduce((a, b) => a + b.cantidad, 0)} unidades</span></span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Sección Clientes */}
-                            {separatedData.clientes.length > 0 && (
-                                <div className="space-y-6">
-                                    <div className="flex items-center gap-2 mb-4 border-l-4 border-secondary pl-4">
-                                        <Users className="text-secondary no-print" size={20} />
-                                        <h4 className="text-lg font-black uppercase tracking-wide">👥 SECCIÓN 2 — POR CLIENTE</h4>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:block">
-                                        {separatedData.clientes.map((client, i) => (
-                                            <div key={i} className="bg-white border border-border/60 p-5 rounded-2xl shadow-sm hover:border-secondary/30 transition-all print:border-black print:rounded-none print:shadow-none print:mb-4 print:break-inside-avoid">
-                                                <div className="flex justify-between items-start mb-3 border-b border-border/40 pb-2 print:border-black">
-                                                    <h5 className="font-black text-secondary uppercase text-sm print:text-black">{client.name}</h5>
-                                                    <span className="text-[10px] font-bold bg-secondary/10 text-secondary px-2 py-0.5 rounded-full print:border print:border-black print:text-black">
-                                                        {client.totalItems} items
-                                                    </span>
-                                                </div>
-                                                <ul className="space-y-1">
-                                                    {client.items.map((it, j) => (
-                                                        <li key={j} className="text-xs flex justify-between font-bold text-navy/80 print:text-black">
-                                                            <span>• {it.titulo}</span>
-                                                            <span className="font-black">× {it.cantidad}</span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-6 border-t border-border/40 flex justify-between items-center bg-surface/50 no-print rounded-b-3xl">
-                            <p className="text-xs text-muted font-bold">
-                                Total unidades recibidas hoy: <span className="text-navy font-black">{Object.values(receivedCounts).reduce((a, b) => a + (parseInt(b) || 0), 0)}</span>
-                            </p>
-                            <div className="flex gap-3">
-                                <button 
-                                    onClick={() => setShowSeparated(false)} 
-                                    className="px-6 py-2.5 rounded-xl text-sm font-bold text-muted hover:bg-border/20 transition-all"
-                                >
-                                    Cerrar
-                                </button>
-                                <button 
-                                    onClick={() => window.print()} 
-                                    className="flex items-center gap-2 bg-secondary text-white px-8 py-2.5 rounded-xl font-bold hover:bg-secondary/90 shadow-lg transition-all"
-                                >
-                                    <Printer size={18} />
-                                    Imprimir
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>

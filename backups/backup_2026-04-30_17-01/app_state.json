@@ -1,0 +1,974 @@
+[
+  {
+    "id": "distribuidor",
+    "data": {
+      "pagos": [
+        {
+          "tc": 0.0063,
+          "fecha": "2026-02-03",
+          "monto": 930000
+        },
+        {
+          "tc": 0.0064,
+          "fecha": "2026-02-09",
+          "monto": 700000
+        },
+        {
+          "tc": 0.0064,
+          "fecha": "2026-02-18",
+          "monto": 1000000
+        },
+        {
+          "tc": 0.0063,
+          "fecha": "2026-02-18",
+          "monto": 1300000
+        },
+        {
+          "tc": 0.00635,
+          "fecha": "2026-02-24",
+          "monto": 1000000
+        },
+        {
+          "tc": 0.0063,
+          "fecha": "2026-02-24",
+          "monto": 1180000
+        },
+        {
+          "tc": 0.00645,
+          "fecha": "2026-03-06",
+          "monto": 1000000
+        },
+        {
+          "tc": 0.0065,
+          "fecha": "",
+          "monto": 1220000
+        },
+        {
+          "tc": 0.0065,
+          "fecha": "2026-03-23",
+          "monto": 1000000
+        },
+        {
+          "tc": 0.00645,
+          "fecha": "2026-03-24",
+          "monto": 1000000
+        },
+        {
+          "tc": 0.0065,
+          "fecha": "2026-03-30",
+          "monto": 1550000
+        },
+        {
+          "tc": 0.00645,
+          "fecha": "2026-04-07",
+          "monto": 850190
+        },
+        {
+          "tc": 0.00655,
+          "fecha": "",
+          "monto": 1120000,
+          "metodo": "Banco Unión (QR/Transf)",
+          "caja_id": "54783baf-b218-440f-83a5-58139bc1cc6b"
+        },
+        {
+          "tc": 0.00665,
+          "fecha": "2026-04-22",
+          "monto": 1655000,
+          "metodo": "Banco Unión (QR/Transf)",
+          "caja_id": "dd9e4593-38ec-462c-ae12-785568890813"
+        },
+        {
+          "tc": 0.0067,
+          "fecha": "2026-04-28",
+          "monto": 1675000,
+          "metodo": "Banco Unión (QR/Transf)",
+          "caja_id": "cd88f8af-5650-453a-ae8f-7179b197fdfe"
+        }
+      ],
+      "ajustes": [],
+      "pedidos": [
+        {
+          "monto": 1268890,
+          "nombre": "7 COMIC M BOLIVIA 24-1"
+        },
+        {
+          "monto": 697920,
+          "nombre": "8 COMIC M BOLIVIA 31-1"
+        },
+        {
+          "monto": 2273915,
+          "nombre": "9 COMIC M BOLIVIA 7-2"
+        },
+        {
+          "monto": 2209620,
+          "nombre": "10 COMIC M BOLIVIA 14-2"
+        },
+        {
+          "monto": 484375,
+          "nombre": "11 COMIC M BOLIVIA 21-2"
+        },
+        {
+          "monto": 646594.35,
+          "nombre": "12 COMIC MANGA BOLIVIA 28-2 (ENTELEQUIA DISTRIBUCIÓN 12 27-2)"
+        },
+        {
+          "monto": 1086800,
+          "nombre": "13 COMIC M BOLIVIA 7-3 (ENTELEQUIA DISTRIBUCIÓN 13 6-3)"
+        },
+        {
+          "monto": 1988641.4,
+          "nombre": "14 COMIC M BOLIVIA 14/3 (ENTELEQUIA DISTRIBUCIÓN 14 13-3)"
+        },
+        {
+          "monto": 1548630,
+          "nombre": "15 COMIC M BOLIVIA 21/3 (ENTELEQUIA DISTRIBUCIÓN 15 20-3)"
+        },
+        {
+          "monto": 866110,
+          "nombre": "16 COMIC M BOLIVIA 16 28/3 (ENTELEQUIA DISTRIBUCIÓN 16 27-3)"
+        },
+        {
+          "monto": 1119415,
+          "nombre": "17 COMIC M BOLIVIA 4-4 (ENTELEQUIA DISTRIBUCIÓN 17 2-4)"
+        },
+        {
+          "monto": 1654895,
+          "nombre": "18 COMIC M BOLIVIA 11-4 (ENTELEQUIA DISTRIBUCIÓN 18 10-4)"
+        },
+        {
+          "monto": 1672240,
+          "nombre": "19 COMIC M BOLIVIA 18-4 (ENTELEQUIA DISTRIBUCIÓN 19 17-4)"
+        }
+      ],
+      "saldoInicial": {
+        "tipo": "favor",
+        "monto": 341310.17
+      }
+    }
+  },
+  {
+    "id": "alquiler",
+    "data": {
+      "meses": [
+        {
+          "ym": "2026-01",
+          "cargado": true,
+          "socioBS": 600,
+          "totalBS": 1850,
+          "tuParteBS": 1250
+        },
+        {
+          "ym": "2026-02",
+          "cargado": true,
+          "socioBS": 600,
+          "totalBS": 1850,
+          "tuParteBS": 1250
+        },
+        {
+          "ym": "2026-03",
+          "cargado": true,
+          "socioBS": 600,
+          "totalBS": 1850,
+          "tuParteBS": 1250
+        },
+        {
+          "ym": "2026-04",
+          "cargado": false,
+          "socioBS": 600,
+          "totalBS": 1850,
+          "tuParteBS": 1250,
+          "pagadoPorMi": false
+        }
+      ],
+      "config": {
+        "socioBS": 600,
+        "totalBS": 1850,
+        "mesInicio": "2026-01"
+      }
+    }
+  },
+  {
+    "id": "planes_socio",
+    "data": {
+      "nplan": 15,
+      "plans": [
+        {
+          "id": 6,
+          "fecha": "2026-03-09",
+          "items": [
+            {
+              "nro": "7 COMIC M BOLIVIA 24-1",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 1,
+              "amount": 58.608599999999996
+            },
+            {
+              "nro": "7 COMIC M BOLIVIA 24-1",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 1,
+              "amount": 28
+            },
+            {
+              "nro": "7 COMIC M BOLIVIA 24-1",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 1,
+              "amount": 1383.48
+            },
+            {
+              "nro": "8 COMIC M BOLIVIA 31-1",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 2,
+              "amount": 122.45563636363636
+            },
+            {
+              "nro": "8 COMIC M BOLIVIA 31-1",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 2,
+              "amount": 28
+            },
+            {
+              "nro": "8 COMIC M BOLIVIA 31-1",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 2,
+              "amount": 1529.5171222160134
+            },
+            {
+              "nro": "9 COMIC M BOLIVIA 7-2",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 3,
+              "amount": 1400.0845529230426
+            },
+            {
+              "nro": "10 COMIC M BOLIVIA 14-2",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 4,
+              "amount": 1544.3185209790372
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "Alquiler Mes: Ene 2026",
+              "remId": "extra-1773018528715-a13zw",
+              "amount": 600
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "envio 6",
+              "remId": "extra-1773078660274",
+              "amount": 98.29
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "MARITO VENDIO UN 20TH CENTURY",
+              "remId": "extra-1773078836977",
+              "amount": 187
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "MARITO VENDIO HELLSING 2",
+              "remId": "extra-1773078916218",
+              "amount": 187
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "deuda anterior",
+              "remId": "extra-1773078981540",
+              "amount": 61.5
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "MARITO VENDIO GANTZ 7",
+              "remId": "extra-1773079147478",
+              "amount": 132
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "MARIO VENDIO ABSOLUTE BATMAN",
+              "remId": "extra-1773081069474",
+              "amount": -240
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "MARIO VENDIO ABSOLUTE SUPER MAN",
+              "remId": "extra-1773081077117",
+              "amount": -220
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "MARIO VENDIO HUMAN TARGET",
+              "remId": "extra-1773081082748",
+              "amount": -300
+            }
+          ],
+          "pagos": [
+            {
+              "id": "pg-1773081756411-gwimw",
+              "nota": "Pago Plan #6",
+              "fecha": "2026-03-09",
+              "monto": 6600.25
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "fecha": "2026-04-02",
+          "items": [
+            {
+              "nro": "10 COMIC M BOLIVIA 14-2",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 4,
+              "amount": 110.44800000000001
+            },
+            {
+              "nro": "10 COMIC M BOLIVIA 14-2",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 4,
+              "amount": 70
+            },
+            {
+              "nro": "11 COMIC M BOLIVIA 21-2",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 5,
+              "amount": 28
+            },
+            {
+              "nro": "11 COMIC M BOLIVIA 21-2",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 5,
+              "amount": 1364.1423132230193
+            },
+            {
+              "nro": "12 COMIC MANGA BOLIVIA 28-2 (ENTELEQUIA DISTRIBUCIÓN 12 27-2)",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 6,
+              "amount": 21
+            },
+            {
+              "nro": "12 COMIC MANGA BOLIVIA 28-2 (ENTELEQUIA DISTRIBUCIÓN 12 27-2)",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 6,
+              "amount": 1137.9199999999998
+            },
+            {
+              "nro": "13 COMIC M BOLIVIA 7-3 (ENTELEQUIA DISTRIBUCIÓN 13 6-3)",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 7,
+              "amount": 28
+            },
+            {
+              "nro": "13 COMIC M BOLIVIA 7-3 (ENTELEQUIA DISTRIBUCIÓN 13 6-3)",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 7,
+              "amount": 1862.8485645742824
+            },
+            {
+              "nro": "14 COMIC M BOLIVIA 14/3 (ENTELEQUIA DISTRIBUCIÓN 14 13-3)",
+              "type": "flete",
+              "label": "Flete Bol",
+              "remId": 8,
+              "amount": 14
+            },
+            {
+              "nro": "14 COMIC M BOLIVIA 14/3 (ENTELEQUIA DISTRIBUCIÓN 14 13-3)",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 8,
+              "amount": 498.58599509695415
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "Alquiler Mes: Feb 2026",
+              "remId": "extra-1773018528715-49g4g",
+              "amount": 600
+            },
+            {
+              "nro": "OTROS CARGOS / ALQUILER",
+              "type": "extra",
+              "label": "Mauri vendió Martin Manhunter a mantas",
+              "remId": "extra-1775167588082",
+              "amount": -200
+            }
+          ],
+          "pagos": [
+            {
+              "id": "pg-1776112647219-k50ng",
+              "nota": "Pago Plan #13",
+              "fecha": "2026-04-02",
+              "monto": 5534.94
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "fecha": "2026-04-14",
+          "items": [
+            {
+              "nro": "11 COMIC M BOLIVIA 21-2",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 5,
+              "amount": 73.45
+            },
+            {
+              "nro": "12 COMIC MANGA BOLIVIA 28-2 (ENTELEQUIA DISTRIBUCIÓN 12 27-2)",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 6,
+              "amount": 54.599999999999994
+            },
+            {
+              "nro": "13 COMIC M BOLIVIA 7-3 (ENTELEQUIA DISTRIBUCIÓN 13 6-3)",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 7,
+              "amount": 64.34999999999998
+            },
+            {
+              "nro": "14 COMIC M BOLIVIA 14/3 (ENTELEQUIA DISTRIBUCIÓN 14 13-3)",
+              "type": "envio",
+              "label": "Envío Arg",
+              "remId": 8,
+              "amount": 33.72416666666666
+            },
+            {
+              "nro": "15 COMIC M BOLIVIA 21/3 (ENTELEQUIA DISTRIBUCIÓN 15 20-3)",
+              "type": "pedido",
+              "label": "Costo Libros",
+              "remId": 9,
+              "amount": 1742.5240163886144
+            }
+          ],
+          "pagos": [
+            {
+              "id": "pg-1776386597831-advj7",
+              "nota": "Pago Plan #14",
+              "banco": "Banco Unión",
+              "fecha": "2026-04-17",
+              "monto": 1968.65,
+              "caja_id": "1114f77b-5605-4e27-9f29-70cb8eefed0e"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "remitos",
+    "data": [
+      {
+        "cg": "2",
+        "cm": "1",
+        "cp": "0",
+        "id": 1,
+        "kg": "40",
+        "nro": "3737-8350",
+        "skg": "6.9",
+        "scaj": "0.4",
+        "cajas": "3",
+        "fecha": "2026-02-03",
+        "cambio": "0.0062",
+        "compre": "54800",
+        "pedido": "7 COMIC M BOLIVIA 24-1",
+        "smonto": "219600",
+        "_sEnvBS": 58.608599999999996,
+        "_sFltBS": 28,
+        "_sPedBS": 1438.38,
+        "_sTotBS": 1524.9886000000001,
+        "tc_dist": 0.00655,
+        "_grandBS": 8830.9895,
+        "_totalBS": 519.76,
+        "selected": false,
+        "pago_aprox": "1268890",
+        "pagos_dist": 1268890,
+        "precio_remito": "54852",
+        "_costoLibrosBS": 8311.2295
+      },
+      {
+        "cg": "2",
+        "cm": "0",
+        "cp": "0",
+        "id": 2,
+        "kg": "22",
+        "nro": "9940-18495",
+        "skg": "7.65",
+        "scaj": "0.4",
+        "cajas": "2",
+        "fecha": "2026-02-09",
+        "cambio": "0.0062",
+        "compre": "56800",
+        "pedido": "8 COMIC M BOLIVIA 31-1",
+        "smonto": "239000",
+        "_sEnvBS": 122.45563636363636,
+        "_sFltBS": 28,
+        "_sPedBS": 1556.7946770854826,
+        "_sTotBS": 1707.250313449119,
+        "tc_dist": 0.0065137852597718935,
+        "_grandBS": 5038.2610085,
+        "_totalBS": 492.15999999999997,
+        "selected": false,
+        "pago_aprox": "697920",
+        "pagos_dist": 697920,
+        "precio_remito": "56830",
+        "_costoLibrosBS": 4546.1010085
+      },
+      {
+        "cg": "0",
+        "cm": "0",
+        "cp": "0",
+        "id": 3,
+        "kg": "0",
+        "nro": "",
+        "skg": "0",
+        "scaj": "0",
+        "cajas": "0",
+        "fecha": "2026-02-15",
+        "cambio": "0.0000",
+        "compre": "0",
+        "pedido": "9 COMIC M BOLIVIA 7-2",
+        "smonto": "220735",
+        "_sEnvBS": 0,
+        "_sFltBS": 0,
+        "_sPedBS": 1410.612085615555,
+        "_sTotBS": 1410.612085615555,
+        "tc_dist": 0.006390522960181009,
+        "_grandBS": 14531.506017,
+        "_totalBS": 0,
+        "selected": false,
+        "pago_aprox": "2273915",
+        "pagos_dist": 2273915,
+        "precio_remito": "0",
+        "_costoLibrosBS": 14531.506017
+      },
+      {
+        "cg": "11",
+        "cm": "0",
+        "cp": "0",
+        "id": 4,
+        "kg": "140",
+        "nro": "3737-8675",
+        "skg": "11.8",
+        "scaj": "1",
+        "cajas": "11",
+        "fecha": "2026-02-23",
+        "cambio": "0.0063",
+        "compre": "208000",
+        "pedido": "10 COMIC M BOLIVIA 14-2",
+        "smonto": "244200",
+        "_sEnvBS": 110.44800000000001,
+        "_sFltBS": 70,
+        "_sPedBS": 1548.512823743449,
+        "_sTotBS": 1728.960823743449,
+        "tc_dist": 0.006341166354395778,
+        "_grandBS": 16091.967999999999,
+        "_totalBS": 2080.4,
+        "selected": false,
+        "pago_aprox": "2209620",
+        "pagos_dist": 2209620,
+        "precio_remito": "207354",
+        "_costoLibrosBS": 14011.568
+      },
+      {
+        "cg": "1",
+        "cm": "0",
+        "cp": "0",
+        "id": 5,
+        "kg": "13",
+        "nro": "3737-8813",
+        "skg": "5.65",
+        "scaj": "0.4",
+        "cajas": "1",
+        "fecha": "2026-03-03",
+        "cambio": "0.0065",
+        "compre": "26000",
+        "pedido": "11 COMIC M BOLIVIA 21-2",
+        "smonto": "215600",
+        "_sEnvBS": 73.45,
+        "_sFltBS": 28,
+        "_sPedBS": 1365.4447154894451,
+        "_sTotBS": 1466.8947154894452,
+        "tc_dist": 0.006333231518967742,
+        "_grandBS": 3306.659017,
+        "_totalBS": 239,
+        "selected": false,
+        "pago_aprox": "484375",
+        "pagos_dist": 484375,
+        "precio_remito": "25845",
+        "_costoLibrosBS": 3067.659017
+      },
+      {
+        "cg": "1",
+        "cm": "1",
+        "cp": "0",
+        "id": 6,
+        "kg": "18",
+        "nro": "3737-8956",
+        "skg": "4.8",
+        "scaj": "0.3",
+        "cajas": "2",
+        "fecha": "2026-03-10",
+        "cambio": "0.0065",
+        "compre": "31500",
+        "pedido": "12 COMIC MANGA BOLIVIA 28-2 (ENTELEQUIA DISTRIBUCIÓN 12 27-2)",
+        "smonto": "179200",
+        "_sEnvBS": 54.599999999999994,
+        "_sFltBS": 21,
+        "_sPedBS": 1128.96,
+        "_sTotBS": 1204.56,
+        "tc_dist": 0.0063,
+        "_grandBS": 4388.294405000001,
+        "_totalBS": 314.75,
+        "selected": false,
+        "pago_aprox": "646594.35",
+        "pagos_dist": 646594.35,
+        "precio_remito": "31264",
+        "_costoLibrosBS": 4073.544405
+      },
+      {
+        "cg": "2",
+        "cm": "1",
+        "cp": "0",
+        "id": 7,
+        "kg": "34",
+        "nro": "3737-9089",
+        "skg": "6.6",
+        "scaj": "0.4",
+        "cajas": "3",
+        "fecha": "2026-03-16",
+        "cambio": "0.0065",
+        "compre": "51000",
+        "pedido": "13 COMIC M BOLIVIA 7-3 (ENTELEQUIA DISTRIBUCIÓN 13 6-3)",
+        "smonto": "289185",
+        "_sEnvBS": 64.34999999999998,
+        "_sFltBS": 28,
+        "_sPedBS": 1833.5308761866627,
+        "_sTotBS": 1925.8808761866626,
+        "tc_dist": 0.006340338801067354,
+        "_grandBS": 7402.180209,
+        "_totalBS": 511.5,
+        "selected": false,
+        "pago_aprox": "1086800",
+        "pagos_dist": 1086800,
+        "precio_remito": "50814",
+        "_costoLibrosBS": 6890.680209
+      },
+      {
+        "cg": "5",
+        "cm": "0",
+        "cp": "1",
+        "id": 8,
+        "kg": "60",
+        "nro": "9940-19185",
+        "skg": "2.20",
+        "scaj": "0.2",
+        "cajas": "6",
+        "fecha": "2026-03-25",
+        "cambio": "0.0065",
+        "compre": "141500",
+        "pedido": "14 COMIC M BOLIVIA 14/3 (ENTELEQUIA DISTRIBUCIÓN 14 13-3)",
+        "smonto": "77000",
+        "_sEnvBS": 33.72416666666666,
+        "_sFltBS": 14,
+        "_sPedBS": 497.8484853925902,
+        "_sTotBS": 545.5726520592568,
+        "tc_dist": 0.006465564745358314,
+        "_grandBS": 14147.439727,
+        "_totalBS": 1289.75,
+        "selected": false,
+        "pago_aprox": "1988641.4",
+        "pagos_dist": 1988641.4,
+        "costo_caja_id": null,
+        "flete_caja_id": null,
+        "precio_remito": "141146",
+        "_costoLibrosBS": 12857.689727
+      },
+      {
+        "cg": "3",
+        "cm": "1",
+        "cp": "0",
+        "id": 9,
+        "kg": "56",
+        "nro": "3767-6251",
+        "skg": "5.7",
+        "scaj": "0.4",
+        "cajas": "4",
+        "fecha": "2026-04-01",
+        "cambio": "0.0065",
+        "compre": "102000",
+        "pedido": "15 COMIC M BOLIVIA 21/3 (ENTELEQUIA DISTRIBUCIÓN 15 20-3)",
+        "smonto": "268100",
+        "_sEnvBS": 67.48392857142856,
+        "_sFltBS": 28,
+        "_sPedBS": 1733.993962082615,
+        "_sTotBS": 1829.4778906540437,
+        "tc_dist": 0.006467713398293977,
+        "_grandBS": 10929.095000000001,
+        "_totalBS": 913,
+        "selected": false,
+        "pago_aprox": "1548630",
+        "pagos_dist": 1548630,
+        "costo_caja_id": "621f60f8-8a46-4d42-a2f9-0db88fb85d67",
+        "flete_caja_id": "d36c1708-7040-4486-88f4-d2548029d7d3",
+        "precio_remito": "102529",
+        "_costoLibrosBS": 10016.095000000001,
+        "costo_monto_pagado": 663,
+        "flete_monto_pagado": 250
+      },
+      {
+        "cg": "1",
+        "cm": "0",
+        "cp": "1",
+        "id": 10,
+        "kg": "28",
+        "nro": "3737-9144",
+        "skg": "1.3",
+        "scaj": "0.1",
+        "cajas": "3",
+        "fecha": "2026-04-06",
+        "cambio": "0",
+        "compre": "0",
+        "pedido": "16 COMIC M BOLIVIA 16 28/3 (ENTELEQUIA DISTRIBUCIÓN 16 27-3)",
+        "smonto": "8000",
+        "_sEnvBS": 0,
+        "_sFltBS": 7,
+        "_sPedBS": 52.00000000000001,
+        "_sTotBS": 59.00000000000001,
+        "tc_dist": 0.006500000000000001,
+        "_grandBS": 5719.715,
+        "_totalBS": 90,
+        "selected": false,
+        "pago_aprox": "866110",
+        "pagos_dist": 866110,
+        "flete_caja_id": "8b6dc325-137c-413f-8e37-bd3e7a648bed",
+        "precio_remito": "43875",
+        "_costoLibrosBS": 5629.715,
+        "flete_monto_pagado": 90
+      },
+      {
+        "cg": "0",
+        "cm": "0",
+        "cp": "0",
+        "id": 11,
+        "kg": "34",
+        "nro": "3737-9232",
+        "skg": "0",
+        "scaj": "0",
+        "cajas": "3",
+        "fecha": "2026-04-13",
+        "cambio": "0",
+        "compre": "0",
+        "pedido": "17 COMIC M BOLIVIA 4-4 (ENTELEQUIA DISTRIBUCIÓN 17 2-4)",
+        "smonto": "414485",
+        "_sEnvBS": 0,
+        "_sFltBS": 0,
+        "_sPedBS": 2678.423449719215,
+        "_sTotBS": 2678.423449719215,
+        "tc_dist": 0.00646205158140636,
+        "_grandBS": 7233.717471,
+        "_totalBS": 0,
+        "selected": false,
+        "pago_aprox": "1119415",
+        "pagos_dist": 1119415,
+        "precio_remito": "54382.50",
+        "_costoLibrosBS": 7233.717471
+      },
+      {
+        "cg": "0",
+        "cm": "0",
+        "cp": "0",
+        "id": 12,
+        "kg": "52",
+        "nro": "3737-9351",
+        "skg": "0",
+        "scaj": "0",
+        "cajas": "4",
+        "fecha": "2026-04-21",
+        "cambio": "0",
+        "compre": "0",
+        "pedido": "18 COMIC M BOLIVIA 11-4 (ENTELEQUIA DISTRIBUCIÓN 18 10-4)",
+        "smonto": "28560",
+        "_sEnvBS": 0,
+        "_sFltBS": 0,
+        "_sPedBS": 189.92196557060115,
+        "_sTotBS": 189.92196557060115,
+        "tc_dist": 0.006649928766477631,
+        "_grandBS": 11004.933866,
+        "_totalBS": 0,
+        "selected": false,
+        "pago_aprox": "1654895",
+        "pagos_dist": 1654895,
+        "precio_remito": "86384",
+        "_costoLibrosBS": 11004.933866
+      },
+      {
+        "cg": "0",
+        "cm": "0",
+        "cp": "0",
+        "id": 13,
+        "kg": "50",
+        "nro": "9940-19541",
+        "skg": "0",
+        "scaj": "0",
+        "cajas": "5",
+        "fecha": "2026-04-27",
+        "cambio": "0",
+        "compre": "0",
+        "pedido": "19 COMIC M BOLIVIA 18-4 (ENTELEQUIA DISTRIBUCIÓN 19 17-4)",
+        "smonto": "0",
+        "_sEnvBS": 0,
+        "_sFltBS": 0,
+        "_sPedBS": 0,
+        "_sTotBS": 0,
+        "tc_dist": 0.006699979236832033,
+        "_grandBS": 11203.973279,
+        "_totalBS": 0,
+        "selected": false,
+        "pago_aprox": "1672240",
+        "pagos_dist": 1672240,
+        "precio_remito": "119301",
+        "_costoLibrosBS": 11203.973279
+      }
+    ]
+  },
+  {
+    "id": "cuenta_corriente",
+    "data": {
+      "pagos": [
+        {
+          "id": "pg-1773081756411-gwimw",
+          "nota": "Pago Plan #6",
+          "fecha": "2026-03-09",
+          "monto": 6600.25,
+          "planId": 6,
+          "isFromPlan": true
+        },
+        {
+          "id": "pg-1776112647219-k50ng",
+          "nota": "Pago Plan #13",
+          "fecha": "2026-04-02",
+          "monto": 5534.94,
+          "planId": 13,
+          "isFromPlan": true
+        },
+        {
+          "id": "pg-1776386597831-advj7",
+          "nota": "Pago Plan #14",
+          "banco": "Banco Unión",
+          "fecha": "2026-04-17",
+          "monto": 1968.65,
+          "planId": 14,
+          "caja_id": "1114f77b-5605-4e27-9f29-70cb8eefed0e",
+          "isFromPlan": true
+        }
+      ],
+      "extras": [
+        {
+          "id": "1773018528715-a13zw",
+          "label": "Alquiler Mes: Ene 2026",
+          "amount": 600
+        },
+        {
+          "id": "1773018528715-49g4g",
+          "label": "Alquiler Mes: Feb 2026",
+          "amount": 600
+        },
+        {
+          "id": "1773078660274",
+          "label": "envio 6",
+          "amount": 98.29
+        },
+        {
+          "id": "1773078836977",
+          "label": "MARITO VENDIO UN 20TH CENTURY",
+          "amount": 187
+        },
+        {
+          "id": "1773078916218",
+          "label": "MARITO VENDIO HELLSING 2",
+          "amount": 187
+        },
+        {
+          "id": "1773078981540",
+          "label": "deuda anterior",
+          "amount": 61.5
+        },
+        {
+          "id": "1773079147478",
+          "label": "MARITO VENDIO GANTZ 7",
+          "amount": 132
+        },
+        {
+          "id": "1773081069474",
+          "label": "MARIO VENDIO ABSOLUTE BATMAN",
+          "amount": -240
+        },
+        {
+          "id": "1773081077117",
+          "label": "MARIO VENDIO ABSOLUTE SUPER MAN",
+          "amount": -220
+        },
+        {
+          "id": "1773081082748",
+          "label": "MARIO VENDIO HUMAN TARGET",
+          "amount": -300
+        },
+        {
+          "id": "1775138192041-96b98",
+          "label": "Alquiler Mes: Mar 2026",
+          "amount": 600
+        },
+        {
+          "id": "1775167588082",
+          "isAlq": false,
+          "label": "Mauri vendió Martin Manhunter a mantas",
+          "amount": -200
+        }
+      ]
+    }
+  },
+  {
+    "id": "reception_delta_cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "data": {
+      "147a9ff3-4a36-4db5-8edd-942dbd0502c1": 2,
+      "431a3c9e-c49d-4dc5-98b9-c2202b1d3142": 2,
+      "6ac4dc97-4b19-422a-a5c7-8666b58c2cd9": 1,
+      "7c539b98-2406-44e5-950b-33c0b2d78afa": 2,
+      "b3413a26-ce10-4ebb-bf5b-2467914ff6d0": 1,
+      "d168df10-6332-4d62-8129-13b442399ba8": 1,
+      "d58f582d-b46e-41a2-bccf-c9c1b3c5fb71": 1,
+      "f734b1b2-68a3-4189-9793-48d724c297f8": 1,
+      "f7365845-f654-4ee5-9c2a-9686e1ddb8e2": 2
+    }
+  },
+  {
+    "id": "last_catalog_sync_week",
+    "data": {
+      "semanaId": "c9bce42d-790a-4953-a2be-3c77500b0710",
+      "updatedAt": "2026-04-24T15:20:43.779Z"
+    }
+  }
+]

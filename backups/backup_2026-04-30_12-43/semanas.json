@@ -1,0 +1,101 @@
+[
+  {
+    "id": "2127ce77-94c9-4fc1-8c58-d0653768001a",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 12 27-2",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 27-2.xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/2127ce77-94c9-4fc1-8c58-d0653768001a_base.xlsx?t=1773695484281",
+    "abierta": false,
+    "created_at": "2026-02-25T17:35:00+00:00",
+    "updated_at": "2026-03-31T20:47:54.235671+00:00",
+    "fecha_estimada_llegada": "2026-03-19",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "cfcee2b5-5b9c-47eb-85ab-bfaff05226bb",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 16 27-3",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 27-3 (1).xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/cfcee2b5-5b9c-47eb-85ab-bfaff05226bb_base.xlsx?t=1774648270180",
+    "abierta": false,
+    "created_at": "2026-03-27T15:08:17.766052+00:00",
+    "updated_at": "2026-03-31T20:47:54.235671+00:00",
+    "fecha_estimada_llegada": "2026-04-18",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "c0de87e2-cdef-4194-9c85-7a8d08415fa9",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 13 6-3",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 13-2.xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/c0de87e2-cdef-4194-9c85-7a8d08415fa9_base.xlsx?t=1773695497304",
+    "abierta": false,
+    "created_at": "2026-03-06T14:18:17.079521+00:00",
+    "updated_at": "2026-03-31T20:47:54.235671+00:00",
+    "fecha_estimada_llegada": "2026-03-28",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "e5d16e84-e4e7-46e3-9745-307fa9a57048",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 14 13-3",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 13-3 (1).xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/e5d16e84-e4e7-46e3-9745-307fa9a57048_base.xlsx?t=1773850002115",
+    "abierta": false,
+    "created_at": "2026-03-13T13:59:49.799145+00:00",
+    "updated_at": "2026-03-31T20:47:54.235671+00:00",
+    "fecha_estimada_llegada": "2026-04-04",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "2a61ddf3-c405-46d7-916a-ea99376bcca9",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 15 20-3",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 20-3 (2).xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/2a61ddf3-c405-46d7-916a-ea99376bcca9_base.xlsx?t=1774044301186",
+    "abierta": false,
+    "created_at": "2026-03-20T15:36:15.9751+00:00",
+    "updated_at": "2026-03-31T20:47:54.235671+00:00",
+    "fecha_estimada_llegada": "2026-04-11",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "c9bce42d-790a-4953-a2be-3c77500b0710",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 20 24-4",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 24-4 v2.xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/c9bce42d-790a-4953-a2be-3c77500b0710_base.xlsx?t=1777126582241",
+    "abierta": true,
+    "created_at": "2026-04-24T15:20:19.833083+00:00",
+    "updated_at": "2026-04-27T17:13:07.848737+00:00",
+    "fecha_estimada_llegada": "2026-05-16",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "d43e985e-d3cb-4875-be8e-c8470a28e290",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 17 2-4",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 2-4.xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/d43e985e-d3cb-4875-be8e-c8470a28e290_base.xlsx?t=1775268926225",
+    "abierta": false,
+    "created_at": "2026-04-03T14:43:42.894916+00:00",
+    "updated_at": "2026-04-04T19:19:42.957957+00:00",
+    "fecha_estimada_llegada": "2026-04-25",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "f3c6d099-3652-43c0-94cf-5f259b9a1f4d",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 18 10-4",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 18 10-4.xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/f3c6d099-3652-43c0-94cf-5f259b9a1f4d_base.xlsx?t=1775852812801",
+    "abierta": false,
+    "created_at": "2026-04-10T20:24:11.631691+00:00",
+    "updated_at": "2026-04-12T02:39:20.75714+00:00",
+    "fecha_estimada_llegada": "2026-05-02",
+    "estado_recepcion": "pendiente"
+  },
+  {
+    "id": "8fac85cb-4ab6-4417-9fff-503f42479e15",
+    "nombre": "ENTELEQUIA DISTRIBUCIÓN 19 17-4",
+    "archivo_nombre": "ENTELEQUIA DISTRIBUCIÓN 17-4.xlsx",
+    "archivo_url": "https://lbraboujrajvzosmddtu.supabase.co/storage/v1/object/public/docs/base_files/8fac85cb-4ab6-4417-9fff-503f42479e15_base.xlsx?t=1776521690683",
+    "abierta": false,
+    "created_at": "2026-04-18T00:33:51.918972+00:00",
+    "updated_at": "2026-04-19T03:15:22.654565+00:00",
+    "fecha_estimada_llegada": "2026-05-10",
+    "estado_recepcion": "pendiente"
+  }
+]
