@@ -919,20 +919,25 @@ export default function ReceptionManagement() {
         const tiendaItems = [];
         const clientGroups = {};
 
-        // 1. Identificar títulos con recepción hoy
-        const activeTitles = Object.entries(receivedCounts)
-            .filter(([_, qty]) => parseInt(qty) > 0);
+        // 1. Identificar títulos con recepción (tanto los que se están ingresando como los ya guardados)
+        const titlesSet = new Set([
+            ...Object.keys(receivedCounts).filter(k => parseInt(receivedCounts[k]) > 0),
+            ...Object.keys(alreadyReceived).filter(k => alreadyReceived[k] > 0)
+        ]);
 
-        console.log('Active titles:', activeTitles);
+        console.log('Titles to process:', Array.from(titlesSet));
 
-        if (activeTitles.length === 0) {
-            alert("⚠️ No hay cantidades ingresadas. Ingresa al menos una unidad en la columna 'LLEGARON (HOY)' antes de ver el pedido separado.");
+        if (titlesSet.size === 0) {
+            alert("⚠️ No hay cantidades recibidas ni ingresadas para esta semana. Ingresa al menos una unidad en la columna 'LLEGARON (HOY)' antes de ver el pedido separado.");
             return;
         }
 
-        activeTitles.forEach(([titleKey, qtyStr]) => {
-            const qtyRec = parseInt(qtyStr);
+        titlesSet.forEach(titleKey => {
             const key = normalizeTitle(titleKey);
+            const qtyInput = parseInt(receivedCounts[key]) || 0;
+            const qtySaved = alreadyReceived[key] || 0;
+            const qtyRec = qtyInput + qtySaved;
+
             const originalItem = masterItems.find(it => normalizeTitle(it.titulo) === key);
             const titleLabel = originalItem?.titulo || titleKey.toUpperCase();
 
@@ -940,17 +945,20 @@ export default function ReceptionManagement() {
             const bd = orderBreakdown[key] || [];
             const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + (b.cantidad || 0), 0);
             
-            const pendingForTitle = clientItems.filter(ci => {
+            const relevantItems = clientItems.filter(ci => {
                 if (normalizeTitle(ci.titulo) !== key) return false;
                 const normEstado = normalizeTitle(ci.estado);
-                return normEstado.includes('adjudicado') || normEstado.includes('confirmado') || normEstado === 'pedido';
+                return normEstado.includes('adjudicado') || 
+                       normEstado.includes('confirmado') || 
+                       normEstado === 'pedido' ||
+                       normEstado === 'en tienda';
             });
 
             // PRIORIDAD 1: Clientes (Reservas manuales)
-            const clientSliceLimit = Math.min(qtyRec, pendingForTitle.length);
-            const preAllocated = pendingForTitle.slice(0, clientSliceLimit);
+            const clientSliceLimit = Math.min(qtyRec, relevantItems.length);
+            const allocated = relevantItems.slice(0, clientSliceLimit);
 
-            preAllocated.forEach(ci => {
+            allocated.forEach(ci => {
                 const vendedor = vendedoresList.find(v => v.id === ci.vendedor_id);
                 const vendorName = vendedor ? `VENDEDOR: ${vendedor.nombre.toUpperCase()}` : 'VENDEDOR: DESCONOCIDO';
 
@@ -1140,7 +1148,7 @@ export default function ReceptionManagement() {
                                 </button>
                                 <button
                                     onClick={handleGenerateSeparatedOrder}
-                                    disabled={Object.keys(receivedCounts).length === 0}
+                                    disabled={Object.keys(receivedCounts).length === 0 && Object.keys(alreadyReceived).length === 0}
                                     className="flex items-center gap-2 bg-navy text-white px-5 py-4 rounded-2xl text-sm font-bold hover:bg-navy/90 transition-all shadow-md whitespace-nowrap"
                                     title="Ver lista separada para tienda y clientes"
                                 >
