@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy, Star } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy, Star, Download } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
 import LanzamientosCurator from './LanzamientosCurator';
+import CatalogExporter from './CatalogExporter';
 
 const CatalogUpdatedView = () => {
     const { isAdmin } = useAuth();
@@ -61,6 +62,7 @@ const CatalogUpdatedView = () => {
     const [paniniLoading, setPaniniLoading] = useState(false);
     const [showAudit, setShowAudit] = useState(false);
     const [isCuratorOpen, setIsCuratorOpen] = useState(false);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -1033,6 +1035,35 @@ const CatalogUpdatedView = () => {
                                 <Plus size={16} /> Nuevo ítem
                             </button>
                         )}
+                        <button
+                            onClick={() => setIsExportModalOpen(true)}
+                            title="Generar PDF o Excel del catálogo"
+                            style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: '0.5rem', 
+                                padding: '0.625rem 1rem', 
+                                borderRadius: '12px', 
+                                border: '1px solid #e2e8f0', 
+                                background: 'white', 
+                                cursor: 'pointer', 
+                                fontWeight: 700, 
+                                fontSize: '0.875rem', 
+                                transition: 'all 0.2s ease', 
+                                color: '#1e293b',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.borderColor = '#f07d2a';
+                                e.currentTarget.style.color = '#f07d2a';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = '#e2e8f0';
+                                e.currentTarget.style.color = '#1e293b';
+                            }}
+                        >
+                            <Download size={16} /> Generar Catálogo
+                        </button>
                     </div>
                 </div>
 
@@ -2752,6 +2783,11 @@ const CatalogUpdatedView = () => {
                 onClose={() => setIsCuratorOpen(false)}
                 catalogData={catalogData}
                 onRefresh={loadCatalog}
+            />
+            <CatalogExporter 
+                isOpen={isExportModalOpen} 
+                onClose={() => setIsExportModalOpen(false)} 
+                data={filteredItems} 
             />
         </div>
     );
