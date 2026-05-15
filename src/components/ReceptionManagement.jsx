@@ -302,7 +302,8 @@ export default function ReceptionManagement() {
             // 3. Consolidar el breakdown usando Math.max y asignar sobrantes a la Tienda
             const confirmedMap = {};
             (master?.datos_json || []).forEach(it => {
-                confirmedMap[normalizeTitle(it.titulo)] = it.cantidad || 0;
+                const key = normalizeTitle(it.titulo);
+                confirmedMap[key] = (confirmedMap[key] || 0) + (it.cantidad || 0);
             });
 
             // Iterar sobre todos los títulos que tienen demanda o están en el master
@@ -377,7 +378,7 @@ export default function ReceptionManagement() {
         const confirmedMap = {};
         masterItems.forEach(it => {
             const key = normalizeTitle(it.titulo);
-            confirmedMap[key] = it.cantidad || 0;
+            confirmedMap[key] = (confirmedMap[key] || 0) + (it.cantidad || 0);
         });
 
         Object.entries(orderBreakdown).forEach(([key, arr]) => {
