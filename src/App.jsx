@@ -297,7 +297,7 @@ function Main({ onGoToPublic }) {
         <ComicAnalysisTool /> // Fallback
     ) : (
         (activeTab === 'remitos' && isSocio) ? <RemitosManagement isSocio={true} /> :
-        (activeTab === 'recepcion' && isSocio) ? <ReceptionManagement /> :
+        activeTab === 'recepcion' ? <ReceptionManagement /> :
         activeTab === 'confirmaciones-info' ? <ConfirmationInfoView /> :
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
