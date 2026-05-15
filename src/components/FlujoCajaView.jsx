@@ -943,8 +943,8 @@ export default function FlujoCajaView({ user, profile }) {
                             </motion.div>
 
                             {/* Panel Central: Operaciones (POS-First) */}
-                            <div className="xl:col-span-3 bg-white rounded-xl border border-border/30 overflow-hidden shadow-sm flex flex-col">
-                                <div className="flex bg-slate-50 border-b border-border/20 p-1">
+                            <div className="xl:col-span-3 bg-white rounded-xl border border-border/30 shadow-sm flex flex-col">
+                                <div className="flex bg-slate-50 rounded-t-xl border-b border-border/20 p-1">
                                     <button 
                                         onClick={() => setActiveOpTab('pos')}
                                         className={`flex-1 py-1.5 px-4 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeOpTab === 'pos' ? 'bg-white text-primary shadow-sm border border-border/10' : 'text-navy/30 hover:bg-white/50'}`}
