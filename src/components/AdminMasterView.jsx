@@ -191,7 +191,16 @@ export default function AdminMasterView() {
                 .eq('semana_id', semanaId);
             
             if (itemsError) throw itemsError;
-            if (!clientItems || clientItems.length === 0) return;
+
+            // NUEVO: Fetch ALL pedido_items de mayoristas para esta semana (solo los pedidos a Entelequia)
+            const { data: mayoristaItems, error: mayoristaError } = await supabase
+                .from('pedido_items')
+                .select('*, pedido:pedidos!inner(tipo, semana_id)')
+                .eq('pedido.semana_id', semanaId)
+                .eq('pedido.tipo', 'mayorista')
+                .eq('fuente', 'entelequia');
+            
+            if (mayoristaError) console.error("Error fetching mayorista items:", mayoristaError);
 
             // 2. Map master titles for faster lookup - SOLO LOS QUE TIENEN CANTIDAD > 0
             const masterTitles = new Set(
@@ -201,27 +210,36 @@ export default function AdminMasterView() {
             let confirmedCount = 0;
             let cutCount = 0;
 
-            // 3. Batch Update statuses
-            for (let item of clientItems) {
-                const itemTitle = (item.titulo || '').toLowerCase().trim();
-                const isConfirmed = masterTitles.has(itemTitle);
-                
-                let nuevoEstado = isConfirmed ? `CONFIRMADO ${wName}`.trim() : 'RECORTADO';
-                
-                // Only update if state changed
-                if (item.estado !== nuevoEstado) {
-                    const { error: updateErr } = await supabase.from('cliente_items').update({ estado: nuevoEstado }).eq('id', item.id);
-                    if (updateErr) console.error("Error al actualizar item:", item.id, updateErr);
+            const updateItems = async (itemsList, tableName) => {
+                for (let item of itemsList) {
+                    const itemTitle = (item.titulo || '').toLowerCase().trim();
+                    const isConfirmed = masterTitles.has(itemTitle);
                     
-                    if (isConfirmed) confirmedCount++;
-                    else cutCount++;
+                    let nuevoEstado = isConfirmed ? `CONFIRMADO ${wName}`.trim() : 'RECORTADO';
+                    
+                    // Only update if state changed
+                    if (item.estado !== nuevoEstado) {
+                        const { error: updateErr } = await supabase.from(tableName).update({ estado: nuevoEstado }).eq('id', item.id);
+                        if (updateErr) console.error(`Error al actualizar ${tableName} item:`, item.id, updateErr);
+                        
+                        if (isConfirmed) confirmedCount++;
+                        else cutCount++;
+                    }
                 }
+            };
+
+            // 3. Batch Update statuses
+            if (clientItems && clientItems.length > 0) {
+                await updateItems(clientItems, 'cliente_items');
+            }
+            if (mayoristaItems && mayoristaItems.length > 0) {
+                await updateItems(mayoristaItems, 'pedido_items');
             }
             
             setSuccess(`Sincronización completa: ${confirmedCount} pedidos confirmados, ${cutCount} marcados como recortados.`);
         } catch (e) {
             console.error("Error sincronizando pedidos:", e);
-            setError("Error al sincronizar los estados de los pedidos de clientes.");
+            setError("Error al sincronizar los estados de los pedidos de clientes y mayoristas.");
         } finally {
             setProcessing(false);
         }

@@ -30,6 +30,7 @@ import ContabilidadView from './components/ContabilidadView';
 import PrestamosView from './components/PrestamosView';
 import StockHistorialView from './components/StockHistorialView';
 import PublicSalesView from './components/PublicSalesView';
+import MayoristaUpload from './components/MayoristaUpload';
 
 // --- Nav item ---
 function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
@@ -72,6 +73,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
+        { id: 'mayoristas', icon: Truck, label: 'Mayoristas' },
         { id: 'caja', icon: Wallet, label: 'Flujo de Caja' },
         { id: 'contabilidad', icon: BookMarked, label: 'Contabilidad' },
         { id: 'prestamos', icon: HandCoins, label: 'Préstamos' },
@@ -174,6 +176,7 @@ const TAB_TITLES = {
     contabilidad: 'Contabilidad General',
     prestamos: 'Préstamos Otorgados',
     entelequia: 'Herramienta Editorial',
+    mayoristas: 'Pedidos Mayoristas',
 };
 
 function Main({ onGoToPublic }) {
@@ -288,6 +291,7 @@ function Main({ onGoToPublic }) {
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
         activeTab === 'clientes' ? <ClientOrdersView /> :
+        activeTab === 'mayoristas' ? <MayoristaUpload /> :
         activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
         activeTab === 'contabilidad' ? <ContabilidadView /> :
         activeTab === 'prestamos' ? <PrestamosView /> :

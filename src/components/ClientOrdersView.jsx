@@ -65,6 +65,7 @@ export default function ClientOrdersView() {
     // Formulario Pagos
     const [payMode, setPayMode] = useState('items'); // 'items' | 'general'
     const [selectedPayItems, setSelectedPayItems] = useState([]);
+    const [itemPayAmounts, setItemPayAmounts] = useState({}); // { [itemId]: monto }
     const [payMonto, setPayMonto] = useState('');
     const [pagoConcepto, setPagoConcepto] = useState('');
     const [payMethod, setPayMethod] = useState('Yasta (QR)'); // 'Efectivo' | 'Yasta (QR)' | 'Banco Unión (QR/Transf)' | 'BNB' | 'Otros'
@@ -74,6 +75,10 @@ export default function ClientOrdersView() {
     const [batchAbono, setBatchAbono] = useState('');
     const [orderMethod, setOrderMethod] = useState('Yasta (QR)'); // método del abono inicial al crear pedido
     const [orderPayAmt, setOrderPayAmt] = useState(''); // monto del pago inicial general
+    const [orderPayMode, setOrderPayMode] = useState('items'); // 'items' | 'credit'
+    
+    // Helper para obtener abonos reales (excluyendo distribuciones/asignaciones)
+    const getPagosRaiz = (list, cid) => (list || []).filter(p => p.cliente_id === cid && !p.concepto?.startsWith('Asignado a:'));
     const [editPago, setEditPago] = useState(null); // { id, concepto, monto, metodo_pago, caja_mov_id }
     const [modoHistorico, setModoHistorico] = useState(false);
     const [histSemana, setHistSemana] = useState(''); // semana_id para modo histórico
@@ -126,6 +131,21 @@ export default function ClientOrdersView() {
             const itemsToDelete = items.filter(i => selectedItems.has(i.id));
 
             for (const it of itemsToDelete) {
+                // [BLOQUE 1] Rescate de dinero antes de borrar
+                if (Number(it.monto_pagado || 0) > 0) {
+                    const { data: pagosAsignados } = await supabase
+                        .from('cliente_pagos')
+                        .select('id, monto, caja_mov_id')
+                        .eq('cliente_id', it.cliente_id)
+                        .eq('concepto', `Asignado a: ${it.titulo}`);
+
+                    for (const p of (pagosAsignados || [])) {
+                        await supabase.from('cliente_pagos').update({
+                            concepto: `Crédito recuperado (ítem eliminado: ${it.titulo})`,
+                            referencia: null
+                        }).eq('id', p.id);
+                    }
+                }
                 // Restore stock if it was physically in store
                 let shouldRestore = false;
                 if ((it.estado === 'EN TIENDA' || it.estado === 'ADJUDICADO') && (it.catalog_id || it.product_id)) {
@@ -677,6 +697,7 @@ export default function ClientOrdersView() {
                     descuento: Number(addForm.descuento) || 0,
                     precio_venta: Number(addForm.precio_final) || Number(addForm.precio_venta) || 0,
                     monto_pagado: Number(addForm.monto_pagado) || 0,
+                    pagoIndividual: 0, // Nuevo campo para control de pago inicial por ítem
                     nota: addForm.nota_item,
                     source: modoHistorico ? 'historico' : selectedStockSource,
                     hist_semana_id: modoHistorico ? (addForm.hist_semana_id || null) : undefined,
@@ -949,8 +970,8 @@ export default function ClientOrdersView() {
                 });
             }
 
-            // 3. Insert Items
-            const { error: insErr } = await supabase.from('cliente_items').insert(itemsToInsert);
+            // 3. Insert Items (Modificado para obtener los IDs generados)
+            const { data: insertedItems, error: insErr } = await supabase.from('cliente_items').insert(itemsToInsert).select();
             if (insErr) throw insErr;
 
             // 4. Subtract stock (solo en modo normal, no histórico)
@@ -984,21 +1005,17 @@ export default function ClientOrdersView() {
             
             if (typeof catalogService !== 'undefined') catalogService.clearCache();
 
-            // 5. Registrar pago inicial
-            const totalAbonoInicial = Number(orderPayAmt) || 0;
-            if (totalAbonoInicial > 0) {
+            // 5. Registrar pago inicial (Refactorizado: Binario Items vs Crédito)
+            const totalAbonoCalculado = orderPayMode === 'items' 
+                ? cart.reduce((s, c) => s + (Number(c.pagoIndividual) || 0), 0)
+                : (Number(orderPayAmt) || 0);
+
+            if (totalAbonoCalculado > 0) {
                 const clienteNombre = clientes.find(c => c.id === clienteId)?.nombre || addForm.nombre || clienteId;
-                if (modoHistorico) {
-                    // Modo histórico: solo registrar en cliente_pagos, sin tocar caja_movimientos
-                    await supabase.from('cliente_pagos').insert([{
-                        cliente_id: clienteId,
-                        monto: totalAbonoInicial,
-                        concepto: 'Pago anterior (histórico)',
-                        vendedor_id: user?.id,
-                        metodo_pago: orderMethod,
-                        caja_mov_id: null,
-                    }]);
-                } else {
+                let cajaMovId = null;
+
+                // 5.1 Crear Movimiento de Caja (Solo si no es modo histórico)
+                if (!modoHistorico) {
                     let turnoId = null;
                     if (orderMethod === 'Efectivo') {
                         const { data: activeTurnoArr } = await supabase
@@ -1016,19 +1033,64 @@ export default function ClientOrdersView() {
                         turno_id: turnoId,
                         tipo: 'INGRESO',
                         categoria: 'Cobro Pedido',
-                        concepto: `ABONO INICIAL [${clienteNombre}] · ${cart.length} ítem(s)`,
-                        monto: totalAbonoInicial,
+                        concepto: orderPayMode === 'items' 
+                            ? `ABONO DISTRIBUIDO [${clienteNombre}] · ${cart.length} ítem(s)`
+                            : `ABONO INICIAL CRÉDITO [${clienteNombre}]`,
+                        monto: totalAbonoCalculado,
                         vendedor_id: user?.id,
                         metodo_pago: orderMethod,
                         origen: 'Pedidos'
                     }]).select('id').single();
+                    cajaMovId = cajaMov?.id || null;
+                }
+
+                // 5.2 Lógica según Modo de Pago
+                if (orderPayMode === 'items') {
+                    // [NUEVO] Crear registro RAÍZ en cliente_pagos para el historial agrupado
                     await supabase.from('cliente_pagos').insert([{
                         cliente_id: clienteId,
-                        monto: totalAbonoInicial,
-                        concepto: 'Abono inicial',
+                        monto: totalAbonoCalculado,
+                        concepto: modoHistorico 
+                            ? `Pago inicial (histórico) · ${cart.length} ítem(s)`
+                            : `Pago inicial · ${cart.length} ítem(s)`,
                         vendedor_id: user?.id,
                         metodo_pago: orderMethod,
-                        caja_mov_id: cajaMov?.id || null,
+                        referencia: null,
+                        caja_mov_id: cajaMovId,
+                    }]);
+
+                    // Distribución manual basada en lo ingresado en el carrito
+                    for (let idx = 0; idx < cart.length; idx++) {
+                        const cItemInput = cart[idx];
+                        const dbItem = (insertedItems || [])[idx];
+                        const amt = Number(cItemInput.pagoIndividual) || 0;
+                        
+                        if (amt > 0 && dbItem) {
+                            // Actualizar ítem en DB
+                            await supabase.from('cliente_items')
+                                .update({ monto_pagado: (Number(dbItem.monto_pagado) || 0) + amt })
+                                .eq('id', dbItem.id);
+                            
+                            // Crear pago granular
+                            await supabase.from('cliente_pagos').insert([{
+                                cliente_id: clienteId,
+                                monto: amt,
+                                concepto: `Asignado a: ${dbItem.titulo}${modoHistorico ? ' (histórico)' : ''}`,
+                                vendedor_id: user?.id,
+                                metodo_pago: orderMethod,
+                                caja_mov_id: cajaMovId,
+                            }]);
+                        }
+                    }
+                } else {
+                    // Modo Crédito: Un solo registro de pago sin tocar ítems
+                    await supabase.from('cliente_pagos').insert([{
+                        cliente_id: clienteId,
+                        monto: totalAbonoCalculado,
+                        concepto: modoHistorico ? 'Abono inicial (histórico)' : 'Abono inicial',
+                        vendedor_id: user?.id,
+                        metodo_pago: orderMethod,
+                        caja_mov_id: cajaMovId,
                     }]);
                 }
             }
@@ -1046,6 +1108,7 @@ export default function ClientOrdersView() {
                 coleccion_nombre: '', tomos: '', precio_tomo: '', pago_inicial_total: ''
             });
             await fetchData();
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
             await fetchCatalog();
 
         } catch (e) {
@@ -1064,6 +1127,13 @@ export default function ClientOrdersView() {
 
             const cli = clientes.find(c => c.id === clienteId);
 
+            // [BLOQUE 5] Calcular dinero realmente nuevo (descontando saldo flotante)
+            const pItemsParaBalance = items.filter(i => i.cliente_id === clienteId);
+            const cPagItemsBal = pItemsParaBalance.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+            const groupPagosBal = getPagosRaiz(pagos, clienteId).reduce((s,p) => s + Number(p.monto), 0);
+            const balanceExistente = Math.max(0, groupPagosBal - cPagItemsBal);
+            const montoNuevoReal = Math.max(0, amt - balanceExistente);
+
             // --- LEDGER: Registrar en caja_movimientos PRIMERO para capturar el ID ---
             let turnoId = null;
             if (payMethod === 'Efectivo') {
@@ -1074,7 +1144,7 @@ export default function ClientOrdersView() {
                     .order('abierto_at', { ascending: false })
                     .limit(1);
                 
-                if (!sinContabilidad && (!activeTurnoArr || activeTurnoArr.length === 0)) {
+                if (!sinContabilidad && montoNuevoReal > 0 && (!activeTurnoArr || activeTurnoArr.length === 0)) {
                     alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
                     setLoading(false);
                     return;
@@ -1083,14 +1153,14 @@ export default function ClientOrdersView() {
             }
 
             let cajaMov = null;
-            if (!sinContabilidad) {
+            if (!sinContabilidad && montoNuevoReal > 0) {
                 const concetoLedger = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
                 const { data: cajaMovData, error: moveErr } = await supabase.from('caja_movimientos').insert([{
                     turno_id: turnoId,
                     tipo: 'INGRESO',
                     categoria: 'Cobro Pedido',
                     concepto: concetoLedger,
-                    monto: amt,
+                    monto: montoNuevoReal, // ← solo el dinero nuevo
                     vendedor_id: user?.id,
                     metodo_pago: payMethod,
                     origen: 'Pedidos'
@@ -1114,43 +1184,62 @@ export default function ClientOrdersView() {
                 if (selectedPayItems.length === 0) return alert("Seleccione al menos un ítem");
 
                 const itemsToUpdate = items.filter(i => selectedPayItems.includes(i.id));
-                // Distribuir el monto cubriendo la deuda exacta de cada ítem en orden.
-                // Si el monto es exactamente la suma de deudas, cada ítem queda en 0.
-                // Si sobra/falta, se aplica en orden hasta agotar el monto.
-                let restante = amt;
-                for (let eq of itemsToUpdate) {
-                    if (restante <= 0) break;
+                
+                // Determinar si todos los ítems seleccionados se pagaron por completo
+                const todosCompletos = itemsToUpdate.every(eq => {
                     const deuda = Math.max(0, Number(eq.precio_venta) - Number(eq.monto_pagado || 0));
-                    const aplicar = Math.min(deuda, restante);
-                    const nuevoMonto = Number(eq.monto_pagado || 0) + aplicar;
-                    await supabase.from('cliente_items').update({
-                        monto_pagado: nuevoMonto,
-                        estado: eq.estado
-                    }).eq('id', eq.id);
-                    restante -= aplicar;
-                }
-                // También crear cliente_pagos para que aparezca en el historial
-                const { error: pErr } = await supabase.from('cliente_pagos').insert([{
+                    return Number(itemPayAmounts[eq.id] || 0) >= deuda;
+                });
+
+                // [NUEVO] Crear registro RAÍZ en cliente_pagos para el historial agrupado en modo items
+                await supabase.from('cliente_pagos').insert([{
                     cliente_id: clienteId,
                     monto: amt,
-                    concepto: pagoConcepto || `Abono ${selectedPayItems.length} ítem(s)`,
+                    concepto: todosCompletos 
+                        ? `Pago recibido · ${itemsToUpdate.length} ítem(s)`
+                        : `Pago parcial · ${itemsToUpdate.length} ítem(s)`,
                     vendedor_id: user?.id,
                     metodo_pago: payMethod,
                     referencia: payReference || null,
                     caja_mov_id: cajaMov?.id || null,
                 }]);
-                if (pErr) throw pErr;
+
+                for (let eq of itemsToUpdate) {
+                    const aplicar = Number(itemPayAmounts[eq.id] || 0);
+                    
+                    if (aplicar > 0) {
+                        const nuevoMonto = Number(eq.monto_pagado || 0) + aplicar;
+                        await supabase.from('cliente_items').update({
+                            monto_pagado: nuevoMonto,
+                            estado: eq.estado
+                        }).eq('id', eq.id);
+
+                        // Crear un registro de pago específico para este ítem
+                        await supabase.from('cliente_pagos').insert([{
+                            cliente_id: clienteId,
+                            monto: aplicar,
+                            concepto: `Asignado a: ${eq.titulo}`,
+                            vendedor_id: user?.id,
+                            metodo_pago: payMethod,
+                            referencia: payReference || null,
+                            caja_mov_id: cajaMov?.id || null, // Mismo ID de caja para todos
+                        }]);
+                    }
+                }
             }
 
             setShowPayModal(null);
             setPayMonto('');
             setPagoConcepto('');
             setPayReference('');
+            setSelectedPayItems([]);
+            setItemPayAmounts({});
             setPayMethod('Yasta (QR)');
             setSelectedPayItems([]);
             setSinContabilidad(false);
 
             await fetchData();
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
             alert(sinContabilidad ? "✓ Pago registrado (sin movimiento en Contabilidad)." : "✓ Pago registrado y contabilizado correctamente.");
         } catch (e) {
             console.error(e);
@@ -1161,18 +1250,29 @@ export default function ClientOrdersView() {
     };
 
     const handleDeletePago = async (pago) => {
-        if (!confirm(`¿Eliminar este abono?\n${pago.concepto || 'Abono'} — BS ${Number(pago.monto).toLocaleString('es-BO', { minimumFractionDigits: 2 })}\n\nTambién se eliminará de Contabilidad.`)) return;
+        const esAsignado = pago.concepto?.startsWith('Asignado a:');
+        if (!confirm(`¿Eliminar este abono?\n${pago.concepto || 'Abono'} — BS ${Number(pago.monto).toLocaleString('es-BO', { minimumFractionDigits: 2 })}${!esAsignado ? '\n\nTambién se eliminará de Contabilidad.' : ''}`)) return;
         try {
             setLoading(true);
-            // Borrar el movimiento de caja si existe el vínculo
-            if (pago.caja_mov_id) {
+            // [BLOQUE 2] Borrar el movimiento de caja solo si NO es una distribución
+            if (pago.caja_mov_id && !esAsignado) {
                 await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
             }
             await supabase.from('cliente_pagos').delete().eq('id', pago.id);
 
-            // Recalcular: si el total pagado restante < sum(monto_pagado en ítems), hay que revertir el exceso
-            const clienteItems = items.filter(i => i.cliente_id === pago.cliente_id);
-            const pagoRestantes = pagos.filter(p => p.cliente_id === pago.cliente_id && p.id !== pago.id);
+            // [BLOQUE 3] Recalcular: usando consultas frescas (evita estado React stale)
+            const { data: clienteItemsFresh } = await supabase
+                .from('cliente_items')
+                .select('id, monto_pagado')
+                .eq('cliente_id', pago.cliente_id);
+            const clienteItems = clienteItemsFresh || [];
+
+            const { data: pagosRestantesFresh } = await supabase
+                .from('cliente_pagos')
+                .select('id, monto')
+                .eq('cliente_id', pago.cliente_id)
+            const pagoRestantes = (pagosRestantesFresh || []).filter(p => !p.concepto?.startsWith('Asignado a:'));
+
             const newGroupPagos = pagoRestantes.reduce((s, p) => s + Number(p.monto), 0);
             const cPagItemsTotal = clienteItems.reduce((s, i) => s + Number(i.monto_pagado || 0), 0);
             let exceso = cPagItemsTotal - newGroupPagos;
@@ -1259,6 +1359,7 @@ export default function ClientOrdersView() {
             }
             setEditPago(null);
             await fetchData();
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
         } catch (e) {
             console.error(e);
             alert('Error al editar el abono: ' + e.message);
@@ -1310,9 +1411,9 @@ export default function ClientOrdersView() {
         try {
             setLoading(true);
             
-            // 1. Obtener los abonos generales actuales del cliente (ordenados por fecha más antigua)
-            const cliPagos = pagos
-                .filter(p => p.cliente_id === clienteId && Number(p.monto) > 0)
+            // 1. Obtener los abonos generales actuales del cliente (SOLO RAÍZ, ordenados por fecha)
+            const cliPagos = getPagosRaiz(pagos, clienteId)
+                .filter(p => Number(p.monto) > 0)
                 .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
             for (const [itemId, amt] of entries) {
@@ -1368,8 +1469,10 @@ export default function ClientOrdersView() {
 
             setShowPayModal(null);
             setDistribuirMontos({});
+            setItemPayAmounts({});
             setPayMode('items');
             await fetchData();
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
             alert("✓ Balance distribuido correctamente.");
         } catch (e) {
             console.error(e);
@@ -1389,16 +1492,26 @@ export default function ClientOrdersView() {
         
         try {
             setLoading(true);
-            // 1. Encontrar el ítem por título para este cliente
-            const it = items.find(i => i.cliente_id === clienteId && i.titulo === titulo);
-            if (!it) {
-                alert(`No se encontró el ítem "${titulo}" para revertir el abono.`);
+            // [BLOQUE 4] Búsqueda fresca del ítem
+            const { data: itFresh } = await supabase
+                .from('cliente_items')
+                .select('id, monto_pagado')
+                .eq('cliente_id', clienteId)
+                .eq('titulo', titulo)
+                .maybeSingle();
+
+            if (!itFresh) {
+                await supabase.from('cliente_pagos').update({
+                    concepto: `Crédito recuperado (ítem eliminado: ${titulo})`
+                }).eq('id', pago.id);
+                await fetchData();
+                alert('El ítem ya no existe. El dinero quedó como crédito del cliente.');
                 return;
             }
 
             // 2. Restar el monto del ítem
-            const nuevoMonto = Math.max(0, Number(it.monto_pagado || 0) - Number(pago.monto));
-            await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', it.id);
+            const nuevoMonto = Math.max(0, Number(itFresh.monto_pagado || 0) - Number(pago.monto));
+            await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itFresh.id);
 
             // 3. Cambiar el registro de pago para que vuelva a contar como saldo disponible
             // Lo marcamos como abono general nuevamente
@@ -1638,7 +1751,7 @@ export default function ClientOrdersView() {
                 fullItems: allMyItems,
                 totalVentas: cVentas,
                 totalPagadoItems: cPagItems,
-                pagos: pagos.filter(p => p.cliente_id === c.id).reduce((s,p) => s + Number(p.monto), 0)
+                pagos: getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
 
@@ -1686,7 +1799,7 @@ export default function ClientOrdersView() {
 
     const sendWhatsApp = (client, type, manualItems = null) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
-        const cliPagos = pagos.filter(p => p.cliente_id === client.id).reduce((s,p) => s + Number(p.monto), 0);
+        const cliPagos = getPagosRaiz(pagos, client.id).reduce((s,p) => s + Number(p.monto), 0);
 
         // Helper de ordenamiento por serie + número de volumen
         const sortByTitle = (arr) => [...arr].sort((a, b) => {
@@ -2345,6 +2458,21 @@ export default function ClientOrdersView() {
                                                                                     if (typeof catalogService !== 'undefined') catalogService.clearCache();
                                                                                 }
                                                                             }
+                                                                            // [BLOQUE 1] Rescate de dinero antes de borrar
+                                                                            if (Number(it.monto_pagado || 0) > 0) {
+                                                                                const { data: pagosAsignados } = await supabase
+                                                                                    .from('cliente_pagos')
+                                                                                    .select('id, monto, caja_mov_id')
+                                                                                    .eq('cliente_id', it.cliente_id)
+                                                                                    .eq('concepto', `Asignado a: ${it.titulo}`);
+
+                                                                                for (const p of (pagosAsignados || [])) {
+                                                                                    await supabase.from('cliente_pagos').update({
+                                                                                        concepto: `Crédito recuperado (ítem eliminado: ${it.titulo})`,
+                                                                                        referencia: null
+                                                                                    }).eq('id', p.id);
+                                                                                }
+                                                                            }
                                                                             await supabase.from('cliente_items').delete().eq('id', it.id);
                                                                             await fetchData(); await fetchCatalog();
                                                                         } catch(e){ console.error(e); }
@@ -2709,6 +2837,11 @@ export default function ClientOrdersView() {
                                 const cVentas = cItems.reduce((s,i) => s + Number(i.precio_venta||0), 0);
                                 const cPagado = cItems.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
                                 const deuda = Math.max(0, cVentas - cPagado);
+                                
+                                // [BLOQUE 9] Cálculo de saldo a favor sin asignar
+                                const cPagosTotales = getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto||0), 0);
+                                const saldoAbonado = Math.max(0, cPagosTotales - cPagado);
+
                                 return (
                                     <tr key={c.id} className="hover:bg-white/5 transition-colors">
                                         <td className="px-5 py-3">
@@ -2716,7 +2849,14 @@ export default function ClientOrdersView() {
                                                 <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-sm shrink-0">
                                                     {(c.nombre || '?')[0].toUpperCase()}
                                                 </div>
-                                                <span className="font-bold text-text">{c.nombre}</span>
+                                                <div className="flex flex-col">
+                                                    <span className="font-bold text-text">{c.nombre}</span>
+                                                    {saldoAbonado > 0 && (
+                                                        <div className="mt-0.5 inline-flex items-center gap-1 bg-orange-500/10 text-orange-500 text-[9px] font-black uppercase px-1.5 py-0.5 rounded border border-orange-500/20 w-fit" title="Crédito sin asignar">
+                                                            ⚠️ BS {formatS(saldoAbonado)}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </td>
                                         <td className="px-5 py-3 text-muted font-mono text-xs">{c.celular || '—'}</td>
@@ -2832,6 +2972,21 @@ export default function ClientOrdersView() {
                                                         await supabase.from('catalogo_productos').update({ stock_fisico: (prod.stock_fisico || 0) + 1 }).eq('id', prod.id);
                                                         await catalogService.logStockMovement({ productoId: prod.id, titulo: prod.titulo || it.titulo || '', delta: 1, stockDespues: (prod.stock_fisico || 0) + 1, motivo: 'DEVOLUCIÓN', detalle: 'Ítem eliminado del pedido' });
                                                         if (typeof catalogService !== 'undefined') catalogService.clearCache();
+                                                    }
+                                                }
+                                                // [BLOQUE 1] Rescate de dinero antes de borrar
+                                                if (Number(it.monto_pagado || 0) > 0) {
+                                                    const { data: pagosAsignados } = await supabase
+                                                        .from('cliente_pagos')
+                                                        .select('id, monto, caja_mov_id')
+                                                        .eq('cliente_id', it.cliente_id)
+                                                        .eq('concepto', `Asignado a: ${it.titulo}`);
+
+                                                    for (const p of (pagosAsignados || [])) {
+                                                        await supabase.from('cliente_pagos').update({
+                                                            concepto: `Crédito recuperado (ítem eliminado: ${it.titulo})`,
+                                                            referencia: null
+                                                        }).eq('id', p.id);
                                                     }
                                                 }
                                                 await supabase.from('cliente_items').delete().eq('id', it.id);
@@ -3104,6 +3259,12 @@ export default function ClientOrdersView() {
                                                         setAddForm({...addForm, precio_final: final, descuento: pct});
                                                     }} className="w-full bg-primary/5 border border-primary/20 px-3 py-2.5 rounded-xl text-xs text-primary font-black outline-none focus:border-primary font-mono text-center shadow-inner"/>
                                                 </div>
+                                                {modoHistorico && (
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[10px] font-black uppercase text-center text-orange-500">Ya Pagado</label>
+                                                        <input type="number" step="0.01" value={addForm.monto_pagado} onChange={e=>setAddForm({...addForm, monto_pagado: e.target.value})} className="w-full bg-orange-500/5 border border-orange-500/20 px-3 py-2.5 rounded-xl text-xs text-orange-600 font-black outline-none focus:border-orange-500 font-mono text-center shadow-inner"/>
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {modoHistorico ? (
@@ -3336,6 +3497,9 @@ export default function ClientOrdersView() {
                                                             <th className="px-3 py-3 text-center w-24">Precio</th>
                                                             <th className="px-3 py-3 text-center w-20">Desc%</th>
                                                             <th className="px-3 py-3 text-center w-24">Final BS</th>
+                                                            {orderPayMode === 'items' && !modoHistorico && (
+                                                                <th className="px-3 py-3 text-center w-24 bg-success/5 text-success">Pago (BS)</th>
+                                                            )}
                                                             {modoHistorico ? (<>
                                                                 <th className="px-3 py-3 text-center w-40">Semana</th>
                                                                 <th className="px-3 py-3 text-center w-32">Estado</th>
@@ -3373,6 +3537,20 @@ export default function ClientOrdersView() {
                                                                     <input type="number" step="0.01" value={c.precio_venta} onChange={(e)=>updateCartItem(i, 'precio_venta', e.target.value)}
                                                                         className="w-20 bg-primary/5 border border-primary/20 rounded px-2 py-1.5 text-center font-mono font-black text-primary outline-none focus:border-primary shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"/>
                                                                 </td>
+
+                                                                {orderPayMode === 'items' && !modoHistorico && (
+                                                                    <td className="px-2 py-2.5 text-center bg-success/5">
+                                                                        <input 
+                                                                            type="number" 
+                                                                            step="0.01" 
+                                                                            value={c.pagoIndividual} 
+                                                                            onChange={(e) => updateCartItem(i, 'pagoIndividual', e.target.value)}
+                                                                            onFocus={e => e.target.select()}
+                                                                            className="w-20 bg-background border border-success/40 rounded px-2 py-1.5 text-center font-mono font-bold text-success outline-none focus:border-success shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                                                            placeholder="0.00"
+                                                                        />
+                                                                    </td>
+                                                                )}
 
                                                                 {modoHistorico ? (<>
                                                                     <td className="px-2 py-2.5 text-center">
@@ -3510,24 +3688,59 @@ export default function ClientOrdersView() {
                             </div>
                         </div>
 
-                        <div className="p-5 border-t border-border bg-background rounded-b-2xl shrink-0 space-y-3">
-                            {/* Pago inicial opcional */}
-                            <div className="flex items-center gap-3 flex-wrap">
-                                <span className="text-[9px] font-black uppercase text-muted tracking-widest">Pago inicial (opcional)</span>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-success opacity-60">BS</span>
-                                    <input type="number" step="0.01" value={orderPayAmt} onChange={e => setOrderPayAmt(e.target.value)} onFocus={e=>e.target.select()}
-                                        className="w-28 bg-surface border border-success/30 pl-8 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-success outline-none focus:border-success"
-                                        placeholder="0.00"/>
-                                </div>
-                                <div className="flex gap-1.5 flex-wrap">
-                                    {[{id:'Efectivo',icon:'💵'},{id:'Yasta (QR)',icon:'📲'},{id:'Banco Unión (QR/Transf)',icon:'🏦'},{id:'BNB',icon:'🏛️'},{id:'Otros',icon:'💳'}].map(m => (
-                                        <button key={m.id} type="button" onClick={() => setOrderMethod(m.id)}
-                                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[9px] font-black border transition-all ${orderMethod === m.id ? 'bg-primary border-primary text-white shadow' : 'bg-surface border-border text-muted hover:border-primary/40'}`}>
-                                            <span>{m.icon}</span>
-                                            <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
+                        <div className="p-5 border-t border-border bg-background rounded-b-2xl shrink-0 space-y-4">
+                            {/* Toggle Binario de Pago Inicial */}
+                            <div className="flex flex-col gap-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-black uppercase text-muted tracking-widest">Configuración de Pago</span>
+                                    <div className="flex bg-muted/20 p-1 rounded-xl border border-border/50">
+                                        <button 
+                                            type="button"
+                                            onClick={() => setOrderPayMode('items')}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${orderPayMode === 'items' ? 'bg-surface text-primary shadow-md border border-primary/20' : 'text-muted-2 hover:text-muted'}`}
+                                        >
+                                            <ShoppingBag size={14}/> Distribuir en Ítems
                                         </button>
-                                    ))}
+                                        <button 
+                                            type="button"
+                                            onClick={() => setOrderPayMode('credit')}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${orderPayMode === 'credit' ? 'bg-surface text-secondary shadow-md border border-secondary/20' : 'text-muted-2 hover:text-muted'}`}
+                                        >
+                                            <Wallet size={14}/> Guardar como Crédito
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-4 p-4 bg-background/50 border border-border/40 rounded-2xl shadow-inner">
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-[9px] font-black uppercase text-muted tracking-widest">Monto Total a Pagar</span>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-success opacity-60">BS</span>
+                                            <input 
+                                                type="number" 
+                                                step="0.01" 
+                                                value={orderPayMode === 'items' ? cart.reduce((s,c)=>s+(Number(c.pagoIndividual)||0),0).toFixed(2) : orderPayAmt} 
+                                                onChange={e => orderPayMode === 'credit' && setOrderPayAmt(e.target.value)} 
+                                                onFocus={e=>e.target.select()}
+                                                disabled={orderPayMode === 'items'}
+                                                className={`w-32 bg-surface border ${orderPayMode === 'items' ? 'border-border text-muted cursor-not-allowed' : 'border-success/30 text-success'} pl-8 pr-2 py-2 rounded-xl text-sm font-mono font-black outline-none focus:border-success shadow-sm`}
+                                                placeholder="0.00"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col gap-1 flex-1">
+                                        <span className="text-[9px] font-black uppercase text-muted tracking-widest pl-1">Método de Pago</span>
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            {[{id:'Efectivo',icon:'💵'},{id:'Yasta (QR)',icon:'📲'},{id:'Banco Unión (QR/Transf)',icon:'🏦'},{id:'BNB',icon:'🏛️'},{id:'Otros',icon:'💳'}].map(m => (
+                                                <button key={m.id} type="button" onClick={() => setOrderMethod(m.id)}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[9px] font-black border transition-all ${orderMethod === m.id ? 'bg-primary border-primary text-white shadow-lg' : 'bg-surface border-border text-muted hover:border-primary/40'}`}>
+                                                    <span>{m.icon}</span>
+                                                    <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div className="flex justify-end gap-4">
@@ -3547,10 +3760,19 @@ export default function ClientOrdersView() {
             )}
 
 
-            {/* PAY MODAL */}
+            {/* PAY MODAL REDESIGNED (Bloques 6-9 Final) */}
             {showPayModal && (() => {
                 const cli = clientes.find(c => c.id === showPayModal);
-                const pItems = items.filter(i => i.cliente_id === showPayModal).sort((a, b) => {
+                const pItemsCli = items.filter(i => i.cliente_id === showPayModal);
+                const totalDeuda = pItemsCli.reduce((s,i) => s + Number(i.precio_venta), 0);
+                const totalPagado = pItemsCli.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                
+                // [BLOQUE 6] Cálculo de Deuda Efectiva (lo que falta pagar tras usar el crédito)
+                const totalAbonado = getPagosRaiz(pagos, showPayModal).reduce((s,p) => s + Number(p.monto), 0);
+                const saldoDisponible = Math.max(0, totalAbonado - totalPagado);
+                const deudaEfectiva = Math.max(0, totalDeuda - totalPagado - saldoDisponible);
+
+                const sortedItems = [...pItemsCli].sort((a, b) => {
                     const getSerie = t => (t || '').replace(/\s\d+\s*$/, '').trim();
                     const getVol = t => { const m = (t || '').match(/\s(\d+)\s*$/); return m ? parseInt(m[1], 10) : null; };
                     const sA = getSerie(a.titulo), sB = getSerie(b.titulo);
@@ -3561,189 +3783,158 @@ export default function ClientOrdersView() {
                 });
                 
                 return (
-                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                        <div className="bg-surface w-full max-w-lg rounded-2xl border border-border flex flex-col">
-                            <div className="p-5 border-b border-border flex justify-between items-center bg-background rounded-t-2xl">
-                                <h2 className="text-lg font-bold font-display text-text flex items-center gap-2">
-                                    💳 Registrar Pago / Abono
-                                </h2>
-                                <button onClick={()=>setShowPayModal(null)} className="text-muted"><X size={20}/></button>
+                    <div className="fixed inset-0 bg-black/60 z-[10020] flex items-center justify-center p-4 backdrop-blur-sm">
+                        <div className="bg-surface w-full max-w-lg rounded-3xl border border-border shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                            
+                            {/* Header & Banner (Bloque 6) */}
+                            <div className="p-6 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 border-b border-border">
+                                <div className="flex justify-between items-start mb-6">
+                                    <div>
+                                        <h2 className="text-xl font-black text-text tracking-tight uppercase">Gestión de Cuenta</h2>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                                            <span className="text-xs font-bold text-muted">{cli?.nombre}</span>
+                                        </div>
+                                    </div>
+                                    <button onClick={()=>{ setShowPayModal(null); setSelectedPayItems([]); setItemPayAmounts({}); }} className="p-2 hover:bg-muted/20 rounded-xl transition-colors text-muted"><X size={20}/></button>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-surface/50 border border-secondary/20 p-4 rounded-2xl shadow-sm">
+                                        <span className="text-[9px] font-black uppercase text-secondary tracking-widest block mb-1">Saldo a Favor</span>
+                                        <div className="text-xl font-mono font-black text-secondary">BS {formatS(saldoDisponible)}</div>
+                                    </div>
+                                    <div className="bg-surface/50 border border-error/20 p-4 rounded-2xl shadow-sm">
+                                        <span className="text-[9px] font-black uppercase text-error tracking-widest block mb-1">Deuda Pendiente</span>
+                                        <div className="text-xl font-mono font-black text-error">BS {formatS(deudaEfectiva)}</div>
+                                    </div>
+                                </div>
                             </div>
                             
-                            <div className="p-5">
-                                <div className="mb-4 text-sm font-bold text-muted text-center uppercase">{cli?.nombre}</div>
-                                {(() => {
-                                    const pItemsCli = items.filter(i => i.cliente_id === showPayModal);
-                                    const cPagItemsCli = pItemsCli.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                                    const groupPagosCli = pagos.filter(p => p.cliente_id === showPayModal).reduce((s,p) => s + Number(p.monto), 0);
-                                    const balanceDisponibleCli = Math.max(0, groupPagosCli - cPagItemsCli);
-                                    return (
-                                        <div className="flex bg-background rounded p-1 mb-5 border border-border mx-auto">
-                                            <button onClick={()=>setPayMode('items')} className={`flex-1 py-1 text-xs font-bold rounded ${payMode==='items'?'bg-surface text-primary shadow':'text-muted'}`}>Pagar Ítems</button>
-                                            <button onClick={()=>setPayMode('general')} className={`flex-1 py-1 text-xs font-bold rounded ${payMode==='general'?'bg-surface text-primary shadow':'text-muted'}`}>Abono a Cuenta</button>
-                                            {balanceDisponibleCli > 0 && (
-                                                <button onClick={()=>setPayMode('distribuir')} className={`flex-1 py-1 text-xs font-bold rounded whitespace-nowrap ${payMode==='distribuir'?'bg-orange-500 text-white shadow':'text-orange-500'}`}>
-                                                    Distribuir BS {formatS(balanceDisponibleCli)}
-                                                </button>
-                                            )}
-                                        </div>
-                                    );
-                                })()}
+                            <div className="p-6 overflow-y-auto max-h-[55vh] space-y-6 scrollbar-hide">
+                                {/* Toggle Binario (Bloque 7) */}
+                                <div className="flex bg-muted/20 p-1.5 rounded-2xl border border-border shadow-inner">
+                                    <button 
+                                        onClick={()=>setPayMode('items')} 
+                                        className={`flex-1 py-3 text-[10px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${payMode==='items' ? 'bg-surface text-primary shadow-md border border-primary/10' : 'text-muted hover:text-text'}`}
+                                    >
+                                        <ShoppingBag size={14}/> Distribuir en Ítems
+                                    </button>
+                                    <button 
+                                        onClick={()=>setPayMode('general')} 
+                                        className={`flex-1 py-3 text-[10px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${payMode==='general' ? 'bg-surface text-primary shadow-md border border-primary/10' : 'text-muted hover:text-text'}`}
+                                    >
+                                        <Wallet size={14}/> Guardar como Crédito
+                                    </button>
+                                </div>
 
                                 {payMode === 'items' ? (
-                                    <div className="mb-4">
-                                        <div className="border border-border rounded-lg bg-background max-h-48 overflow-y-auto">
-                                            <div className="flex items-center justify-between px-3 pt-3 pb-1">
-                                                <span className="text-[10px] text-muted font-bold uppercase">Selecciona los ítems a pagar:</span>
+                                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                                        <div className="border border-border rounded-2xl bg-background overflow-hidden shadow-inner">
+                                            <div className="flex items-center justify-between px-4 py-3 bg-muted/10 border-b border-border/50">
+                                                <span className="text-[10px] text-muted font-black uppercase tracking-widest">Selecciona libros a pagar</span>
                                                 {(() => {
-                                                    const pendientes = pItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0);
-                                                    const todosSeleccionados = pendientes.length > 0 && pendientes.every(i => selectedPayItems.includes(i.id));
+                                                    const pendientes = sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0);
+                                                    const todosSel = pendientes.length > 0 && pendientes.every(i => selectedPayItems.includes(i.id));
                                                     return (
                                                         <button onClick={() => {
-                                                            if (todosSeleccionados) {
-                                                                setSelectedPayItems([]);
-                                                                setPayMonto('');
-                                                            } else {
+                                                            if (todosSel) { setSelectedPayItems([]); setPayMonto(''); }
+                                                            else {
                                                                 const ids = pendientes.map(i => i.id);
                                                                 setSelectedPayItems(ids);
                                                                 const total = pendientes.reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
                                                                 setPayMonto(total);
                                                             }
-                                                        }} className="text-[10px] font-black uppercase text-primary hover:underline">
-                                                            {todosSeleccionados ? 'Deseleccionar' : 'Seleccionar todos'}
+                                                        }} className="text-[9px] font-black uppercase text-primary hover:text-secondary transition-colors">
+                                                            {todosSel ? 'Deseleccionar' : 'Seleccionar Todo'}
                                                         </button>
                                                     );
                                                 })()}
                                             </div>
-                                            {pItems.map(it => {
-                                                const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
-                                                if(deuda <= 0) return null;
-                                                const checked = selectedPayItems.includes(it.id);
-                                                return (
-                                                    <label key={it.id} className={`flex items-center gap-3 px-3 py-2 hover:bg-surface cursor-pointer border-b border-border/50 last:border-0 ${checked ? 'bg-primary/5' : ''}`}>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={checked}
-                                                            onChange={(e)=>{
-                                                                let next;
-                                                                if(e.target.checked) next = [...selectedPayItems, it.id];
-                                                                else next = selectedPayItems.filter(x=>x!==it.id);
-                                                                setSelectedPayItems(next);
-                                                                // Auto-llenar monto con la suma de deudas seleccionadas
-                                                                const total = pItems.filter(i => next.includes(i.id)).reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
-                                                                setPayMonto(total > 0 ? total : '');
-                                                            }}
-                                                            className="w-4 h-4 accent-primary shrink-0"
-                                                        />
-                                                        <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
-                                                            <div className="text-sm font-bold text-text leading-tight">{it.titulo}</div>
-                                                            <div className={`text-xs font-black font-mono shrink-0 ${checked ? 'text-primary' : 'text-error'}`}>BS {formatS(deuda)}</div>
-                                                        </div>
-                                                    </label>
-                                                )
-                                            })}
-                                            {pItems.filter(i=> (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
-                                                <div className="text-xs text-center text-success py-4">No hay ítems con deuda pendiente.</div>
-                                            )}
-                                        </div>
-                                        {selectedPayItems.length > 0 && (() => {
-                                            const selItems = pItems.filter(i => selectedPayItems.includes(i.id));
-                                            const totalSel = selItems.reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
-                                            return (
-                                                <div className="mt-2 flex justify-between items-center px-2">
-                                                    <span className="text-[10px] font-black uppercase text-muted">{selItems.length} ítem(s) seleccionado(s)</span>
-                                                    <span className="text-sm font-black font-mono text-primary">BS {formatS(totalSel)}</span>
-                                                </div>
-                                            );
-                                        })()}
-                                    </div>
-                                ) : payMode === 'distribuir' ? (
-                                    (() => {
-                                        const pItemsCli2 = items.filter(i => i.cliente_id === showPayModal);
-                                        const cPagItemsCli2 = pItemsCli2.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                                        const groupPagosCli2 = pagos.filter(p => p.cliente_id === showPayModal).reduce((s,p) => s + Number(p.monto), 0);
-                                        const balCli = Math.max(0, groupPagosCli2 - cPagItemsCli2);
-                                        return (
-                                            <div className="mb-4">
-                                                <div className="flex justify-between items-center mb-2 p-2 bg-orange-400/10 border border-orange-400/20 rounded-lg">
-                                                    <span className="text-[10px] font-black uppercase text-orange-500">Balance disponible</span>
-                                                    <span className="font-mono font-black text-orange-500">BS {formatS(balCli)}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <div className="text-[10px] text-muted font-bold uppercase">Asignar monto a cada ítem (máx. pendiente):</div>
-                                                    <button
-                                                        onClick={() => {
-                                                            const pendientes = pItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0);
-                                                            let restante = balCli;
-                                                            const nuevos = {};
-                                                            for (const it of pendientes) {
-                                                                if (restante <= 0) break;
-                                                                const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
-                                                                const asignar = Math.min(deuda, restante);
-                                                                nuevos[it.id] = asignar;
-                                                                restante -= asignar;
-                                                            }
-                                                            setDistribuirMontos(nuevos);
-                                                        }}
-                                                        className="text-[10px] font-black uppercase px-2 py-1 rounded bg-orange-500/10 text-orange-500 hover:bg-orange-500/20"
-                                                    >
-                                                        Auto-distribuir
-                                                    </button>
-                                                </div>
-                                                <div className="border border-border rounded-lg bg-background max-h-52 overflow-y-auto">
-                                                    {pItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0).map(it => {
-                                                        const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
-                                                        const montoAsignado = Number(distribuirMontos[it.id] || 0);
-                                                        return (
-                                                            <div key={it.id} className="flex items-center gap-3 p-2 border-b border-border/50 last:border-0">
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="text-sm font-bold truncate text-text">{it.titulo}</div>
-                                                                    <div className="text-[10px] uppercase text-error">Pendiente: BS {formatS(deuda)}</div>
-                                                                </div>
-                                                                <input
-                                                                    type="number" min="0" max={deuda} step="0.01"
-                                                                    value={montoAsignado || ''}
-                                                                    placeholder="0"
-                                                                    onChange={e => {
-                                                                        const val = Math.min(Number(e.target.value), deuda);
-                                                                        setDistribuirMontos(prev => ({ ...prev, [it.id]: val < 0 ? 0 : val }));
-                                                                    }}
-                                                                    className="w-24 bg-background border border-border px-2 py-1 rounded-lg text-sm text-right font-mono outline-none focus:border-orange-500"
-                                                                />
-                                                            </div>
-                                                        );
-                                                    })}
-                                                    {pItems.filter(i => (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
-                                                        <div className="text-xs text-center text-success py-4">Todos los ítems están cubiertos.</div>
-                                                    )}
-                                                </div>
-                                                {(() => {
-                                                    const totalAsignado = Object.values(distribuirMontos).reduce((s,v) => s + Number(v||0), 0);
-                                                    if (totalAsignado === 0) return null;
-                                                    const excedeDist = totalAsignado > balCli;
+                                            <div className="max-h-48 overflow-y-auto divide-y divide-border/50">
+                                                {sortedItems.map(it => {
+                                                    const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
+                                                    if(deuda <= 0) return null;
+                                                    const checked = selectedPayItems.includes(it.id);
                                                     return (
-                                                        <div className={`mt-2 text-center text-xs font-black ${excedeDist ? 'text-error' : 'text-success'}`}>
-                                                            Asignado: BS {formatS(totalAsignado)} / BS {formatS(balCli)} disponible
-                                                            {excedeDist && ' — Supera el balance'}
-                                                        </div>
+                                                        <label key={it.id} className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${checked ? 'bg-primary/5' : 'hover:bg-muted/5'}`}>
+                                                            <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${checked ? 'bg-primary border-primary text-white' : 'border-border'}`}>
+                                                                {checked && <Check size={14} strokeWidth={4}/>}
+                                                                <input type="checkbox" className="hidden" checked={checked} onChange={(e)=>{
+                                                                    let next = e.target.checked ? [...selectedPayItems, it.id] : selectedPayItems.filter(x=>x!==it.id);
+                                                                    setSelectedPayItems(next);
+                                                                    
+                                                                    const newAmounts = { ...itemPayAmounts };
+                                                                    if (e.target.checked) {
+                                                                        newAmounts[it.id] = deuda;
+                                                                    } else {
+                                                                        delete newAmounts[it.id];
+                                                                    }
+                                                                    setItemPayAmounts(newAmounts);
+                                                                    
+                                                                    const total = Object.values(newAmounts).reduce((s, val) => s + Number(val || 0), 0);
+                                                                    setPayMonto(total > 0 ? total : '');
+                                                                }}/>
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-sm font-bold text-text leading-tight truncate">{it.titulo}</div>
+                                                                <div className="text-[10px] text-muted mt-0.5">Saldo: BS {formatS(deuda)}</div>
+                                                            </div>
+                                                            {checked ? (
+                                                                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="0" 
+                                                                        max={deuda}
+                                                                        step="0.1"
+                                                                        value={itemPayAmounts[it.id] || ''}
+                                                                        onChange={(e) => {
+                                                                            let val = Number(e.target.value);
+                                                                            if (val > deuda) val = deuda;
+                                                                            if (val < 0) val = 0;
+                                                                            
+                                                                            const updated = { ...itemPayAmounts, [it.id]: e.target.value === '' ? '' : val };
+                                                                            setItemPayAmounts(updated);
+                                                                            
+                                                                            const newTotal = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
+                                                                            setPayMonto(newTotal > 0 ? newTotal : '');
+                                                                        }}
+                                                                        className="w-20 bg-background border border-border focus:border-primary rounded-lg px-2 py-1 text-right text-xs font-black font-mono text-primary outline-none transition-colors"
+                                                                    />
+                                                                    <span className="text-[10px] font-black text-muted">BS</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="text-xs font-black font-mono text-error/60 shrink-0">BS {formatS(deuda)}</div>
+                                                            )}
+                                                        </label>
                                                     );
-                                                })()}
+                                                })}
+                                                {sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
+                                                    <div className="py-10 text-center text-xs text-muted italic">No hay deudas pendientes</div>
+                                                )}
                                             </div>
-                                        );
-                                    })()
+                                        </div>
+                                    </div>
                                 ) : (
-                                    <div className="mb-4">
-                                        <label className="block text-xs mb-1 text-muted">Concepto (Opcional)</label>
-                                        <input type="text" value={pagoConcepto} onChange={e=>setPagoConcepto(e.target.value)} className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary" placeholder="Ej: Depósito QR..."/>
+                                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-muted uppercase tracking-widest ml-1">Concepto del Abono</label>
+                                            <input 
+                                                type="text" 
+                                                value={pagoConcepto} 
+                                                onChange={e=>setPagoConcepto(e.target.value)} 
+                                                className="w-full bg-background border border-border px-4 py-3 rounded-2xl text-sm outline-none focus:border-primary shadow-sm" 
+                                                placeholder="Ej: Pago adelantado, Reserva..."
+                                            />
+                                        </div>
                                     </div>
                                 )}
 
-                                {payMode !== 'distribuir' && <>
-                                    <div className="mb-4">
-                                        <label className="text-[10px] font-black text-muted uppercase flex items-center gap-2 mb-3">
-                                            <Wallet size={14} className="text-secondary"/> Método de Pago
-                                        </label>
-                                        <div className="grid grid-cols-5 gap-1.5 p-1 bg-background border border-border rounded-xl">
+                                {/* Datos de Pago Comunes */}
+                                <div className="space-y-6 pt-2">
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black text-muted uppercase tracking-widest ml-1">Método de Pago</label>
+                                        <div className="grid grid-cols-5 gap-2">
                                             {[
                                                 { id: 'Efectivo', icon: '💵' },
                                                 { id: 'Yasta (QR)', icon: '📲' },
@@ -3754,85 +3945,116 @@ export default function ClientOrdersView() {
                                                 <button
                                                     key={m.id}
                                                     onClick={() => setPayMethod(m.id)}
-                                                    className={`py-2 flex flex-col items-center gap-0.5 text-[8px] font-black uppercase rounded-lg transition-all leading-tight ${payMethod === m.id ? 'bg-[var(--primary)] text-white shadow-md' : 'text-muted hover:bg-surface'}`}
+                                                    className={`py-3 flex flex-col items-center gap-1 text-[8px] font-black uppercase rounded-2xl transition-all border ${payMethod === m.id ? 'bg-primary border-primary text-white shadow-lg scale-105' : 'bg-surface border-border text-muted hover:border-primary/40'}`}
                                                 >
-                                                    <span className="text-base leading-none">{m.icon}</span>
-                                                    {m.id === 'Banco Unión (QR/Transf)' ? <span>B. Unión</span> : <span>{m.id}</span>}
+                                                    <span className="text-lg">{m.icon}</span>
+                                                    <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
 
                                     {payMethod !== 'Efectivo' && (
-                                        <div className="mb-4">
-                                            <label className="block text-[10px] font-black text-muted uppercase mb-1">No. Operación / Referencia</label>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-muted uppercase tracking-widest ml-1">Referencia / No. Operación</label>
                                             <input
                                                 type="text"
                                                 value={payReference}
                                                 onChange={e => setPayReference(e.target.value)}
-                                                placeholder="Ej: TXN-1234567"
-                                                className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-[var(--primary)] font-mono"
+                                                placeholder="TXN-XXXXXX"
+                                                className="w-full bg-background border border-border px-4 py-3 rounded-2xl text-sm outline-none focus:border-primary font-mono shadow-sm"
                                             />
                                         </div>
                                     )}
 
-                                    <div className="mb-4">
-                                        <label className="block text-xs font-bold mb-1 text-success uppercase">Monto a Abonar (BS)</label>
-                                        <input type="number" value={payMonto} onChange={e=>setPayMonto(e.target.value)} autoFocus className="w-full bg-background border-2 border-border focus:border-success px-4 py-3 rounded-lg text-xl text-center text-success font-bold font-mono outline-none shadow-inner"/>
+                                    <div className="bg-primary/5 border border-primary/20 p-6 rounded-3xl space-y-2 text-center">
+                                        <label className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Monto a Ingresar (BS)</label>
+                                        <input 
+                                            type="number" 
+                                            value={payMonto} 
+                                            onChange={e=>setPayMonto(e.target.value)} 
+                                            className="w-full bg-transparent text-4xl text-center font-black font-mono text-primary outline-none placeholder:text-primary/20"
+                                            placeholder="0.00"
+                                            autoFocus
+                                        />
                                         {payMode === 'items' && selectedPayItems.length > 0 && payMonto > 0 && (
-                                            <div className="text-[10px] text-center mt-2 text-muted uppercase">
+                                            <div className="text-[9px] font-bold text-primary/60 uppercase tracking-widest pt-2">
                                                 {(() => {
-                                                    const totalDeuda = pItems.filter(i => selectedPayItems.includes(i.id)).reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
-                                                    if (Number(payMonto) === totalDeuda) return `Cubre la deuda exacta de ${selectedPayItems.length} ítem(s).`;
-                                                    if (Number(payMonto) < totalDeuda) return `Monto parcial — se aplicará en orden hasta agotar BS ${formatS(payMonto)}.`;
-                                                    return `Cubre todos los ítems y sobran BS ${formatS(Number(payMonto) - totalDeuda)}.`;
+                                                    const totalD = sortedItems.filter(i => selectedPayItems.includes(i.id)).reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
+                                                    if (Number(payMonto) === totalD) return "Pago exacto para la selección";
+                                                    if (Number(payMonto) < totalD) return `Pago parcial de BS ${formatS(payMonto)}`;
+                                                    return `Cubre deudas y sobran BS ${formatS(Number(payMonto) - totalD)} de crédito`;
                                                 })()}
                                             </div>
                                         )}
                                     </div>
-                                </>}
+                                </div>
 
-                                {/* Historial de Abonos */}
+                                {/* Historial Jerárquico de Abonos (Bloque 8) */}
                                 {(() => {
-                                    const cli = clientes.find(c => c.id === showPayModal);
-                                    const historial = pagos.filter(p => p.cliente_id === showPayModal).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-                                    if (historial.length === 0) return null;
+                                    const historialFiltrado = pagos.filter(p => p.cliente_id === showPayModal && Number(p.monto) > 0).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+                                    if (historialFiltrado.length === 0) return null;
+
+                                    const pagosRaiz = historialFiltrado.filter(p => !p.concepto?.startsWith('Asignado a:'));
+                                    const pagosAsignados = historialFiltrado.filter(p => p.concepto?.startsWith('Asignado a:'));
+                                    
                                     const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
+                                    
                                     return (
-                                        <div className="border-t border-border pt-3">
-                                            <div className="text-[10px] font-black text-muted uppercase mb-2">Historial de Abonos Generales</div>
-                                            <div className="max-h-32 overflow-y-auto space-y-1">
-                                                {historial.map(p => (
-                                                    <div key={p.id} className="flex items-center justify-between bg-background rounded-lg px-3 py-1.5 border border-border/50 group">
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <span className="text-base leading-none">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
-                                                            <div className="min-w-0">
-                                                                <div className="text-[10px] font-bold text-text truncate">{p.concepto || 'Abono'}</div>
-                                                                {p.referencia && <div className="text-[9px] text-muted font-mono">Ref: {p.referencia}</div>}
-                                                                <div className="text-[9px] text-muted">{p.metodo_pago || 'Efectivo'} · {new Date(p.fecha || p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: '2-digit' })}</div>
+                                        <div className="pt-4 border-t border-border space-y-4">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[10px] font-black text-muted uppercase tracking-widest">Actividad Reciente</span>
+                                            </div>
+                                            <div className="space-y-3 max-h-60 overflow-y-auto pr-1 scrollbar-hide">
+                                                {pagosRaiz.map(p => (
+                                                    <div key={p.id} className="space-y-1">
+                                                        {/* Fila Raíz */}
+                                                        <div className="flex items-center justify-between p-3 rounded-2xl border bg-surface border-border/50 group hover:border-primary/30 transition-all">
+                                                            <div className="flex items-center gap-3 min-w-0">
+                                                                <div className="w-10 h-10 rounded-xl bg-muted/10 flex items-center justify-center text-lg shadow-sm">
+                                                                    {METHOD_ICON[p.metodo_pago] || '💳'}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <div className="text-xs font-bold truncate text-text">{p.concepto || 'Abono'}</div>
+                                                                    <div className="flex items-center gap-2 text-[9px] text-muted font-medium mt-0.5">
+                                                                        <span>{p.metodo_pago}</span>
+                                                                        <span>•</span>
+                                                                        <span>{new Date(p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' })}</span>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-1 ml-2 shrink-0">
-                                                            <span className="text-success font-black text-xs font-mono whitespace-nowrap">+BS {formatS(p.monto)}</span>
-                                                            {isAdmin && (
-                                                                <>
-                                                                    {p.concepto?.startsWith('Asignado a: ') && (
-                                                                        <button onClick={() => handleRevertirDistribucion(p)} title="Quitar distribución (Devolver a saldo general)"
-                                                                            className="p-1 rounded hover:bg-orange-500/10 text-orange-500 transition-all">
-                                                                            <RotateCcw size={11} />
+                                                            <div className="flex items-center gap-3 ml-4">
+                                                                <div className="text-sm font-black font-mono text-success">+ {formatS(p.monto)}</div>
+                                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    {isAdmin && (
+                                                                        <button onClick={() => !loading && handleDeletePago(p)} className="p-2 bg-error/10 text-error rounded-lg hover:bg-error hover:text-white transition-all shadow-sm">
+                                                                            <Trash2 size={12} strokeWidth={3}/>
                                                                         </button>
                                                                     )}
-                                                                    <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })} title="Editar abono"
-                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
-                                                                        <Edit2 size={11} />
-                                                                    </button>
-                                                                    <button onClick={() => !loading && handleDeletePago(p)} title="Eliminar abono (también en Contabilidad)"
-                                                                        className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all ${loading ? 'cursor-not-allowed' : ''}`}>
-                                                                        <Trash2 size={11} />
-                                                                    </button>
-                                                                </>
-                                                            )}
+                                                                </div>
+                                                            </div>
                                                         </div>
+
+                                                        {/* Sub-ítems Asignados */}
+                                                        {pagosAsignados
+                                                            .filter(pa => pa.caja_mov_id === p.caja_mov_id && pa.caja_mov_id !== null)
+                                                            .map(pa => (
+                                                                <div key={pa.id} className="flex items-center justify-between py-1.5 pr-3 pl-12 bg-primary/5 rounded-xl border border-primary/5 group/sub">
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <span className="text-muted text-xs">↳</span>
+                                                                        <div className="text-[10px] font-bold text-muted truncate">
+                                                                            {pa.concepto.replace('Asignado a: ', '')}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-3 shrink-0">
+                                                                        <div className="text-[10px] font-black font-mono text-muted">BS {formatS(pa.monto)}</div>
+                                                                        <button onClick={() => handleRevertirDistribucion(pa)} className="opacity-0 group-hover/sub:opacity-100 p-1.5 bg-orange-500/10 text-orange-500 rounded-lg hover:bg-orange-500 hover:text-white transition-all" title="Quitar Distribución">
+                                                                            <RotateCcw size={10} strokeWidth={3}/>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        }
                                                     </div>
                                                 ))}
                                             </div>
@@ -3841,41 +4063,29 @@ export default function ClientOrdersView() {
                                 })()}
                             </div>
 
-                            <div className="p-4 border-t border-border flex justify-between items-center gap-3 bg-background rounded-b-2xl">
-                                <div className="flex items-center gap-2">
-                                    {isAdmin && payMode !== 'distribuir' && (
-                                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="No crea movimiento en Contabilidad/Caja. Útil para corregir pagos históricos.">
-                                            <input type="checkbox" checked={sinContabilidad} onChange={e => setSinContabilidad(e.target.checked)} className="w-3.5 h-3.5 accent-orange-400"/>
-                                            <span className={`text-[10px] font-black uppercase ${sinContabilidad ? 'text-orange-500' : 'text-muted'}`}>Sin contabilidad</span>
+                            {/* Footer Actions (Bloque 9) */}
+                            <div className="p-6 bg-background border-t border-border flex items-center justify-between gap-4">
+                                <div>
+                                    {isAdmin && (
+                                        <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                            <div className={`w-4 h-4 rounded border-2 transition-all flex items-center justify-center ${sinContabilidad ? 'bg-orange-500 border-orange-500' : 'border-muted group-hover:border-orange-500/50'}`}>
+                                                {sinContabilidad && <Check size={12} strokeWidth={4} className="text-white"/>}
+                                                <input type="checkbox" className="hidden" checked={sinContabilidad} onChange={e => setSinContabilidad(e.target.checked)}/>
+                                            </div>
+                                            <span className={`text-[10px] font-black uppercase tracking-widest ${sinContabilidad ? 'text-orange-500' : 'text-muted group-hover:text-text'}`}>Sin Contabilidad</span>
                                         </label>
                                     )}
                                 </div>
                                 <div className="flex gap-3">
-                                <button onClick={()=>{ setShowPayModal(null); setSinContabilidad(false); }} className="px-4 py-2 text-sm font-bold text-muted hover:text-text">Cancelar</button>
-                                {payMode === 'distribuir' ? (() => {
-                                    const pItemsCli3 = items.filter(i => i.cliente_id === showPayModal);
-                                    const cPagItemsCli3 = pItemsCli3.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                                    const groupPagosCli3 = pagos.filter(p => p.cliente_id === showPayModal).reduce((s,p) => s + Number(p.monto), 0);
-                                    const balCli3 = Math.max(0, groupPagosCli3 - cPagItemsCli3);
-                                    const totalAsignado3 = Object.values(distribuirMontos).reduce((s,v) => s + Number(v||0), 0);
-                                    const excede3 = totalAsignado3 > balCli3;
-                                    const sinMonto3 = totalAsignado3 === 0;
-                                    return (
-                                        <button onClick={()=>handleDistribuirBalance()} disabled={sinMonto3 || excede3 || loading}
-                                            className="bg-orange-500 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-orange-600 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
-                                            Aplicar distribución
-                                        </button>
-                                    );
-                                })() : (
+                                    <button onClick={()=>{ setShowPayModal(null); setSinContabilidad(false); setSelectedPayItems([]); setItemPayAmounts({}); }} className="px-6 py-3 text-[11px] font-black uppercase tracking-widest text-muted hover:text-text transition-colors">Cancelar</button>
                                     <button 
                                         onClick={()=>handleSavePayment(cli.id)} 
                                         disabled={loading || !payMonto || payMonto <= 0}
-                                        className="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-success/90 shadow-lg disabled:opacity-50 flex items-center gap-2"
+                                        className="bg-primary text-background px-8 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:scale-105 hover:shadow-xl hover:shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-3"
                                     >
-                                        {loading ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : null}
+                                        {loading ? <div className="animate-spin w-4 h-4 border-2 border-background border-t-transparent rounded-full" /> : <Check size={18} strokeWidth={3}/>}
                                         Confirmar Pago
                                     </button>
-                                )}
                                 </div>
                             </div>
                         </div>

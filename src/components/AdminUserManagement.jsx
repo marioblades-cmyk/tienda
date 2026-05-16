@@ -58,6 +58,16 @@ export default function AdminUserManagement() {
         else fetchVendedores();
     };
 
+    const toggleMayorista = async (id, currentStatus) => {
+        const { error } = await supabase
+            .from('vendedores')
+            .update({ es_mayorista: !currentStatus })
+            .eq('id', id);
+
+        if (error) alert(translateError(error));
+        else fetchVendedores();
+    };
+
     const deleteVendedor = async (v) => {
         if (!window.confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${v.nombre}? Esta acción no se puede deshacer.`)) return;
 
@@ -127,6 +137,9 @@ export default function AdminUserManagement() {
                                                     {v.is_socio && (
                                                         <span className="bg-primary/10 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded border border-primary/20">SOCIO</span>
                                                     )}
+                                                    {v.es_mayorista && (
+                                                        <span className="bg-accent/10 text-accent text-[10px] font-bold px-1.5 py-0.5 rounded border border-accent/20">MAYORISTA</span>
+                                                    )}
                                                 </div>
                                                 <p className="text-xs text-muted flex items-center gap-1 font-medium mt-1">
                                                     <Calendar size={12} className="text-primary" /> {new Date(v.created_at).toLocaleDateString()}
@@ -174,6 +187,13 @@ export default function AdminUserManagement() {
                                             title={v.is_socio ? 'Quitar rol de Socio' : 'Hacer Socio'}
                                         >
                                             <User size={16} className={v.is_socio ? "fill-primary/20" : ""} />
+                                        </button>
+                                        <button
+                                            onClick={() => toggleMayorista(v.id, v.es_mayorista)}
+                                            className={`p-2 transition-colors ${v.es_mayorista ? 'text-accent hover:text-muted' : 'text-muted hover:text-accent'}`}
+                                            title={v.es_mayorista ? 'Quitar rol de Mayorista' : 'Hacer Mayorista'}
+                                        >
+                                            <Package size={16} className={v.es_mayorista ? "fill-accent/20" : ""} />
                                         </button>
                                         <button
                                             onClick={() => deleteVendedor(v)}

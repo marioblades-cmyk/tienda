@@ -648,6 +648,46 @@ export default function ReceptionManagement() {
             }
         }
 
+        // [NUEVO] PARTE 1: Actualizar pedido_items de MAYORISTAS
+        try {
+            // Obtenemos los pedido_items de esta semana que son de Entelequia
+            const { data: mayoristaItems } = await supabase
+                .from('pedido_items')
+                .select('id, pedido_id, titulo, estado, pedido:pedidos!inner(semana_id, tipo)')
+                .eq('pedido.semana_id', selectedSemana)
+                .eq('pedido.tipo', 'mayorista')
+                .eq('fuente', 'entelequia');
+
+            const orderIdsToCheck = new Set();
+
+            for (const item of itemsToSave) {
+                const key = normalizeTitle(item.titulo);
+                const matchedMi = (mayoristaItems || []).filter(mi => normalizeTitle(mi.titulo) === key);
+                
+                if (matchedMi.length > 0) {
+                    for (const mi of matchedMi) {
+                        await supabase.from('pedido_items').update({ estado: 'EN TIENDA' }).eq('id', mi.id);
+                        orderIdsToCheck.add(mi.pedido_id);
+                    }
+                }
+            }
+
+            // Verificar si el pedido general mayorista cambió a EN TIENDA
+            for (const pId of orderIdsToCheck) {
+                const { data: allItemsInOrder } = await supabase
+                    .from('pedido_items')
+                    .select('estado')
+                    .eq('pedido_id', pId);
+                
+                const allReceived = allItemsInOrder.every(it => it.estado === 'EN TIENDA');
+                if (allReceived) {
+                    await supabase.from('pedidos').update({ estado: 'EN TIENDA' }).eq('id', pId);
+                }
+            }
+        } catch (err) {
+            console.error("Error actualizando estados mayoristas:", err);
+        }
+
         const stockRows = Object.entries(stockDeltas).map(([id, delta]) => ({
             id,
             stock_fisico: (prodMap[idToKey[id]]?.stock_fisico || 0) + delta,

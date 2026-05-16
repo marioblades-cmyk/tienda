@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
-import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle, RefreshCw, FileUp, ShoppingBag } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Filter, Eye, EyeOff, FileText, Plus, Database, CheckCircle2, AlertCircle, RefreshCw, FileUp, ShoppingBag, Store } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { catalogService } from '../services/catalogService';
@@ -68,7 +68,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         // FETCH RAW DATA AND AGGREGATE IN JS FOR HIGHER FLEXIBILITY
         let query = supabase
             .from('pedido_items')
-            .select('*, pedido:pedidos!inner(vendedor_nombre, tipo, semana_id, vendedor_id)')
+            .select('*, catalogo_productos(precio_tapa), pedido:pedidos!inner(vendedor_nombre, tipo, semana_id, vendedor_id)')
             .eq('pedido.semana_id', selectedSemana);
 
         if (sellerIdFilter) {
@@ -108,9 +108,10 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     };
 
     // Process data for tables
-    const { summaryData, detailData, vendors, tiendaVendors, fileCards } = useMemo(() => {
+    const { summaryData, detailData, vendors, tiendaVendors, fileCards, mayoristasSet } = useMemo(() => {
         const vendorsSet = new Set();
         const tiendaVendorsSet = new Set();
+        const mayoristasTracker = new Set();
         const editorialSummary = {};
         const editorialDetails = {};
 
@@ -119,15 +120,51 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             editorialSummary[ed] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[ed] ?? 35, total: 0 };
         });
 
+        // PASS 1: Reconstruir mapa de precios oficiales (ARS) para esta semana
+        const officialPrices = {};
+        items.forEach(item => {
+            if (!item) return;
+            const tKey = String(item.titulo || '').toLowerCase().trim();
+            
+            // Prioridad 1: Master Conf (Entelequia directo)
+            if (masterConf?.[tKey]) {
+                officialPrices[tKey] = masterConf[tKey].precio;
+                return;
+            }
+            // Prioridad 2: Catálogo (ARS) o Item de Vendedor Normal (que ya es ARS)
+            if (!officialPrices[tKey]) {
+                const catalogPrice = item.catalogo_productos?.precio_tapa;
+                if (catalogPrice) {
+                    officialPrices[tKey] = catalogPrice;
+                } else if (item.pedido?.tipo !== 'mayorista') {
+                    officialPrices[tKey] = item.precio;
+                }
+            }
+        });
+
+        // PASS 2: Agregación principal
         items.forEach(item => {
             if (!item || !item.pedido) return; // Protección contra item malformado
-            const vName = item.pedido.vendedor_nombre || 'Desconocido';
+            
+            // FILTRO DE SEGURIDAD: Excluir items sacados del stock físico
+            // para no pedirlos nuevamente a Entelequia en el consolidado.
+            if (item.fuente === 'stock') return;
             const isTienda = item.pedido.tipo === 'tienda';
+            const isMayorista = item.pedido.tipo === 'mayorista';
+            const vName = isMayorista 
+                ? `${item.pedido.vendedor_nombre} (MAY)` 
+                : (item.pedido.vendedor_nombre || 'Desconocido');
             const editorial = item.editorial || 'Otras';
-            const amount = (item.precio || 0) * (item.cantidad || 0);
+
+            // USAR PRECIO ARS UNIFICADO
+            const searchTitle = String(item.titulo || '').toLowerCase().trim();
+            const precioARS = officialPrices[searchTitle] || item.precio || 0;
+            const amount = precioARS * (item.cantidad || 0);
 
             if (isTienda) tiendaVendorsSet.add(vName);
             else vendorsSet.add(vName);
+
+            if (isMayorista) mayoristasTracker.add(vName);
 
             // Aggregating for Summary Table
             if (!editorialSummary[editorial]) editorialSummary[editorial] = { vendors: {}, tiendaVendors: {}, subtotal: 0, dto: EDITORIAL_DTOS[editorial] ?? 35, total: 0 };
@@ -137,6 +174,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             } else {
                 editorialSummary[editorial].vendors[vName] = (editorialSummary[editorial].vendors[vName] || 0) + amount;
             }
+
+            // El subtotal financiero incluye TODO (vendedores + mayoristas) en ARS
             editorialSummary[editorial].subtotal += amount;
 
             // Aggregating for Detail Table
@@ -149,7 +188,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 editorialDetails[editorial][detailKey] = {
                     titulo: item.titulo,
                     ean: item.isbn_raw,
-                    precio: item.precio,
+                    precio: precioARS, // Guardamos el ARS unificado
                     vendorQty: {},
                     tiendaQty: {},
                     totalQty: 0,
@@ -221,16 +260,28 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         vendorsSet.forEach(v => {
             let vTotal = 0;
             let vItems = 0;
+            const isMayorista = mayoristasTracker.has(v);
             items.forEach(item => {
-                if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo !== 'tienda') {
-                    const amount = (item.precio || 0) * (item.cantidad || 0);
+                // FILTRO DE SEGURIDAD: Excluir stock de la tarjeta (solo Entelequia)
+                if (item.fuente === 'stock') return;
+
+                const itemVName = item?.pedido?.tipo === 'mayorista' 
+                    ? `${item.pedido.vendedor_nombre} (MAY)` 
+                    : (item?.pedido?.vendedor_nombre || 'Desconocido');
+                
+                if (itemVName === v && item?.pedido?.tipo !== 'tienda') {
+                    // USAR PRECIO ARS UNIFICADO
+                    const searchTitle = String(item.titulo || '').toLowerCase().trim();
+                    const precioARS = officialPrices[searchTitle] || item.precio || 0;
+                    const amount = precioARS * (item.cantidad || 0);
+
                     const editorial = item.editorial || 'Otras';
                     const dto = EDITORIAL_DTOS[editorial] ?? 35;
                     vTotal += amount * (1 - (dto / 100));
                     vItems += item.cantidad || 0;
                 }
             });
-            fileCards.push({ name: v, total: Math.round(vTotal), items: vItems, type: 'vendedor' });
+            fileCards.push({ name: v, total: Math.round(vTotal), items: vItems, type: isMayorista ? 'mayorista' : 'vendedor' });
         });
 
         // Extract tienda vendors for cards
@@ -238,8 +289,15 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             let tiendaTotal = 0;
             let tiendaItems = 0;
             items.forEach(item => {
+                // FILTRO DE SEGURIDAD: Excluir stock de la tarjeta (solo Entelequia)
+                if (item.fuente === 'stock') return;
+
                 if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo === 'tienda') {
-                    const amount = (item.precio || 0) * (item.cantidad || 0);
+                    // USAR PRECIO ARS UNIFICADO
+                    const searchTitle = String(item.titulo || '').toLowerCase().trim();
+                    const precioARS = officialPrices[searchTitle] || item.precio || 0;
+                    const amount = precioARS * (item.cantidad || 0);
+
                     const editorial = item.editorial || 'Otras';
                     const dto = EDITORIAL_DTOS[editorial] ?? 35;
                     tiendaTotal += amount * (1 - (dto / 100));
@@ -254,7 +312,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             detailData: editorialDetails,
             vendors: Array.from(vendorsSet).sort(),
             tiendaVendors: Array.from(tiendaVendorsSet).sort(),
-            fileCards
+            fileCards,
+            mayoristasSet: mayoristasTracker
         };
     }, [items]);
 
@@ -488,21 +547,38 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 Object.values(products).forEach(p => {
                     const normTitle = String(p.titulo || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                     const normIsbn = String(p.ean || '').replace(/[^0-9]/g, '');
-                    const pInfo = { 
-                        qty: p.totalQty, 
-                        original: p.titulo, 
-                        precio: p.precio, 
-                        editorial: p.editorial,
-                        normTitle: normTitle // Guardamos el título normalizado para el productKey
-                    };
-                    if (normTitle) flatProducts[normTitle] = pInfo;
-                    
-                    if (normIsbn && normIsbn.length > 5) {
-                        if (!isbnProducts[normIsbn]) {
-                            isbnProducts[normIsbn] = pInfo;
+                    const isMay = Object.keys(p.vendorQty).some(v => v.endsWith('(MAY)'));
+                    const isNormal = Object.keys(p.vendorQty).some(v => !v.endsWith('(MAY)')) || Object.keys(p.tiendaQty).length > 0;
+
+                    if (normTitle) {
+                        if (flatProducts[normTitle]) {
+                            // ACUMULAR CANTIDADES (Evita pérdida de unidades por duplicados)
+                            flatProducts[normTitle].qty += p.totalQty;
+                            if (isMay) flatProducts[normTitle].isMay = true;
+                            if (isNormal) flatProducts[normTitle].isNormal = true;
+                            flatProducts[normTitle].sourceType = 
+                                (flatProducts[normTitle].isMay && flatProducts[normTitle].isNormal) ? 'AMBOS' : 
+                                (flatProducts[normTitle].isMay ? 'MAYORISTA' : 'NORMAL');
                         } else {
-                            // Si el ISBN está repetido para distintos títulos en el sistema, 
-                            // lo marcamos para NO usarlo como única fuente de verdad.
+                            flatProducts[normTitle] = { 
+                                qty: p.totalQty, 
+                                original: p.titulo, 
+                                precio: p.precio, 
+                                editorial: p.editorial,
+                                normTitle: normTitle,
+                                isMay,
+                                isNormal,
+                                sourceType: isMay && isNormal ? 'AMBOS' : (isMay ? 'MAYORISTA' : 'NORMAL')
+                            };
+                        }
+                    }
+                    
+                    if (normIsbn && normIsbn.length > 5 && normTitle) {
+                        const currentInfo = flatProducts[normTitle];
+                        if (!isbnProducts[normIsbn]) {
+                            isbnProducts[normIsbn] = currentInfo;
+                        } else if (isbnProducts[normIsbn] !== currentInfo) {
+                            // Si el ISBN apunta a un objeto distinto (título distinto), marcar como DUPLICATE
                             isbnProducts[normIsbn] = 'DUPLICATE';
                         }
                     }
@@ -528,7 +604,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             console.log("Total consolidado en sistema:", totalQtyInDB);
 
             // Procesar cada hoja identificada
-            productSheets.forEach(({ ws, titleColIndex, qtyColIndex, isbnColIndex }) => {
+            productSheets.forEach(({ ws, titleColIndex, qtyColIndex, isbnColIndex, priceColIndex }) => {
                 console.log(`\n>>> Procesando hoja: "${ws.name}" | TitleCol=${titleColIndex+1}, QtyCol=${qtyColIndex+1} <<<`);
                 
                 // DUMP de las primeras 15 filas para diagnóstico
@@ -553,8 +629,18 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
                     const cellTitle = row.getCell(titleColIndex + 1).value;
                     const cellIsbn = isbnColIndex !== -1 ? String(row.getCell(isbnColIndex + 1).value || '').replace(/[^0-9]/g, '') : null;
+                    const cellPrice = priceColIndex !== -1 ? Number(row.getCell(priceColIndex + 1).value) || 0 : 0;
                     
                     if (!cellTitle && !cellIsbn) return;
+
+                    // FILTRO DE NOTAS/INSTRUCCIONES DEL DISTRIBUIDOR
+                    const titleStr = String(cellTitle || '').toUpperCase();
+                    if (titleStr.includes('POR FAVOR COMPLETAR') || 
+                        titleStr.includes('NO EN EL FONDO') || 
+                        titleStr.includes('REEDICIONES') ||
+                        (cellPrice === 0 && (!cellIsbn || cellIsbn.length < 5))) {
+                        return; // Es una nota, aviso o celda vacía/inválida
+                    }
 
                     // Imprimir muestra de los primeros 5 títulos para diagnóstico
                     if (samplesPrinted < 5 && cellTitle) {
@@ -611,6 +697,27 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             });
 
             console.log("Coincidencias totales encontradas:", matchedCount);
+
+            // --- REPORTE DE DISCREPANCIAS (TEMPORAL) ---
+            const missingTitles = [];
+            Object.values(flatProducts).forEach(p => {
+                const key = `title:${p.normTitle}`;
+                if (!filledProducts.has(key)) {
+                    missingTitles.push({
+                        Título: p.original,
+                        Unidades: p.qty,
+                        Tipo: p.sourceType,
+                        Editorial: p.editorial
+                    });
+                }
+            });
+
+            if (missingTitles.length > 0) {
+                console.group("%c🚨 REPORTE DE TÍTULOS NO ENCONTRADOS EN EL EXCEL", "color: red; font-weight: bold; font-size: 14px;");
+                console.log(`Se detectaron ${missingTitles.length} títulos que están en el sistema pero NO existen en el Excel del distribuidor.`);
+                console.table(missingTitles);
+                console.groupEnd();
+            }
 
             if (matchedCount === 0) {
                 alert("No se encontraron coincidencias entre el Excel del distribuidor y los pedidos de la semana.");
@@ -1123,17 +1230,28 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             {fileCards.map((card, idx) => (
                                 <div key={idx} className="bg-white/5 border border-border/40 p-3 rounded-xl flex items-center justify-between group hover:border-primary/40 transition-all">
                                     <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${card.type === 'tienda' ? 'bg-secondary/20 text-secondary' : 'bg-primary/20 text-primary'}`}>
-                                            <FileText size={16} />
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                            card.type === 'tienda' ? 'bg-secondary/20 text-secondary' : 
+                                            card.type === 'mayorista' ? 'bg-[#E8891A]/20 text-[#E8891A]' : 
+                                            'bg-primary/20 text-primary'
+                                        }`}>
+                                            {card.type === 'mayorista' ? <Store size={16} /> : <FileText size={16} />}
                                         </div>
                                         <div>
-                                            <div className="text-xs font-bold text-text truncate max-w-[200px]">{card.name}</div>
+                                            <div className="flex items-center gap-2 mb-0.5">
+                                                {card.type === 'mayorista' && <span className="bg-[#E8891A] text-white text-[8px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded">MAYORISTA</span>}
+                                                <div className="text-xs font-bold text-text truncate max-w-[200px]">{card.name}</div>
+                                            </div>
                                             <div className="text-xs text-muted font-medium">{card.items} productos cargados</div>
                                         </div>
                                     </div>
                                     <div className="text-right">
                                         <div className="text-xs text-muted/50 font-bold uppercase tracking-widest leading-none mb-1">Total</div>
-                                        <div className={`text-sm font-bold ${card.type === 'tienda' ? 'text-secondary' : 'text-primary'}`}>
+                                        <div className={`text-sm font-bold ${
+                                            card.type === 'tienda' ? 'text-secondary' : 
+                                            card.type === 'mayorista' ? 'text-[#E8891A]' : 
+                                            'text-primary'
+                                        }`}>
                                             ${card.total.toLocaleString()}
                                         </div>
                                     </div>
@@ -1168,7 +1286,15 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         <thead className="text-xs uppercase tracking-widest bg-white/5">
                             <tr className="border-b border-border/40">
                                 <th className="p-4 font-bold text-muted w-1/4">EDITORIAL</th>
-                                {vendors.map(v => <th key={v} className="p-4 font-bold text-center">{v}</th>)}
+                                {vendors.map(v => (
+                                    <th key={v} className={`p-4 font-bold text-center ${mayoristasSet.has(v) ? 'text-[#E8891A]' : ''}`}>
+                                        {mayoristasSet.has(v) ? (
+                                            <div className="flex items-center justify-center gap-1">
+                                                <Store size={14} /> {v}
+                                            </div>
+                                        ) : v}
+                                    </th>
+                                ))}
                                 {tiendaVendors.map(v => <th key={`t-${v}`} className="p-4 font-bold text-center text-secondary">T. {v}</th>)}
                                 <th className="p-4 font-bold text-center">SUBTOTAL</th>
                                 <th className="p-4 font-bold text-center text-muted/40">DTO %</th>
@@ -1295,7 +1421,15 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                                     <th className="p-3 w-1/3">TITULO</th>
                                                     <th className="p-3">EAN</th>
                                                     <th className="p-3 text-center">PRECIO</th>
-                                                    {vendors.map(v => <th key={v} className="p-3 text-center uppercase tracking-tighter">{v}</th>)}
+                                                    {vendors.map(v => (
+                                                        <th key={v} className={`p-3 text-center uppercase tracking-tighter ${mayoristasSet.has(v) ? 'text-[#E8891A]' : ''}`}>
+                                                            {mayoristasSet.has(v) ? (
+                                                                <div className="flex items-center justify-center gap-1">
+                                                                    <Store size={12} /> {v}
+                                                                </div>
+                                                            ) : v}
+                                                        </th>
+                                                    ))}
                                                     {tiendaVendors.map(v => <th key={`t-${v}`} className="p-3 text-center text-secondary uppercase tracking-tighter">T. {v}</th>)}
                                                     <th className="p-3 text-center">TOTAL <span className="text-[9px] block text-muted/60">PEDIDO</span></th>
                                                     {masterConf && <th className="p-3 text-center text-accent">CONFIR. <span className="text-[9px] block text-accent/60">DESPACHO</span></th>}

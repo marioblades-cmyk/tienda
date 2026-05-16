@@ -211,6 +211,12 @@ function MovimientosTab({ turnoActivo }) {
 
     useEffect(() => { fetchMovimientos(); }, [dateFrom, dateTo]);
 
+    useEffect(() => {
+        const handler = () => fetchMovimientos();
+        window.addEventListener('contabilidad:refresh', handler);
+        return () => window.removeEventListener('contabilidad:refresh', handler);
+    }, []);
+
     const fetchMovimientos = async () => {
         setLoading(true);
         try {
