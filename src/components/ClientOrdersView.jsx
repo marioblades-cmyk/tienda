@@ -70,6 +70,8 @@ export default function ClientOrdersView() {
     const [pagoConcepto, setPagoConcepto] = useState('');
     const [payMethod, setPayMethod] = useState('Yasta (QR)'); // 'Efectivo' | 'Yasta (QR)' | 'Banco Unión (QR/Transf)' | 'BNB' | 'Otros'
     const [payReference, setPayReference] = useState(''); // No. operación para pagos digitales
+    const [showAllPayMethods, setShowAllPayMethods] = useState(false);
+    const [showHistorial, setShowHistorial] = useState(false);
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
     const [batchDiscount, setBatchDiscount] = useState('');
     const [batchAbono, setBatchAbono] = useState('');
@@ -85,7 +87,7 @@ export default function ClientOrdersView() {
     const [editItem, setEditItem] = useState(null); // { id, titulo, precio_venta, estado, nota, semana_id }
     const [bulkEstadoTarget, setBulkEstadoTarget] = useState('ENTREGADO');
     const [bulkSemanaTarget, setBulkSemanaTarget] = useState('');
-    const [distribuirMontos, setDistribuirMontos] = useState({}); // { itemId: monto }
+    const [historialOpen, setHistorialOpen] = useState(false);
     const [cartSelected, setCartSelected] = useState(new Set()); // índices seleccionados en el carrito histórico
     const [cartBulkSemana, setCartBulkSemana] = useState('');
     const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
@@ -1403,7 +1405,7 @@ export default function ClientOrdersView() {
     };
 
     const handleDistribuirBalance = async () => {
-        const entries = Object.entries(distribuirMontos).filter(([, amt]) => Number(amt) > 0);
+        const entries = Object.entries(itemPayAmounts).filter(([, amt]) => Number(amt) > 0);
         if (entries.length === 0) return;
         const clienteId = showPayModal;
         if (!clienteId) return;
@@ -1468,7 +1470,6 @@ export default function ClientOrdersView() {
             }
 
             setShowPayModal(null);
-            setDistribuirMontos({});
             setItemPayAmounts({});
             setPayMode('items');
             await fetchData();
@@ -3760,14 +3761,12 @@ export default function ClientOrdersView() {
             )}
 
 
-            {/* PAY MODAL REDESIGNED (Bloques 6-9 Final) */}
+            {/* PAY MODAL */}
             {showPayModal && (() => {
                 const cli = clientes.find(c => c.id === showPayModal);
                 const pItemsCli = items.filter(i => i.cliente_id === showPayModal);
                 const totalDeuda = pItemsCli.reduce((s,i) => s + Number(i.precio_venta), 0);
                 const totalPagado = pItemsCli.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                
-                // [BLOQUE 6] Cálculo de Deuda Efectiva (lo que falta pagar tras usar el crédito)
                 const totalAbonado = getPagosRaiz(pagos, showPayModal).reduce((s,p) => s + Number(p.monto), 0);
                 const saldoDisponible = Math.max(0, totalAbonado - totalPagado);
                 const deudaEfectiva = Math.max(0, totalDeuda - totalPagado - saldoDisponible);
@@ -3781,311 +3780,321 @@ export default function ClientOrdersView() {
                     if (nA !== null && nB !== null) return nA - nB;
                     return (a.titulo || '').localeCompare(b.titulo || '', 'es');
                 });
-                
+
+                const isDistribuir = payMode === 'distribute';
+                const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
+
                 return (
                     <div className="fixed inset-0 bg-black/60 z-[10020] flex items-center justify-center p-4 backdrop-blur-sm">
                         <div className="bg-surface w-full max-w-lg rounded-3xl border border-border shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                            
-                            {/* Header & Banner (Bloque 6) */}
-                            <div className="p-6 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 border-b border-border">
-                                <div className="flex justify-between items-start mb-6">
-                                    <div>
-                                        <h2 className="text-xl font-black text-text tracking-tight uppercase">Gestión de Cuenta</h2>
-                                        <div className="flex items-center gap-2 mt-1">
-                                            <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                                            <span className="text-xs font-bold text-muted">{cli?.nombre}</span>
-                                        </div>
-                                    </div>
-                                    <button onClick={()=>{ setShowPayModal(null); setSelectedPayItems([]); setItemPayAmounts({}); }} className="p-2 hover:bg-muted/20 rounded-xl transition-colors text-muted"><X size={20}/></button>
-                                </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-surface/50 border border-secondary/20 p-4 rounded-2xl shadow-sm">
-                                        <span className="text-[9px] font-black uppercase text-secondary tracking-widest block mb-1">Saldo a Favor</span>
-                                        <div className="text-xl font-mono font-black text-secondary">BS {formatS(saldoDisponible)}</div>
-                                    </div>
-                                    <div className="bg-surface/50 border border-error/20 p-4 rounded-2xl shadow-sm">
-                                        <span className="text-[9px] font-black uppercase text-error tracking-widest block mb-1">Deuda Pendiente</span>
-                                        <div className="text-xl font-mono font-black text-error">BS {formatS(deudaEfectiva)}</div>
+                            {/* Header */}
+                            <div className="px-5 pt-4 pb-3 border-b border-border flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <span className="text-xs font-black uppercase text-text truncate">{cli?.nombre}</span>
+                                    <span className="text-[9px] text-muted">·</span>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <span className="text-[10px] font-black font-mono text-secondary">↑ {formatS(saldoDisponible)}</span>
+                                        <span className="text-[9px] text-muted">·</span>
+                                        <span className="text-[10px] font-black font-mono text-error">↓ {formatS(deudaEfectiva)}</span>
                                     </div>
                                 </div>
+                                <button onClick={()=>{ setShowPayModal(null); setSelectedPayItems([]); setItemPayAmounts({}); setHistorialOpen(false); }} className="p-1.5 hover:bg-muted/20 rounded-lg transition-colors text-muted shrink-0"><X size={16}/></button>
                             </div>
-                            
-                            <div className="p-6 overflow-y-auto max-h-[55vh] space-y-6 scrollbar-hide">
-                                {/* Toggle Binario (Bloque 7) */}
-                                <div className="flex bg-muted/20 p-1.5 rounded-2xl border border-border shadow-inner">
-                                    <button 
-                                        onClick={()=>setPayMode('items')} 
-                                        className={`flex-1 py-3 text-[10px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${payMode==='items' ? 'bg-surface text-primary shadow-md border border-primary/10' : 'text-muted hover:text-text'}`}
+
+                            <div className="p-4 overflow-y-auto max-h-[60vh] space-y-4 scrollbar-hide">
+                                {/* Toggle 3 opciones */}
+                                <div className="flex bg-muted/20 p-1 rounded-2xl border border-border gap-1">
+                                    <button
+                                        onClick={()=>setPayMode('items')}
+                                        className={`flex-1 py-2 text-[9px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-1.5 ${payMode==='items' ? 'bg-surface text-primary shadow border border-primary/10' : 'text-muted hover:text-text'}`}
                                     >
-                                        <ShoppingBag size={14}/> Distribuir en Ítems
+                                        <ShoppingBag size={11}/> Pagar Ítems
                                     </button>
-                                    <button 
-                                        onClick={()=>setPayMode('general')} 
-                                        className={`flex-1 py-3 text-[10px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${payMode==='general' ? 'bg-surface text-primary shadow-md border border-primary/10' : 'text-muted hover:text-text'}`}
+                                    <button
+                                        onClick={()=>setPayMode('general')}
+                                        className={`flex-1 py-2 text-[9px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-1.5 ${payMode==='general' ? 'bg-surface text-primary shadow border border-primary/10' : 'text-muted hover:text-text'}`}
                                     >
-                                        <Wallet size={14}/> Guardar como Crédito
+                                        <Wallet size={11}/> Guardar Crédito
+                                    </button>
+                                    <button
+                                        onClick={()=>setPayMode('distribute')}
+                                        disabled={saldoDisponible <= 0}
+                                        className={`flex-1 py-2 text-[9px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed ${payMode==='distribute' ? 'bg-surface text-secondary shadow border border-secondary/10' : 'text-muted hover:text-text'}`}
+                                    >
+                                        <Layers size={11}/> Distribuir BS {formatS(saldoDisponible)}
                                     </button>
                                 </div>
 
-                                {payMode === 'items' ? (
-                                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                                        <div className="border border-border rounded-2xl bg-background overflow-hidden shadow-inner">
-                                            <div className="flex items-center justify-between px-4 py-3 bg-muted/10 border-b border-border/50">
-                                                <span className="text-[10px] text-muted font-black uppercase tracking-widest">Selecciona libros a pagar</span>
-                                                {(() => {
-                                                    const pendientes = sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0);
-                                                    const todosSel = pendientes.length > 0 && pendientes.every(i => selectedPayItems.includes(i.id));
-                                                    return (
-                                                        <button onClick={() => {
-                                                            if (todosSel) { setSelectedPayItems([]); setPayMonto(''); }
-                                                            else {
-                                                                const ids = pendientes.map(i => i.id);
-                                                                setSelectedPayItems(ids);
-                                                                const total = pendientes.reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
-                                                                setPayMonto(total);
+                                {/* Lista de ítems (modes: items y distribute) */}
+                                {(payMode === 'items' || payMode === 'distribute') && (
+                                    <div className="border border-border rounded-2xl bg-background overflow-hidden shadow-inner animate-in fade-in duration-200">
+                                        <div className="flex items-center justify-between px-3 py-2 bg-muted/10 border-b border-border/50">
+                                            <span className="text-[9px] text-muted font-black uppercase tracking-widest">
+                                                {isDistribuir ? 'Asignar crédito disponible' : 'Selecciona ítems a pagar'}
+                                            </span>
+                                            {(() => {
+                                                const pendientes = sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0);
+                                                const todosSel = pendientes.length > 0 && pendientes.every(i => selectedPayItems.includes(i.id));
+                                                return (
+                                                    <button onClick={() => {
+                                                        if (todosSel) { setSelectedPayItems([]); setItemPayAmounts({}); if (!isDistribuir) setPayMonto(''); }
+                                                        else {
+                                                            const ids = pendientes.map(i => i.id);
+                                                            setSelectedPayItems(ids);
+                                                            const newAmounts = {};
+                                                            if (isDistribuir) {
+                                                                let restante = saldoDisponible;
+                                                                for (const i of pendientes) {
+                                                                    const d = Math.max(0, i.precio_venta - i.monto_pagado);
+                                                                    const take = Math.min(d, restante);
+                                                                    newAmounts[i.id] = take;
+                                                                    restante -= take;
+                                                                    if (restante <= 0) break;
+                                                                }
+                                                            } else {
+                                                                pendientes.forEach(i => { newAmounts[i.id] = Math.max(0, i.precio_venta - i.monto_pagado); });
+                                                                const total = Object.values(newAmounts).reduce((s,v) => s + Number(v||0), 0);
+                                                                setPayMonto(total > 0 ? total : '');
                                                             }
-                                                        }} className="text-[9px] font-black uppercase text-primary hover:text-secondary transition-colors">
-                                                            {todosSel ? 'Deseleccionar' : 'Seleccionar Todo'}
-                                                        </button>
-                                                    );
-                                                })()}
-                                            </div>
-                                            <div className="max-h-48 overflow-y-auto divide-y divide-border/50">
-                                                {sortedItems.map(it => {
-                                                    const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
-                                                    if(deuda <= 0) return null;
-                                                    const checked = selectedPayItems.includes(it.id);
-                                                    return (
-                                                        <label key={it.id} className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${checked ? 'bg-primary/5' : 'hover:bg-muted/5'}`}>
-                                                            <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${checked ? 'bg-primary border-primary text-white' : 'border-border'}`}>
-                                                                {checked && <Check size={14} strokeWidth={4}/>}
-                                                                <input type="checkbox" className="hidden" checked={checked} onChange={(e)=>{
-                                                                    let next = e.target.checked ? [...selectedPayItems, it.id] : selectedPayItems.filter(x=>x!==it.id);
-                                                                    setSelectedPayItems(next);
-                                                                    
-                                                                    const newAmounts = { ...itemPayAmounts };
-                                                                    if (e.target.checked) {
-                                                                        newAmounts[it.id] = deuda;
-                                                                    } else {
-                                                                        delete newAmounts[it.id];
-                                                                    }
-                                                                    setItemPayAmounts(newAmounts);
-                                                                    
+                                                            setItemPayAmounts(newAmounts);
+                                                        }
+                                                    }} className="text-[9px] font-black uppercase text-primary hover:text-secondary transition-colors">
+                                                        {todosSel ? 'Desel.' : 'Selec. Todo'}
+                                                    </button>
+                                                );
+                                            })()}
+                                        </div>
+                                        <div className="max-h-44 overflow-y-auto divide-y divide-border/50">
+                                            {sortedItems.map(it => {
+                                                const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
+                                                if(deuda <= 0) return null;
+                                                const checked = selectedPayItems.includes(it.id);
+                                                return (
+                                                    <label key={it.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${checked ? 'bg-primary/5' : 'hover:bg-muted/5'}`}>
+                                                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all shrink-0 ${checked ? 'bg-primary border-primary text-white' : 'border-border'}`}>
+                                                            {checked && <Check size={10} strokeWidth={4}/>}
+                                                            <input type="checkbox" className="hidden" checked={checked} onChange={(e)=>{
+                                                                let next = e.target.checked ? [...selectedPayItems, it.id] : selectedPayItems.filter(x=>x!==it.id);
+                                                                setSelectedPayItems(next);
+                                                                const newAmounts = { ...itemPayAmounts };
+                                                                if (e.target.checked) {
+                                                                    newAmounts[it.id] = deuda;
+                                                                } else {
+                                                                    delete newAmounts[it.id];
+                                                                }
+                                                                setItemPayAmounts(newAmounts);
+                                                                if (!isDistribuir) {
                                                                     const total = Object.values(newAmounts).reduce((s, val) => s + Number(val || 0), 0);
                                                                     setPayMonto(total > 0 ? total : '');
-                                                                }}/>
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="text-sm font-bold text-text leading-tight truncate">{it.titulo}</div>
-                                                                <div className="text-[10px] text-muted mt-0.5">Saldo: BS {formatS(deuda)}</div>
-                                                            </div>
-                                                            {checked ? (
-                                                                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                                                                    <input 
-                                                                        type="number" 
-                                                                        min="0" 
-                                                                        max={deuda}
-                                                                        step="0.1"
-                                                                        value={itemPayAmounts[it.id] || ''}
-                                                                        onChange={(e) => {
-                                                                            let val = Number(e.target.value);
-                                                                            if (val > deuda) val = deuda;
-                                                                            if (val < 0) val = 0;
-                                                                            
-                                                                            const updated = { ...itemPayAmounts, [it.id]: e.target.value === '' ? '' : val };
-                                                                            setItemPayAmounts(updated);
-                                                                            
+                                                                }
+                                                            }}/>
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-xs font-bold text-text leading-tight truncate">{it.titulo}</div>
+                                                            <div className="text-[9px] text-muted">BS {formatS(deuda)}</div>
+                                                        </div>
+                                                        {checked ? (
+                                                            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    max={deuda}
+                                                                    step="0.1"
+                                                                    value={itemPayAmounts[it.id] || ''}
+                                                                    onChange={(e) => {
+                                                                        let val = Number(e.target.value);
+                                                                        if (val > deuda) val = deuda;
+                                                                        if (val < 0) val = 0;
+                                                                        const updated = { ...itemPayAmounts, [it.id]: e.target.value === '' ? '' : val };
+                                                                        setItemPayAmounts(updated);
+                                                                        if (!isDistribuir) {
                                                                             const newTotal = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
                                                                             setPayMonto(newTotal > 0 ? newTotal : '');
-                                                                        }}
-                                                                        className="w-20 bg-background border border-border focus:border-primary rounded-lg px-2 py-1 text-right text-xs font-black font-mono text-primary outline-none transition-colors"
-                                                                    />
-                                                                    <span className="text-[10px] font-black text-muted">BS</span>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="text-xs font-black font-mono text-error/60 shrink-0">BS {formatS(deuda)}</div>
-                                                            )}
-                                                        </label>
-                                                    );
-                                                })}
-                                                {sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
-                                                    <div className="py-10 text-center text-xs text-muted italic">No hay deudas pendientes</div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black text-muted uppercase tracking-widest ml-1">Concepto del Abono</label>
-                                            <input 
-                                                type="text" 
-                                                value={pagoConcepto} 
-                                                onChange={e=>setPagoConcepto(e.target.value)} 
-                                                className="w-full bg-background border border-border px-4 py-3 rounded-2xl text-sm outline-none focus:border-primary shadow-sm" 
-                                                placeholder="Ej: Pago adelantado, Reserva..."
-                                            />
+                                                                        }
+                                                                    }}
+                                                                    className="w-16 bg-background border border-border focus:border-primary rounded-lg px-2 py-1 text-right text-xs font-black font-mono text-primary outline-none transition-colors"
+                                                                />
+                                                                <span className="text-[9px] font-black text-muted">BS</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-xs font-black font-mono text-error/60 shrink-0">BS {formatS(deuda)}</div>
+                                                        )}
+                                                    </label>
+                                                );
+                                            })}
+                                            {sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0).length === 0 && (
+                                                <div className="py-8 text-center text-xs text-muted italic">No hay deudas pendientes</div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
 
-                                {/* Datos de Pago Comunes */}
-                                <div className="space-y-6 pt-2">
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-muted uppercase tracking-widest ml-1">Método de Pago</label>
-                                        <div className="grid grid-cols-5 gap-2">
-                                            {[
-                                                { id: 'Efectivo', icon: '💵' },
-                                                { id: 'Yasta (QR)', icon: '📲' },
-                                                { id: 'Banco Unión (QR/Transf)', icon: '🏦' },
-                                                { id: 'BNB', icon: '🏛️' },
-                                                { id: 'Otros', icon: '💳' },
-                                            ].map(m => (
-                                                <button
-                                                    key={m.id}
-                                                    onClick={() => setPayMethod(m.id)}
-                                                    className={`py-3 flex flex-col items-center gap-1 text-[8px] font-black uppercase rounded-2xl transition-all border ${payMethod === m.id ? 'bg-primary border-primary text-white shadow-lg scale-105' : 'bg-surface border-border text-muted hover:border-primary/40'}`}
-                                                >
-                                                    <span className="text-lg">{m.icon}</span>
-                                                    <span>{m.id === 'Banco Unión (QR/Transf)' ? 'B. Unión' : m.id}</span>
-                                                </button>
-                                            ))}
-                                        </div>
+                                {/* Concepto (solo mode general) */}
+                                {payMode === 'general' && (
+                                    <div className="space-y-1 animate-in fade-in duration-200">
+                                        <label className="text-[9px] font-black text-muted uppercase tracking-widest ml-1">Concepto del Abono</label>
+                                        <input
+                                            type="text"
+                                            value={pagoConcepto}
+                                            onChange={e=>setPagoConcepto(e.target.value)}
+                                            className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-sm outline-none focus:border-primary shadow-sm"
+                                            placeholder="Ej: Pago adelantado, Reserva..."
+                                        />
                                     </div>
+                                )}
 
-                                    {payMethod !== 'Efectivo' && (
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black text-muted uppercase tracking-widest ml-1">Referencia / No. Operación</label>
+                                {/* Método de pago + monto (solo modes items y general) */}
+                                {!isDistribuir && (
+                                    <div className="space-y-3">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[9px] font-black text-muted uppercase tracking-widest ml-1">Método de Pago</label>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {[
+                                                    { id: 'Efectivo', icon: '💵', label: 'Efectivo' },
+                                                    { id: 'Yasta (QR)', icon: '📲', label: 'Yasta' },
+                                                    { id: 'Banco Unión (QR/Transf)', icon: '🏦', label: 'B. Unión' },
+                                                    { id: 'BNB', icon: '🏛️', label: 'BNB' },
+                                                    { id: 'Otros', icon: '💳', label: 'Otros' },
+                                                ].map(m => (
+                                                    <button
+                                                        key={m.id}
+                                                        onClick={() => setPayMethod(m.id)}
+                                                        className={`px-2.5 py-1.5 flex items-center gap-1.5 text-[9px] font-black uppercase rounded-xl border transition-all ${payMethod === m.id ? 'bg-primary border-primary text-white shadow' : 'bg-surface border-border text-muted hover:border-primary/40'}`}
+                                                    >
+                                                        <span>{m.icon}</span><span>{m.label}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {payMethod !== 'Efectivo' && (
                                             <input
                                                 type="text"
                                                 value={payReference}
                                                 onChange={e => setPayReference(e.target.value)}
-                                                placeholder="TXN-XXXXXX"
-                                                className="w-full bg-background border border-border px-4 py-3 rounded-2xl text-sm outline-none focus:border-primary font-mono shadow-sm"
+                                                placeholder="Ref / No. Operación"
+                                                className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary font-mono shadow-sm"
+                                            />
+                                        )}
+
+                                        <div className="bg-primary/5 border border-primary/20 px-4 py-3 rounded-2xl flex items-center gap-3">
+                                            <label className="text-[9px] font-black text-primary uppercase tracking-widest shrink-0">Monto BS</label>
+                                            <input
+                                                type="number"
+                                                value={payMonto}
+                                                onChange={e=>setPayMonto(e.target.value)}
+                                                className="flex-1 bg-transparent text-2xl text-right font-black font-mono text-primary outline-none placeholder:text-primary/20"
+                                                placeholder="0.00"
+                                                autoFocus
                                             />
                                         </div>
-                                    )}
-
-                                    <div className="bg-primary/5 border border-primary/20 p-6 rounded-3xl space-y-2 text-center">
-                                        <label className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Monto a Ingresar (BS)</label>
-                                        <input 
-                                            type="number" 
-                                            value={payMonto} 
-                                            onChange={e=>setPayMonto(e.target.value)} 
-                                            className="w-full bg-transparent text-4xl text-center font-black font-mono text-primary outline-none placeholder:text-primary/20"
-                                            placeholder="0.00"
-                                            autoFocus
-                                        />
                                         {payMode === 'items' && selectedPayItems.length > 0 && payMonto > 0 && (
-                                            <div className="text-[9px] font-bold text-primary/60 uppercase tracking-widest pt-2">
+                                            <div className="text-[9px] font-bold text-muted uppercase tracking-widest text-right">
                                                 {(() => {
                                                     const totalD = sortedItems.filter(i => selectedPayItems.includes(i.id)).reduce((s,i) => s + Math.max(0, i.precio_venta - i.monto_pagado), 0);
-                                                    if (Number(payMonto) === totalD) return "Pago exacto para la selección";
-                                                    if (Number(payMonto) < totalD) return `Pago parcial de BS ${formatS(payMonto)}`;
-                                                    return `Cubre deudas y sobran BS ${formatS(Number(payMonto) - totalD)} de crédito`;
+                                                    if (Number(payMonto) === totalD) return "Pago exacto";
+                                                    if (Number(payMonto) < totalD) return `Parcial BS ${formatS(payMonto)}`;
+                                                    return `Sobran BS ${formatS(Number(payMonto) - totalD)} → crédito`;
                                                 })()}
                                             </div>
                                         )}
                                     </div>
-                                </div>
+                                )}
 
-                                {/* Historial Jerárquico de Abonos (Bloque 8) */}
+                                {/* Historial colapsado por defecto */}
                                 {(() => {
                                     const historialFiltrado = pagos.filter(p => p.cliente_id === showPayModal && Number(p.monto) > 0).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
                                     if (historialFiltrado.length === 0) return null;
-
                                     const pagosRaiz = historialFiltrado.filter(p => !p.concepto?.startsWith('Asignado a:'));
                                     const pagosAsignados = historialFiltrado.filter(p => p.concepto?.startsWith('Asignado a:'));
-                                    
-                                    const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
-                                    
                                     return (
-                                        <div className="pt-4 border-t border-border space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[10px] font-black text-muted uppercase tracking-widest">Actividad Reciente</span>
-                                            </div>
-                                            <div className="space-y-3 max-h-60 overflow-y-auto pr-1 scrollbar-hide">
-                                                {pagosRaiz.map(p => (
-                                                    <div key={p.id} className="space-y-1">
-                                                        {/* Fila Raíz */}
-                                                        <div className="flex items-center justify-between p-3 rounded-2xl border bg-surface border-border/50 group hover:border-primary/30 transition-all">
-                                                            <div className="flex items-center gap-3 min-w-0">
-                                                                <div className="w-10 h-10 rounded-xl bg-muted/10 flex items-center justify-center text-lg shadow-sm">
-                                                                    {METHOD_ICON[p.metodo_pago] || '💳'}
-                                                                </div>
-                                                                <div className="min-w-0">
-                                                                    <div className="text-xs font-bold truncate text-text">{p.concepto || 'Abono'}</div>
-                                                                    <div className="flex items-center gap-2 text-[9px] text-muted font-medium mt-0.5">
-                                                                        <span>{p.metodo_pago}</span>
-                                                                        <span>•</span>
-                                                                        <span>{new Date(p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' })}</span>
+                                        <div className="border-t border-border pt-3 space-y-2">
+                                            <button onClick={() => setHistorialOpen(v => !v)} className="flex items-center gap-2 w-full text-left">
+                                                <span className="text-[9px] font-black text-muted uppercase tracking-widest flex-1">Historial de Abonos ({pagosRaiz.length})</span>
+                                                {historialOpen ? <ChevronUp size={12} className="text-muted"/> : <ChevronDown size={12} className="text-muted"/>}
+                                            </button>
+                                            {historialOpen && (
+                                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1 scrollbar-hide animate-in fade-in duration-200">
+                                                    {pagosRaiz.map(p => (
+                                                        <div key={p.id} className="space-y-1">
+                                                            <div className="flex items-center justify-between px-3 py-2 rounded-xl border bg-surface border-border/50 group hover:border-primary/30 transition-all">
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <span className="text-base">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-[10px] font-bold truncate text-text">{p.concepto || 'Abono'}</div>
+                                                                        <div className="text-[9px] text-muted">{p.metodo_pago} · {new Date(p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' })}</div>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                            <div className="flex items-center gap-3 ml-4">
-                                                                <div className="text-sm font-black font-mono text-success">+ {formatS(p.monto)}</div>
-                                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <div className="flex items-center gap-2 ml-3 shrink-0">
+                                                                    <div className="text-xs font-black font-mono text-success">+ {formatS(p.monto)}</div>
                                                                     {isAdmin && (
-                                                                        <button onClick={() => !loading && handleDeletePago(p)} className="p-2 bg-error/10 text-error rounded-lg hover:bg-error hover:text-white transition-all shadow-sm">
-                                                                            <Trash2 size={12} strokeWidth={3}/>
+                                                                        <button onClick={() => !loading && handleDeletePago(p)} className="opacity-0 group-hover:opacity-100 p-1.5 bg-error/10 text-error rounded-lg hover:bg-error hover:text-white transition-all">
+                                                                            <Trash2 size={11} strokeWidth={3}/>
                                                                         </button>
                                                                     )}
                                                                 </div>
                                                             </div>
-                                                        </div>
-
-                                                        {/* Sub-ítems Asignados */}
-                                                        {pagosAsignados
-                                                            .filter(pa => pa.caja_mov_id === p.caja_mov_id && pa.caja_mov_id !== null)
-                                                            .map(pa => (
-                                                                <div key={pa.id} className="flex items-center justify-between py-1.5 pr-3 pl-12 bg-primary/5 rounded-xl border border-primary/5 group/sub">
-                                                                    <div className="flex items-center gap-2 min-w-0">
-                                                                        <span className="text-muted text-xs">↳</span>
-                                                                        <div className="text-[10px] font-bold text-muted truncate">
-                                                                            {pa.concepto.replace('Asignado a: ', '')}
+                                                            {pagosAsignados
+                                                                .filter(pa => pa.caja_mov_id === p.caja_mov_id && pa.caja_mov_id !== null)
+                                                                .map(pa => (
+                                                                    <div key={pa.id} className="flex items-center justify-between py-1.5 pr-3 pl-10 bg-primary/5 rounded-lg border border-primary/5 group/sub">
+                                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                                            <span className="text-muted text-xs">↳</span>
+                                                                            <div className="text-[9px] font-bold text-muted truncate">{pa.concepto.replace('Asignado a: ', '')}</div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2 shrink-0">
+                                                                            <div className="text-[9px] font-black font-mono text-muted">BS {formatS(pa.monto)}</div>
+                                                                            <button onClick={() => handleRevertirDistribucion(pa)} className="opacity-0 group-hover/sub:opacity-100 p-1 bg-orange-500/10 text-orange-500 rounded-lg hover:bg-orange-500 hover:text-white transition-all" title="Quitar Distribución">
+                                                                                <RotateCcw size={9} strokeWidth={3}/>
+                                                                            </button>
                                                                         </div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-3 shrink-0">
-                                                                        <div className="text-[10px] font-black font-mono text-muted">BS {formatS(pa.monto)}</div>
-                                                                        <button onClick={() => handleRevertirDistribucion(pa)} className="opacity-0 group-hover/sub:opacity-100 p-1.5 bg-orange-500/10 text-orange-500 rounded-lg hover:bg-orange-500 hover:text-white transition-all" title="Quitar Distribución">
-                                                                            <RotateCcw size={10} strokeWidth={3}/>
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            ))
-                                                        }
-                                                    </div>
-                                                ))}
-                                            </div>
+                                                                ))
+                                                            }
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })()}
                             </div>
 
-                            {/* Footer Actions (Bloque 9) */}
-                            <div className="p-6 bg-background border-t border-border flex items-center justify-between gap-4">
+                            {/* Footer */}
+                            <div className="px-4 py-3 bg-background border-t border-border flex items-center justify-between gap-3">
                                 <div>
                                     {isAdmin && (
                                         <label className="flex items-center gap-2 cursor-pointer group select-none">
                                             <div className={`w-4 h-4 rounded border-2 transition-all flex items-center justify-center ${sinContabilidad ? 'bg-orange-500 border-orange-500' : 'border-muted group-hover:border-orange-500/50'}`}>
-                                                {sinContabilidad && <Check size={12} strokeWidth={4} className="text-white"/>}
+                                                {sinContabilidad && <Check size={10} strokeWidth={4} className="text-white"/>}
                                                 <input type="checkbox" className="hidden" checked={sinContabilidad} onChange={e => setSinContabilidad(e.target.checked)}/>
                                             </div>
-                                            <span className={`text-[10px] font-black uppercase tracking-widest ${sinContabilidad ? 'text-orange-500' : 'text-muted group-hover:text-text'}`}>Sin Contabilidad</span>
+                                            <span className={`text-[9px] font-black uppercase tracking-widest ${sinContabilidad ? 'text-orange-500' : 'text-muted group-hover:text-text'}`}>Sin Contab.</span>
                                         </label>
                                     )}
                                 </div>
-                                <div className="flex gap-3">
-                                    <button onClick={()=>{ setShowPayModal(null); setSinContabilidad(false); setSelectedPayItems([]); setItemPayAmounts({}); }} className="px-6 py-3 text-[11px] font-black uppercase tracking-widest text-muted hover:text-text transition-colors">Cancelar</button>
-                                    <button 
-                                        onClick={()=>handleSavePayment(cli.id)} 
-                                        disabled={loading || !payMonto || payMonto <= 0}
-                                        className="bg-primary text-background px-8 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:scale-105 hover:shadow-xl hover:shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-3"
-                                    >
-                                        {loading ? <div className="animate-spin w-4 h-4 border-2 border-background border-t-transparent rounded-full" /> : <Check size={18} strokeWidth={3}/>}
-                                        Confirmar Pago
-                                    </button>
+                                <div className="flex gap-2">
+                                    <button onClick={()=>{ setShowPayModal(null); setSinContabilidad(false); setSelectedPayItems([]); setItemPayAmounts({}); setHistorialOpen(false); }} className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-muted hover:text-text transition-colors">Cancelar</button>
+                                    {isDistribuir ? (
+                                        <button
+                                            onClick={handleDistribuirBalance}
+                                            disabled={loading || Object.values(itemPayAmounts).reduce((s,v)=>s+Number(v||0),0) <= 0}
+                                            className="bg-secondary text-background px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 hover:shadow-lg hover:shadow-secondary/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {loading ? <div className="animate-spin w-3 h-3 border-2 border-background border-t-transparent rounded-full" /> : <Layers size={14} strokeWidth={3}/>}
+                                            Distribuir
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={()=>handleSavePayment(cli.id)}
+                                            disabled={loading || !payMonto || payMonto <= 0}
+                                            className="bg-primary text-background px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 hover:shadow-lg hover:shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {loading ? <div className="animate-spin w-3 h-3 border-2 border-background border-t-transparent rounded-full" /> : <Check size={14} strokeWidth={3}/>}
+                                            Confirmar
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>
