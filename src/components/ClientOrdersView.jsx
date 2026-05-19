@@ -2143,7 +2143,7 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        const totalPagado = group.pagos > 0 ? group.pagos : cPagItems;
+                        const totalPagado = cPagItems;
                         const balanceDisponible = Math.max(0, group.pagos - cPagItems);
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
