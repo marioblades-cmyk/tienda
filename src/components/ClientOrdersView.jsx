@@ -1730,9 +1730,12 @@ export default function ClientOrdersView() {
 
             if (!isAdmin && myItems.length === 0 && !search) return;
 
-            // KPIs SIEMPRE basados en el total del pedido (no filtrados por vista)
-            const cVentas = allMyItems.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
-            const cPagItems = allMyItems.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
+            // KPIs solo de ítems no entregados (ENTREGADO se excluye de totales del header)
+            const activeForKPI = allMyItems.filter(i => i.estado !== 'ENTREGADO');
+            const cVentas = activeForKPI.reduce((s,i)=>s+Number(i.precio_venta||0), 0);
+            const cPagItems = activeForKPI.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
+            // Necesario para calcular balanceDisponible correctamente (todo el dinero recibido)
+            const allPagItems = allMyItems.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
 
             // Ordenar ítems de visualización
             const sortedItems = [...myItems].sort((a, b) => {
@@ -1752,6 +1755,7 @@ export default function ClientOrdersView() {
                 fullItems: allMyItems,
                 totalVentas: cVentas,
                 totalPagadoItems: cPagItems,
+                allPagadoItems: allPagItems,
                 pagos: getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
@@ -2144,7 +2148,8 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        const balanceDisponible = Math.max(0, group.pagos - cPagItems);
+                        // balanceDisponible usa allPagadoItems (todos los ítems) para no inflarse artificialmente
+                        const balanceDisponible = Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
                         const totalPagado = cPagItems + balanceDisponible;
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
