@@ -381,7 +381,7 @@ export default function MayoristaUpload() {
         setProcessing(true);
         try {
             const storeName = vendedores.find(v => v.id === selectedVendedor)?.nombre;
-            const { data: cajaMov } = await supabase
+            const { data: cajaMov, error: cajError } = await supabase
                 .from('caja_movimientos')
                 .insert([{
                     tipo: 'INGRESO',
@@ -393,8 +393,9 @@ export default function MayoristaUpload() {
                     vendedor_id: selectedVendedor
                 }])
                 .select().single();
+            if (cajError) throw new Error('Error en contabilidad: ' + cajError.message);
 
-            await supabase
+            const { error: pagoError } = await supabase
                 .from('mayorista_pagos')
                 .insert([{
                     vendedor_id: selectedVendedor,
@@ -404,6 +405,7 @@ export default function MayoristaUpload() {
                     notas: pagoForm.notas,
                     caja_mov_id: cajaMov.id
                 }]);
+            if (pagoError) throw new Error('Error al guardar en cuenta del mayorista: ' + pagoError.message);
 
             setSuccess("✓ Pago registrado y sincronizado con contabilidad.");
             setShowPagoModal(false);
@@ -942,7 +944,7 @@ export default function MayoristaUpload() {
                                     <select value={pagoForm.metodo} onChange={(e)=>setPagoForm({...pagoForm, metodo: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-[11px] font-black text-navy outline-none">
                                         <option value="Efectivo">Efectivo</option>
                                         <option value="Transferencia">Transferencia</option>
-                                        <option value="QR">Yasta (QR)</option>
+                                        <option value="Yasta (QR)">Yasta (QR)</option>
                                     </select>
                                 </div>
                             </div>
