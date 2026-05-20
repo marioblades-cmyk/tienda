@@ -1016,34 +1016,43 @@ export default function ClientOrdersView() {
                 const clienteNombre = clientes.find(c => c.id === clienteId)?.nombre || addForm.nombre || clienteId;
                 let cajaMovId = null;
 
-                // 5.1 Crear Movimiento de Caja (Solo si no es modo histórico)
+                // 5.1 Crear Movimiento de Caja (Solo si no es modo histórico y hay dinero nuevo real)
                 if (!modoHistorico) {
-                    let turnoId = null;
-                    if (orderMethod === 'Efectivo') {
-                        const { data: activeTurnoArr } = await supabase
-                            .from('turnos_caja').select('id').eq('estado', 'ABIERTO')
-                            .order('abierto_at', { ascending: false }).limit(1);
-                        
-                        if (!activeTurnoArr || activeTurnoArr.length === 0) {
-                            alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
-                            setLoading(false);
-                            return;
+                    // Calcular si el cliente ya tiene crédito que cubre parte del pago
+                    const cliItemsActuales = items.filter(i => i.cliente_id === clienteId);
+                    const cliPagActuales = getPagosRaiz(pagos, clienteId).reduce((s,p) => s + Number(p.monto), 0);
+                    const cliPagItemsActuales = cliItemsActuales.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                    const creditoExistente = Math.max(0, cliPagActuales - cliPagItemsActuales);
+                    const montoNuevoRealOrder = Math.max(0, totalAbonoCalculado - creditoExistente);
+
+                    if (montoNuevoRealOrder > 0) {
+                        let turnoId = null;
+                        if (orderMethod === 'Efectivo') {
+                            const { data: activeTurnoArr } = await supabase
+                                .from('turnos_caja').select('id').eq('estado', 'ABIERTO')
+                                .order('abierto_at', { ascending: false }).limit(1);
+
+                            if (!activeTurnoArr || activeTurnoArr.length === 0) {
+                                alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
+                                setLoading(false);
+                                return;
+                            }
+                            turnoId = activeTurnoArr[0].id;
                         }
-                        turnoId = activeTurnoArr[0].id;
+                        const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
+                            turno_id: turnoId,
+                            tipo: 'INGRESO',
+                            categoria: 'Cobro Pedido',
+                            concepto: orderPayMode === 'items'
+                                ? `ABONO PEDIDO [${clienteNombre}] · ${cart.length} ítem(s)`
+                                : `ABONO INICIAL CRÉDITO [${clienteNombre}]`,
+                            monto: montoNuevoRealOrder,
+                            vendedor_id: user?.id,
+                            metodo_pago: orderMethod,
+                            origen: 'Pedidos'
+                        }]).select('id').single();
+                        cajaMovId = cajaMov?.id || null;
                     }
-                    const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
-                        turno_id: turnoId,
-                        tipo: 'INGRESO',
-                        categoria: 'Cobro Pedido',
-                        concepto: orderPayMode === 'items' 
-                            ? `ABONO DISTRIBUIDO [${clienteNombre}] · ${cart.length} ítem(s)`
-                            : `ABONO INICIAL CRÉDITO [${clienteNombre}]`,
-                        monto: totalAbonoCalculado,
-                        vendedor_id: user?.id,
-                        metodo_pago: orderMethod,
-                        origen: 'Pedidos'
-                    }]).select('id').single();
-                    cajaMovId = cajaMov?.id || null;
                 }
 
                 // 5.2 Lógica según Modo de Pago
