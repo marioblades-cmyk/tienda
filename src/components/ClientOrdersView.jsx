@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { ffecha, fhora, ffechaLarga, fstamp } from '../utils/dateUtils';
 
 export default function ClientOrdersView() {
     const { user, isAdmin } = useAuth();
@@ -476,7 +477,7 @@ export default function ClientOrdersView() {
 
     const getAuditNote = () => {
         const myName = vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio';
-        const now = new Date().toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const now = fstamp(new Date());
         return `[✔ Entregado por ${myName} el ${now}]`;
     };
 
@@ -2569,7 +2570,7 @@ export default function ClientOrdersView() {
                                                                         <div className="text-[9px] text-muted flex items-center gap-1">
                                                                             <span>{p.metodo_pago || 'Efectivo'}</span>
                                                                             <span>·</span>
-                                                                            <span>{new Date(p.fecha || p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' })}</span>
+                                                                            <span>{ffecha(p.fecha || p.created_at)}</span>
                                                                             <span>·</span>
                                                                             <span className="font-black text-primary uppercase">{vendedores.find(v => v.id === p.vendedor_id)?.nombre?.split(' ')[0] || 'Socio'}</span>
                                                                         </div>
@@ -4037,7 +4038,7 @@ export default function ClientOrdersView() {
                                                                     <span className="text-base">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
                                                                     <div className="min-w-0">
                                                                         <div className="text-[10px] font-bold truncate text-text">{p.concepto || 'Abono'}</div>
-                                                                        <div className="text-[9px] text-muted">{p.metodo_pago} · {new Date(p.created_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' })}</div>
+                                                                        <div className="text-[9px] text-muted">{p.metodo_pago} · {ffecha(p.created_at)}</div>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center gap-2 ml-3 shrink-0">

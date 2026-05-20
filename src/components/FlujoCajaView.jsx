@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
+import { ffecha, fhora, ffechaLarga } from '../utils/dateUtils';
 import { 
     Wallet, Plus, Minus, Eye, History, User, 
     ArrowUpRight, ArrowDownLeft, Trash2, Edit3, 
@@ -787,7 +788,7 @@ export default function FlujoCajaView({ user, profile }) {
                                 </div>
                                 {turnoActivo && (
                                     <span className="text-xs font-mono text-navy font-bold uppercase tracking-tighter">
-                                        ID: {turnoActivo.turno} • {new Date(turnoActivo.abierto_at).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: 'numeric' })} {new Date(turnoActivo.abierto_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        ID: {turnoActivo.turno} • {ffechaLarga(turnoActivo.abierto_at)} {fhora(turnoActivo.abierto_at)}
                                     </span>
                                 )}
                                 {turnoActivo && turnoActivo.vendedor_id !== user?.id && !isAdmin && (
@@ -1397,7 +1398,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                     className="hover:bg-slate-50/50 transition-all group"
                                                 >
                                                     <td className="p-5 font-mono text-navy/60 text-xs font-bold leading-tight">
-                                                        {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                        {fhora(m.created_at)}
                                                     </td>
                                                     <td className="p-5">
                                                         <span className={`px-3 py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider border shadow-sm ${m.tipo === 'INGRESO' ? 'bg-success/10 text-success border-success/20' : 'bg-error/10 text-error border-error/20'}`}>
@@ -1524,7 +1525,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                 return (
                                                 <tr key={h.id} className="hover:bg-primary/5 transition-all group">
                                                     <td className="p-4">
-                                                        <div className="font-bold text-navy text-sm uppercase tracking-tight mb-0.5">{new Date(h.cerrado_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                                                        <div className="font-bold text-navy text-sm uppercase tracking-tight mb-0.5">{ffechaLarga(h.cerrado_at)}</div>
                                                         <div className="text-xs font-bold uppercase text-primary tracking-widest">TURNO: {h.turno}</div>
                                                     </td>
                                                     <td className="p-4 font-bold text-navy text-sm uppercase truncate max-w-[150px]">{h.responsable}</td>
@@ -1643,7 +1644,7 @@ export default function FlujoCajaView({ user, profile }) {
                                 {historialTurnos.map(h => (
                                     <tr key={h.id} className="hover:bg-primary/5 transition-all group">
                                         <td className="p-6">
-                                            <div className="font-bold text-navy text-sm uppercase tracking-tight mb-1">{new Date(h.cerrado_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                                            <div className="font-bold text-navy text-sm uppercase tracking-tight mb-1">{ffechaLarga(h.cerrado_at)}</div>
                                             <div className="text-xs text-navy/60 font-mono tracking-tighter font-bold uppercase">ID: {h.id.slice(0,6)}</div>
                                         </td>
                                         <td className="p-6 font-bold text-navy text-sm uppercase truncate max-w-[150px]">{h.responsable}</td>
@@ -2353,7 +2354,7 @@ function TurnoDetailModal({ turno, onClose }) {
                                         <tbody className="divide-y divide-border/10 text-navy/80">
                                             {movs.map(m => (
                                                 <tr key={m.id} className="hover:bg-background transition-all">
-                                                    <td className="p-3 border-r border-border/5 font-mono opacity-60">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                                                    <td className="p-3 border-r border-border/5 font-mono opacity-60">{fhora(m.created_at)}</td>
                                                     <td className="p-3 font-black">{m.categoria}</td>
                                                     <td className="p-3 italic opacity-80">{m.concepto || '—'}</td>
                                                     <td className={`p-3 text-right font-black font-mono ${m.tipo === 'INGRESO' ? 'text-success' : 'text-error'}`}>
