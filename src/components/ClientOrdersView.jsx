@@ -1468,20 +1468,11 @@ export default function ClientOrdersView() {
                     if (availableInPago <= 0) continue;
 
                     const take = Math.min(availableInPago, restanteXItem);
-                    const newMonto = availableInPago - take;
-                    
-                    // Actualizar el abono original (Restar)
-                    const newConcepto = newMonto === 0 
-                        ? (p.concepto?.includes('Distribuido') ? p.concepto : `${p.concepto || 'Abono'} (Totalmente Distribuido)`)
-                        : p.concepto;
-                        
-                    await supabase.from('cliente_pagos').update({ 
-                        monto: newMonto,
-                        concepto: newConcepto
-                    }).eq('id', p.id);
-                    
-                    // Actualizar memoria local de cliPagos para la siguiente iteración de ítems
-                    p.monto = newMonto;
+
+                    // Solo actualizar memoria local (para no sobrepasar el balance en la iteración
+                    // de múltiples ítems). El ROOT en DB no se reduce: su monto representa el total
+                    // recibido del cliente y la fórmula balance = pagos - allPagadoItems lo maneja.
+                    p.monto = availableInPago - take;
 
                     // Crear el registro de "Dónder se fue el dinero" (Nuevo registro asignado)
                     await supabase.from('cliente_pagos').insert([{
@@ -1540,7 +1531,10 @@ export default function ClientOrdersView() {
                 await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itFresh.id);
             }
 
-            // 2. Restaurar el saldo en el abono raíz original (via caja_mov_id)
+            // 2. Restaurar el saldo en el abono raíz solo si fue reducido (datos viejos)
+            // Si ROOT.monto > 0, el saldo ya está correctamente reflejado en getPagosRaiz
+            // y el balance se ajusta automáticamente al reducir monto_pagado del ítem.
+            // Si ROOT.monto === 0, fue reducido por el distribute viejo → hay que restaurarlo.
             let rootRestaurado = false;
             if (pago.caja_mov_id) {
                 const { data: rootPago } = await supabase
@@ -1552,14 +1546,22 @@ export default function ClientOrdersView() {
                     .maybeSingle();
 
                 if (rootPago) {
-                    const nuevoMontoRoot = Number(rootPago.monto) + Number(pago.monto);
-                    // Quitar el sufijo "(Totalmente Distribuido)" si ahora hay saldo
-                    const nuevoConcRoot = rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto;
-                    await supabase.from('cliente_pagos').update({
-                        monto: nuevoMontoRoot,
-                        concepto: nuevoConcRoot
-                    }).eq('id', rootPago.id);
                     rootRestaurado = true;
+                    if (Number(rootPago.monto) === 0) {
+                        // Datos viejos: ROOT fue reducido a 0 → restaurar con el monto del caja original
+                        const { data: cajaMov } = await supabase
+                            .from('caja_movimientos')
+                            .select('monto')
+                            .eq('id', pago.caja_mov_id)
+                            .maybeSingle();
+                        const montoOriginal = cajaMov ? Number(cajaMov.monto) : Number(pago.monto);
+                        const nuevoConcRoot = rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto;
+                        await supabase.from('cliente_pagos').update({
+                            monto: montoOriginal,
+                            concepto: nuevoConcRoot
+                        }).eq('id', rootPago.id);
+                    }
+                    // Si ROOT.monto > 0: el balance se ajusta solo al reducir el ítem → no tocar ROOT
                 }
             }
 
