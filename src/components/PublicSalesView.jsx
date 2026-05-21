@@ -3,7 +3,7 @@ import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { Search, ShoppingBag, X, Check, ArrowRight, MessageCircle, Info, Filter, User, Sparkles, RefreshCw, Phone, Edit3, Library, Image as ImageIcon, Truck, Calendar, Minus, Plus } from 'lucide-react';
 
-export default function PublicSalesView() {
+export default function PublicSalesView({ onBack }) {
     const getBoliviaTime = () => {
         return new Date(new Date().toLocaleString(
             'en-US', { timeZone: 'America/La_Paz' }
@@ -770,6 +770,16 @@ export default function PublicSalesView() {
                 </div>
 
                 <div className="flex gap-2">
+                    {onBack && (
+                        <button
+                            onClick={onBack}
+                            className="flex items-center gap-2 px-3 py-2 text-white/50 hover:text-white transition-all select-none text-xs bg-white/5 hover:bg-white/10 rounded-xl border border-white/5"
+                            title="Volver al panel de administración"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                            <span className="hidden sm:inline font-black font-mono">ADMIN</span>
+                        </button>
+                    )}
                     <button
                         onClick={() => setActiveSection('cuenta')}
                         className={`flex items-center gap-2 px-3 md:px-4 py-2.5 rounded-xl text-xs font-black font-mono tracking-wider transition-all select-none border ${activeSection === 'cuenta' ? 'bg-primary/20 text-primary border-primary/30 shadow-md' : 'text-slate-300 hover:text-white border-transparent hover:bg-white/5'}`}

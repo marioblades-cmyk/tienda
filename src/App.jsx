@@ -57,7 +57,7 @@ function NavItem({ id, icon: Icon, label, active, onClick, showLabel, badge }) {
 }
 
 // --- Sidebar content ---
-function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, hasPendingChanges, user, profile }) {
+function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, hasPendingChanges, user, profile, onGoToPublic }) {
     const adminItems = [
         { id: 'mis-pedidos', icon: LayoutDashboard, label: 'Mis Pedidos' },
         { id: 'semanas', icon: Calendar, label: 'Semanas' },
@@ -143,6 +143,14 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
                         </div>
                     )}
                 </div>
+                <button
+                    onClick={() => onGoToPublic?.()}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-muted hover:bg-primary/10 hover:text-primary transition-all mb-1 ${!showLabels ? 'justify-center' : ''}`}
+                    title="Ver Tienda Virtual"
+                >
+                    <ShoppingBag size={20} />
+                    {showLabels && <span className="text-xs font-bold font-mono">TIENDA VIRTUAL</span>}
+                </button>
                 <button
                     onClick={() => supabase.auth.signOut()}
                     className={`w-full flex items-center gap-3 p-3 rounded-xl text-muted hover:bg-error/10 hover:text-error transition-all ${!showLabels ? 'justify-center' : ''}`}
@@ -333,6 +341,7 @@ function Main({ onGoToPublic }) {
                     hasPendingChanges={hasPendingChanges}
                     user={user}
                     profile={profile}
+                    onGoToPublic={onGoToPublic}
                 />
                 {/* Collapse toggle */}
                 <button
@@ -424,7 +433,7 @@ export default function App() {
     return (
         <ErrorBoundary>
             {isPublicCatalog ? (
-                <PublicSalesView />
+                <PublicSalesView onBack={() => setIsPublicCatalog(false)} />
             ) : (
                 <AuthProvider>
                     <Main onGoToPublic={() => setIsPublicCatalog(true)} />
