@@ -1018,13 +1018,14 @@ export default function ClientOrdersView() {
                 let cajaMovId = null;
 
                 // 5.1 Crear Movimiento de Caja (Solo si no es modo histórico y hay dinero nuevo real)
+                // montoNuevoRealOrder declarado aquí para que esté disponible en 5.2
+                const cliItemsActuales = items.filter(i => i.cliente_id === clienteId);
+                const cliPagActuales = getPagosRaiz(pagos, clienteId).reduce((s,p) => s + Number(p.monto), 0);
+                const cliPagItemsActuales = cliItemsActuales.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
+                const creditoExistente = Math.max(0, cliPagActuales - cliPagItemsActuales);
+                const montoNuevoRealOrder = Math.max(0, totalAbonoCalculado - creditoExistente);
+
                 if (!modoHistorico) {
-                    // Calcular si el cliente ya tiene crédito que cubre parte del pago
-                    const cliItemsActuales = items.filter(i => i.cliente_id === clienteId);
-                    const cliPagActuales = getPagosRaiz(pagos, clienteId).reduce((s,p) => s + Number(p.monto), 0);
-                    const cliPagItemsActuales = cliItemsActuales.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                    const creditoExistente = Math.max(0, cliPagActuales - cliPagItemsActuales);
-                    const montoNuevoRealOrder = Math.max(0, totalAbonoCalculado - creditoExistente);
 
                     if (montoNuevoRealOrder > 0) {
                         let turnoId = null;
