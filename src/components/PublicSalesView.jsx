@@ -56,6 +56,7 @@ export default function PublicSalesView({ onBack }) {
     const [accountLoading, setAccountLoading] = useState(false);
     const [isEditingData, setIsEditingData] = useState(false);
     const [displayLimit, setDisplayLimit] = useState(50);
+    const [availFilter, setAvailFilter] = useState('todos'); // 'todos' | 'stock' | 'preventa'
 
     useEffect(() => {
         fetchCatalog();
@@ -412,6 +413,13 @@ export default function PublicSalesView({ onBack }) {
             list = list.filter(p => p.editorial === selectedCategory);
         }
 
+        // Filtro de disponibilidad
+        if (availFilter === 'stock') {
+            list = list.filter(p => (p.stock_fisico || 0) > 0);
+        } else if (availFilter === 'preventa') {
+            list = list.filter(p => (p.stock_fisico || 0) === 0 && p.agotado_distribuidor !== true);
+        }
+
         // Ordenar: Prioridad a Ivrea, luego alfabético
         list = list.sort((a, b) => {
             const aIsIvrea = (a.editorial || '').toLowerCase().includes('ivrea');
@@ -422,7 +430,7 @@ export default function PublicSalesView({ onBack }) {
         });
 
         return list;
-    }, [catalog, search, selectedCategory]);
+    }, [catalog, search, selectedCategory, availFilter]);
 
     // Novedades Curadas (Estrenos)
     const novelties = useMemo(() => {
@@ -744,7 +752,25 @@ export default function PublicSalesView({ onBack }) {
 
     return (
         <div className="bg-[#f8fafc] text-slate-800 min-h-screen flex flex-col font-sans antialiased relative pb-12">
-            {/* ── SECCIÓN PRINCIPAL ── */}
+            {/* ── CARRITO FLOTANTE GLOBAL ── */}
+            {cart.length > 0 && !checkoutMode && !isConfirmed && (
+                <div className="fixed bottom-24 right-6 z-[100]">
+                    <button
+                        onClick={() => setCheckoutMode(true)}
+                        className="w-16 h-16 bg-primary hover:bg-secondary text-slate-900 rounded-full shadow-[0_10px_40px_rgba(0,0,0,0.25)] flex items-center justify-center transition-all hover:scale-110 active:scale-90 relative group border-4 border-white"
+                        title="Ver mi Carrito"
+                    >
+                        <ShoppingBag size={26} className="group-hover:rotate-12 transition-transform" />
+                        <div className="absolute -top-2 -right-1 bg-red-500 text-white text-[11px] font-black w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-md">
+                            {cart.reduce((a, c) => a + c.qty, 0)}
+                        </div>
+                        <div className="absolute right-[72px] bg-[#1a2d42] text-white px-3 py-2 rounded-xl text-[10px] font-black whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 shadow-xl">
+                            🛒 {totalCart.toFixed(2)} Bs
+                        </div>
+                    </button>
+                </div>
+            )}
+
             {/* ── BOTÓN FLOTANTE DE WHATSAPP ── */}
             <a
                 href="https://wa.me/59175111355?text=¡Hola!%20Quisiera%20consultar%20sobre%20unos%20mangas."
@@ -1361,65 +1387,66 @@ export default function PublicSalesView({ onBack }) {
                         </div>
                     )}
 
-                    {/* Buscador & Catálogo Completo */}
-                    <div className="max-w-7xl mx-auto w-full px-4 md:px-6 flex flex-col gap-6 animate-fadeIn pb-10 mt-4">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <h3 className="text-xl font-display font-black text-[#1a2d42] tracking-tight leading-none mb-1">Catálogo Completo</h3>
-                                <span className="text-slate-500 text-xs">Usa la lupa para buscar tu manga o cómic. Priorizando Ivrea.</span>
+                    {/* ── BUSCADOR STICKY + FILTROS ── */}
+                    <div className="sticky top-[57px] z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
+                        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 flex flex-col gap-3">
+                            {/* Fila 1: buscador */}
+                            <div className="relative flex items-center">
+                                <Search className="absolute left-4 text-slate-400 pointer-events-none" size={18} />
+                                <input
+                                    type="text"
+                                    value={search}
+                                    onChange={(e) => { setSearch(e.target.value); setDisplayLimit(50); }}
+                                    className="w-full bg-slate-50 border border-slate-200 pl-12 pr-10 py-3 rounded-2xl text-slate-800 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm transition-all font-medium"
+                                    placeholder="Buscar manga, cómic o editorial..."
+                                />
+                                {search && (
+                                    <button onClick={() => setSearch('')} className="absolute right-3 text-slate-400 hover:text-slate-700 transition-colors">
+                                        <X size={16} />
+                                    </button>
+                                )}
                             </div>
-
-                            {/* Filtro por Categorías */}
-                            <div className="flex items-center gap-2 w-full md:w-auto">
-                                <Filter className="text-slate-400 shrink-0" size={18} />
-                                <select
-                                    value={selectedCategory}
-                                    onChange={(e) => setSelectedCategory(e.target.value)}
-                                    className="w-full md:w-48 bg-white border border-slate-200 px-4 py-3 rounded-xl text-slate-800 text-xs focus:outline-none focus:border-primary cursor-pointer shadow-sm transition-all font-bold"
-                                >
-                                    {categories.map(cat => (
-                                        <option key={cat} value={cat}>
-                                            {cat === 'todos' ? 'Todas las Editoriales' : cat}
-                                        </option>
-                                    ))}
-                                </select>
+                            {/* Fila 2: chips disponibilidad + editorial */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {/* Chips de disponibilidad */}
+                                {[
+                                    { id: 'todos', label: '📚 Todos', count: null },
+                                    { id: 'stock', label: '✅ En Stock', count: catalog.filter(p => p.visible_web !== false && (p.stock_fisico||0) > 0).length },
+                                    { id: 'preventa', label: '🟡 Preventa', count: catalog.filter(p => p.visible_web !== false && (p.stock_fisico||0) === 0 && p.agotado_distribuidor !== true).length },
+                                ].map(f => (
+                                    <button
+                                        key={f.id}
+                                        onClick={() => { setAvailFilter(f.id); setDisplayLimit(50); }}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all border whitespace-nowrap ${availFilter === f.id ? 'bg-[#1a2d42] text-white border-[#1a2d42] shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}
+                                    >
+                                        {f.label}{f.count !== null ? ` (${f.count})` : ''}
+                                    </button>
+                                ))}
+                                <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block"/>
+                                {/* Selector editorial */}
+                                <div className="flex items-center gap-1.5">
+                                    <Filter className="text-slate-400 shrink-0" size={14} />
+                                    <select
+                                        value={selectedCategory}
+                                        onChange={(e) => { setSelectedCategory(e.target.value); setDisplayLimit(50); }}
+                                        className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-slate-700 text-xs focus:outline-none focus:border-primary cursor-pointer transition-all font-bold max-w-[160px]"
+                                    >
+                                        {categories.map(cat => (
+                                            <option key={cat} value={cat}>{cat === 'todos' ? 'Todas las editoriales' : cat}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                {/* Contador resultados */}
+                                <span className="ml-auto text-[11px] text-slate-400 font-mono hidden sm:block shrink-0">
+                                    {filteredCatalog.length} títulos
+                                </span>
                             </div>
                         </div>
+                    </div>
 
-                        {/* Buscador Lupa */}
-                        <div className="relative flex items-center">
-                            <Search className="absolute left-4 text-slate-400 pointer-events-none" size={18} />
-                            <input
-                                type="text"
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                className="w-full bg-white border border-slate-200 pl-12 pr-4 py-4 rounded-2xl text-slate-800 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-md transition-all font-medium"
-                                placeholder="Escribe el nombre del manga o cómic que buscas..."
-                            />
-                        </div>
+                    {/* Catálogo Completo */}
+                    <div className="max-w-7xl mx-auto w-full px-4 md:px-6 flex flex-col gap-6 pb-10 mt-6">
 
-                        {/* Carrito Flotante Estilo WhatsApp (Elevado para no solapar) */}
-                        {cart.length > 0 && (
-                            <div className="fixed bottom-24 right-6 z-[100] animate-bounceIn">
-                                <button
-                                    onClick={() => setCheckoutMode(true)}
-                                    className="w-16 h-16 bg-primary hover:bg-secondary text-slate-900 rounded-full shadow-[0_10px_40px_rgba(0,0,0,0.3)] flex items-center justify-center transition-all hover:scale-110 active:scale-90 relative group border-4 border-white"
-                                    title="Ver mi Carrito"
-                                >
-                                    <ShoppingBag size={28} className="group-hover:rotate-12 transition-transform" />
-                                    
-                                    {/* Contador / Badge */}
-                                    <div className="absolute -top-2 -right-1 bg-red-600 text-white text-[11px] font-black w-7 h-7 rounded-full flex items-center justify-center border-2 border-white shadow-md animate-pulse">
-                                        {cart.reduce((a, c) => a + c.qty, 0)}
-                                    </div>
-
-                                    {/* Tooltip con Total (Aparece al pasar el mouse) */}
-                                    <div className="absolute right-20 bg-[#1a2d42] text-white px-4 py-2 rounded-2xl text-[10px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 shadow-xl">
-                                        Total: {totalCart.toFixed(2)} Bs
-                                    </div>
-                                </button>
-                            </div>
-                        )}
 
                         {/* Listado de Productos (Tarjetas con Imagen) */}
                         {loading ? (
@@ -1440,84 +1467,65 @@ export default function PublicSalesView({ onBack }) {
                                     const price = prod.precio_venta_bs || prod.precio_tapa || 0;
 
                                     return (
-                                        <div key={prod.id} className="bg-[#1a2d42] hover:bg-[#152436] border border-[#1a2d42]/10 p-3 md:p-5 rounded-3xl flex flex-col justify-between transition-all duration-200 shadow-lg select-none hover:shadow-2xl hover:scale-[1.02] hover:border-white/10 flex-1 min-w-0 group">
-                                            
-                                            {/* Imagen de Portada */}
-                                            <div className="w-full aspect-[2/3] bg-[#111f2e] rounded-2xl overflow-hidden mb-4 relative flex-shrink-0 border border-white/5 shadow-inner">
-                                                {/* BADGES DE ESTADO (✨ NUEVO / 🔄 REIMP) */}
-                                                {prod.es_novedad && (
-                                                    <div className="absolute top-2 left-2 z-10 bg-green-500 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 animate-pulse border border-green-400">
-                                                        <Sparkles size={10} className="fill-white" />
-                                                        NUEVO
+                                        <div key={prod.id} className="bg-[#1a2d42] hover:bg-[#152436] border border-white/5 p-3 md:p-4 rounded-3xl flex flex-col justify-between transition-all duration-200 shadow-lg select-none hover:shadow-2xl hover:scale-[1.02] flex-1 min-w-0 group cursor-pointer">
+
+                                            {/* Imagen con overlay hover */}
+                                            <div className="w-full aspect-[2/3] bg-[#111f2e] rounded-2xl overflow-hidden mb-3 relative flex-shrink-0 border border-white/5 shadow-inner">
+                                                {/* Badge NUEVO / REIMP */}
+                                                {prod.es_novedad && !prod.es_reimpresion && (
+                                                    <div className="absolute top-2 left-2 z-10 bg-green-500 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 border border-green-400">
+                                                        <Sparkles size={9}/> NUEVO
                                                     </div>
                                                 )}
                                                 {prod.es_reimpresion && (
                                                     <div className="absolute top-2 left-2 z-10 bg-blue-500 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 border border-blue-400">
-                                                        <RefreshCw size={10} />
-                                                        REIMP.
+                                                        <RefreshCw size={9}/> REIMP.
+                                                    </div>
+                                                )}
+                                                {/* Ribbon disponibilidad (bottom de imagen) */}
+                                                <div className={`absolute bottom-0 left-0 right-0 z-10 py-1 text-center text-[9px] font-black tracking-wider backdrop-blur-sm
+                                                    ${status.canOrder && (prod.stock_fisico||0) > 0 ? 'bg-green-500/80 text-white' :
+                                                      status.canOrder ? 'bg-amber-500/80 text-white' :
+                                                      'bg-red-500/70 text-white'}`}>
+                                                    {(prod.stock_fisico||0) > 0 ? '✅ EN STOCK' : status.canOrder ? '🟡 PREVENTA' : '❌ AGOTADO'}
+                                                </div>
+                                                {/* Hover overlay con botón añadir */}
+                                                {status.canOrder && (
+                                                    <div className="absolute inset-0 z-20 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); addToCart(prod, status); }}
+                                                            className="bg-primary hover:bg-secondary text-slate-900 font-black px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xl transform translate-y-2 group-hover:translate-y-0 transition-transform duration-200"
+                                                        >
+                                                            <ShoppingBag size={14}/> Añadir
+                                                        </button>
                                                     </div>
                                                 )}
                                                 {prod.imagen_url ? (
-                                                    <img 
-                                                        src={prod.imagen_url} 
-                                                        alt={prod.titulo} 
-                                                        className="w-full h-full object-cover md:object-contain group-hover:scale-105 transition-transform duration-500" 
-                                                        onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} 
-                                                    />
+                                                    <img src={prod.imagen_url} alt={prod.titulo} className="w-full h-full object-cover md:object-contain group-hover:scale-105 transition-transform duration-500" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
                                                 ) : null}
                                                 <div className={`absolute inset-0 flex flex-col items-center justify-center text-white/20 gap-2 ${prod.imagen_url ? 'hidden' : 'flex'}`}>
-                                                    <ImageIcon size={32} />
-                                                    <span className="text-[10px] font-mono">Sin Imagen</span>
+                                                    <ImageIcon size={32}/><span className="text-[10px] font-mono">Sin Imagen</span>
                                                 </div>
                                             </div>
 
                                             <div className="flex flex-col flex-1">
-                                                <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                                                    <span className="text-[9px] font-mono font-black text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20 tracking-wider">
-                                                        {prod.editorial || 'EDITORIAL'}
-                                                    </span>
-                                                    <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded border tracking-tight leading-tight flex items-center gap-1 ${status.color}`}>
-                                                        {status.isComingSoon && <Truck size={10} className="animate-bounce" />}
-                                                        {status.label}
-                                                    </span>
-                                                </div>
-
-                                                <h3 className="text-sm md:text-base font-bold text-white mb-1 tracking-tight leading-snug">
-                                                    {prod.titulo}
-                                                </h3>
+                                                <span className="text-[9px] font-mono font-black text-primary/80 tracking-wider mb-1 truncate">{prod.editorial || 'EDITORIAL'}</span>
+                                                <h3 className="text-xs md:text-sm font-bold text-white tracking-tight leading-snug line-clamp-2 flex-1">{prod.titulo}</h3>
                                             </div>
 
-                                            <div className="flex items-center justify-between mt-2 pt-3 border-t border-white/10">
-                                                <div className="flex flex-col">
-                                                    <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase hidden md:inline">Precio</span>
-                                                    <span className="text-[11px] md:text-xl font-black text-white leading-tight tracking-tight">
-                                                        {price.toFixed(2)} <span className="text-primary text-[9px]">Bs.</span>
-                                                    </span>
-                                                </div>
-
-                                    {(() => {
-                                      const status = getAvailabilityStatus(prod);
-                                      return (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => { e.preventDefault(); status.canOrder && addToCart(prod, status); }}
-                                          disabled={!status.canOrder}
-                                          className={`font-bold px-2 py-1.5 md:px-3.5 md:py-2 
-                                            rounded-xl transition-all duration-200 flex items-center 
-                                            gap-1.5 shadow-md text-xs
-                                            ${status.canOrder 
-                                              ? 'bg-primary hover:bg-secondary text-slate-900 cursor-pointer' 
-                                              : 'bg-gray-500/20 text-gray-400 cursor-not-allowed opacity-50'
-                                            }`}
-                                        >
-                                          <ShoppingBag size={14} className="hidden md:block"/>
-                                          <span>
-                                            {status.canOrder ? 'Añadir' : 
-                                             status.agotado ? 'Agotado' : '...'}
-                                          </span>
-                                        </button>
-                                      );
-                                    })()}
+                                            <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/10">
+                                                <span className="text-base md:text-xl font-black text-white leading-none">
+                                                    {price.toFixed(2)} <span className="text-primary text-[10px] font-bold">Bs</span>
+                                                </span>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); status.canOrder && addToCart(prod, status); }}
+                                                    disabled={!status.canOrder}
+                                                    className={`font-black px-2.5 py-1.5 md:px-3 md:py-2 rounded-xl transition-all text-xs flex items-center gap-1 shadow-sm
+                                                        ${status.canOrder ? 'bg-primary hover:bg-secondary text-slate-900' : 'bg-white/10 text-white/30 cursor-not-allowed'}`}
+                                                >
+                                                    <ShoppingBag size={13}/>
+                                                    <span className="hidden md:inline">{status.canOrder ? 'Añadir' : 'Agotado'}</span>
+                                                </button>
                                             </div>
                                         </div>
                                     );
@@ -1560,28 +1568,35 @@ const FeaturedSection = ({ items, title, icon: Icon, colorClass = "text-primary"
                     const price = prod.precio_venta_bs || prod.precio_tapa || 0;
 
                     return (
-                        <div key={prod.id} className="bg-[#1a2d42] border border-[#1a2d42]/10 p-3 md:p-5 rounded-3xl flex flex-col justify-between transition-all duration-200 hover:scale-[1.02] hover:shadow-xl select-none flex-1 group">
-                            <div className="w-full aspect-[2/3] bg-[#111f2e] rounded-2xl overflow-hidden mb-4 relative flex-shrink-0 border border-white/5 shadow-inner">
-                                {/* BADGES DE ESTADO (✨ NUEVO / 🔄 REIMP) */}
-                                {prod.es_novedad && (
-                                    <div className="absolute top-2 left-2 z-10 bg-green-500 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 animate-pulse border border-green-400">
-                                        <Sparkles size={10} className="fill-white" />
-                                        NUEVO
+                        <div key={prod.id} className="bg-[#1a2d42] border border-white/5 p-3 md:p-4 rounded-3xl flex flex-col justify-between transition-all duration-200 hover:scale-[1.02] hover:shadow-xl select-none flex-1 group cursor-pointer">
+                            <div className="w-full aspect-[2/3] bg-[#111f2e] rounded-2xl overflow-hidden mb-3 relative flex-shrink-0 border border-white/5 shadow-inner">
+                                {prod.es_novedad && !prod.es_reimpresion && (
+                                    <div className="absolute top-2 left-2 z-10 bg-green-500 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 border border-green-400">
+                                        <Sparkles size={9}/> NUEVO
                                     </div>
                                 )}
                                 {prod.es_reimpresion && (
                                     <div className="absolute top-2 left-2 z-10 bg-blue-500 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 border border-blue-400">
-                                        <RefreshCw size={10} />
-                                        REIMP.
+                                        <RefreshCw size={9}/> REIMP.
+                                    </div>
+                                )}
+                                {/* Ribbon disponibilidad */}
+                                <div className={`absolute bottom-0 left-0 right-0 z-10 py-1 text-center text-[9px] font-black tracking-wider backdrop-blur-sm
+                                    ${status.canOrder && (prod.stock_fisico||0) > 0 ? 'bg-green-500/80 text-white' :
+                                      status.canOrder ? 'bg-amber-500/80 text-white' :
+                                      'bg-red-500/70 text-white'}`}>
+                                    {(prod.stock_fisico||0) > 0 ? '✅ EN STOCK' : status.canOrder ? '🟡 PREVENTA' : '❌ AGOTADO'}
+                                </div>
+                                {/* Hover overlay */}
+                                {status.canOrder && (
+                                    <div className="absolute inset-0 z-20 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                        <button onClick={(e) => { e.stopPropagation(); addToCart(prod, status); }} className="bg-primary hover:bg-secondary text-slate-900 font-black px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xl transform translate-y-2 group-hover:translate-y-0 transition-transform duration-200">
+                                            <ShoppingBag size={14}/> Añadir
+                                        </button>
                                     </div>
                                 )}
                                 {prod.imagen_url ? (
-                                    <img 
-                                        src={prod.imagen_url} 
-                                        alt={prod.titulo} 
-                                        className="w-full h-full object-cover md:object-contain group-hover:scale-105 transition-transform duration-500" 
-                                        onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} 
-                                    />
+                                    <img src={prod.imagen_url} alt={prod.titulo} className="w-full h-full object-cover md:object-contain group-hover:scale-105 transition-transform duration-500" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
                                 ) : null}
                                 <div className={`absolute inset-0 flex flex-col items-center justify-center text-white/20 gap-2 ${prod.imagen_url ? 'hidden' : 'flex'}`}>
                                     <ImageIcon size={32} />
@@ -1591,7 +1606,7 @@ const FeaturedSection = ({ items, title, icon: Icon, colorClass = "text-primary"
 
                             <div className="flex flex-col flex-1">
                                 <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                                    <span className="text-[9px] font-mono font-black text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20 tracking-wider">
+                                    <span className="text-[9px] font-mono font-black text-primary/80 tracking-wider">
                                         {prod.editorial || 'EDITORIAL'}
                                     </span>
                                     <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded border tracking-tight leading-tight flex items-center gap-1 ${status.color}`}>
@@ -1599,34 +1614,23 @@ const FeaturedSection = ({ items, title, icon: Icon, colorClass = "text-primary"
                                         {status.label}
                                     </span>
                                 </div>
-                                <h3 className="text-sm md:text-base font-bold text-white mb-1 tracking-tight leading-snug">
+                                <h3 className="text-xs md:text-sm font-bold text-white tracking-tight leading-snug line-clamp-2 flex-1">
                                     {prod.titulo}
                                 </h3>
                             </div>
 
-                            <div className="flex items-center justify-between mt-2 pt-3 border-t border-white/10">
-                                <div className="flex flex-col">
-                                    <span className="text-[10px] font-black text-white leading-tight tracking-tight">
-                                        {price.toFixed(2)} <span className="text-primary text-[9px]">Bs.</span>
-                                    </span>
-                                </div>
+                            <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/10">
+                                <span className="text-base md:text-xl font-black text-white leading-none">
+                                    {price.toFixed(2)} <span className="text-primary text-[10px] font-bold">Bs</span>
+                                </span>
                                 <button
-                                    type="button"
-                                    onClick={(e) => { e.preventDefault(); status.canOrder && addToCart(prod, status); }}
+                                    onClick={(e) => { e.stopPropagation(); status.canOrder && addToCart(prod, status); }}
                                     disabled={!status.canOrder}
-                                    className={`font-bold px-2 py-1.5 md:px-3.5 md:py-2 
-                                    rounded-xl transition-all duration-200 flex items-center 
-                                    gap-1.5 shadow-md text-xs
-                                    ${status.canOrder 
-                                        ? 'bg-primary hover:bg-secondary text-slate-900 cursor-pointer' 
-                                        : 'bg-gray-500/20 text-gray-400 cursor-not-allowed opacity-50'
-                                    }`}
+                                    className={`font-black px-2.5 py-1.5 md:px-3 md:py-2 rounded-xl transition-all text-xs flex items-center gap-1 shadow-sm
+                                        ${status.canOrder ? 'bg-primary hover:bg-secondary text-slate-900' : 'bg-white/10 text-white/30 cursor-not-allowed'}`}
                                 >
-                                    <ShoppingBag size={14} className="hidden md:block"/>
-                                    <span>
-                                    {status.canOrder ? 'Añadir' : 
-                                        status.agotado ? 'Agotado' : '...'}
-                                    </span>
+                                    <ShoppingBag size={13}/>
+                                    <span className="hidden md:inline">{status.canOrder ? 'Añadir' : 'Agotado'}</span>
                                 </button>
                             </div>
                         </div>
