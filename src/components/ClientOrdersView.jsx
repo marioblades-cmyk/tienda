@@ -1058,18 +1058,23 @@ export default function ClientOrdersView() {
 
                 // 5.2 Lógica según Modo de Pago
                 if (orderPayMode === 'items') {
-                    // [NUEVO] Crear registro RAÍZ en cliente_pagos para el historial agrupado
-                    await supabase.from('cliente_pagos').insert([{
-                        cliente_id: clienteId,
-                        monto: totalAbonoCalculado,
-                        concepto: modoHistorico 
-                            ? `Pago inicial (histórico) · ${cart.length} ítem(s)`
-                            : `Pago inicial · ${cart.length} ítem(s)`,
-                        vendedor_id: user?.id,
-                        metodo_pago: orderMethod,
-                        referencia: null,
-                        caja_mov_id: cajaMovId,
-                    }]);
+                    // Crear registro RAÍZ en cliente_pagos
+                    // monto = montoNuevoRealOrder para no inflar saldo cuando hay crédito existente
+                    // En modo histórico siempre se registra el total (sin crédito previo)
+                    const rootMontoOrder = modoHistorico ? totalAbonoCalculado : montoNuevoRealOrder;
+                    if (rootMontoOrder > 0) {
+                        await supabase.from('cliente_pagos').insert([{
+                            cliente_id: clienteId,
+                            monto: rootMontoOrder,
+                            concepto: modoHistorico
+                                ? `Pago inicial (histórico) · ${cart.length} ítem(s)`
+                                : `Pago inicial · ${cart.length} ítem(s)`,
+                            vendedor_id: user?.id,
+                            metodo_pago: orderMethod,
+                            referencia: null,
+                            caja_mov_id: cajaMovId,
+                        }]);
+                    }
 
                     // Distribución manual basada en lo ingresado en el carrito
                     for (let idx = 0; idx < cart.length; idx++) {
@@ -1203,18 +1208,22 @@ export default function ClientOrdersView() {
                     return Number(itemPayAmounts[eq.id] || 0) >= deuda;
                 });
 
-                // [NUEVO] Crear registro RAÍZ en cliente_pagos para el historial agrupado en modo items
-                await supabase.from('cliente_pagos').insert([{
-                    cliente_id: clienteId,
-                    monto: amt,
-                    concepto: todosCompletos 
-                        ? `Pago recibido · ${itemsToUpdate.length} ítem(s)`
-                        : `Pago parcial · ${itemsToUpdate.length} ítem(s)`,
-                    vendedor_id: user?.id,
-                    metodo_pago: payMethod,
-                    referencia: payReference || null,
-                    caja_mov_id: cajaMov?.id || null,
-                }]);
+                // [NUEVO] Crear registro RAÍZ en cliente_pagos — solo si hay dinero nuevo real
+                // monto = montoNuevoReal (no amt) para evitar inflar el saldo disponible cuando
+                // parte del pago viene de crédito existente del cliente
+                if (montoNuevoReal > 0) {
+                    await supabase.from('cliente_pagos').insert([{
+                        cliente_id: clienteId,
+                        monto: montoNuevoReal,
+                        concepto: todosCompletos
+                            ? `Pago recibido · ${itemsToUpdate.length} ítem(s)`
+                            : `Pago parcial · ${itemsToUpdate.length} ítem(s)`,
+                        vendedor_id: user?.id,
+                        metodo_pago: payMethod,
+                        referencia: payReference || null,
+                        caja_mov_id: cajaMov?.id || null,
+                    }]);
+                }
 
                 for (let eq of itemsToUpdate) {
                     const aplicar = Number(itemPayAmounts[eq.id] || 0);
