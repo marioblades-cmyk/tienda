@@ -1273,47 +1273,60 @@ export default function ClientOrdersView() {
 
     const handleDeletePago = async (pago) => {
         const esAsignado = pago.concepto?.startsWith('Asignado a:');
-        if (!confirm(`¿Eliminar este abono?\n${pago.concepto || 'Abono'} — BS ${Number(pago.monto).toLocaleString('es-BO', { minimumFractionDigits: 2 })}${!esAsignado ? '\n\nTambién se eliminará de Contabilidad.' : ''}`)) return;
+
+        // Si es una sub-entrada "Asignado a:", usar la lógica de revertir asignación
+        if (esAsignado) {
+            return handleRevertirDistribucion(pago);
+        }
+
+        if (!confirm(
+            `¿Eliminar este abono?\n${pago.concepto || 'Abono'} — BS ${Number(pago.monto).toLocaleString('es-BO', { minimumFractionDigits: 2 })}\n\n` +
+            `⚠️ También se eliminarán todas las asignaciones vinculadas y se restarán de los ítems correspondientes.` +
+            (pago.caja_mov_id ? '\n\nSe eliminará de Contabilidad.' : '')
+        )) return;
+
         try {
             setLoading(true);
-            // [BLOQUE 2] Borrar el movimiento de caja solo si NO es una distribución
-            if (pago.caja_mov_id && !esAsignado) {
-                await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
-            }
-            await supabase.from('cliente_pagos').delete().eq('id', pago.id);
 
-            // [BLOQUE 3] Recalcular: usando consultas frescas (evita estado React stale)
-            const { data: clienteItemsFresh } = await supabase
-                .from('cliente_items')
-                .select('id, monto_pagado')
-                .eq('cliente_id', pago.cliente_id);
-            const clienteItems = clienteItemsFresh || [];
+            // 1. Buscar y procesar todas las sub-entradas "Asignado a:" vinculadas
+            if (pago.caja_mov_id) {
+                const { data: subEntries } = await supabase
+                    .from('cliente_pagos')
+                    .select('id, monto, concepto, cliente_id')
+                    .eq('caja_mov_id', pago.caja_mov_id)
+                    .like('concepto', 'Asignado a:%');
 
-            const { data: pagosRestantesFresh } = await supabase
-                .from('cliente_pagos')
-                .select('id, monto')
-                .eq('cliente_id', pago.cliente_id)
-            const pagoRestantes = (pagosRestantesFresh || []).filter(p => !p.concepto?.startsWith('Asignado a:'));
+                for (const sub of (subEntries || [])) {
+                    const titulo = sub.concepto.replace('Asignado a: ', '').trim();
 
-            const newGroupPagos = pagoRestantes.reduce((s, p) => s + Number(p.monto), 0);
-            const cPagItemsTotal = clienteItems.reduce((s, i) => s + Number(i.monto_pagado || 0), 0);
-            let exceso = cPagItemsTotal - newGroupPagos;
+                    // Restar del ítem correspondiente
+                    const { data: itFresh } = await supabase
+                        .from('cliente_items')
+                        .select('id, monto_pagado')
+                        .eq('cliente_id', sub.cliente_id)
+                        .eq('titulo', titulo)
+                        .maybeSingle();
 
-            if (exceso > 0) {
-                // Reducir monto_pagado de los ítems (de mayor a menor monto_pagado) hasta cubrir el exceso
-                const itemsOrdenados = [...clienteItems].sort((a, b) => Number(b.monto_pagado || 0) - Number(a.monto_pagado || 0));
-                for (const it of itemsOrdenados) {
-                    if (exceso <= 0) break;
-                    const mp = Number(it.monto_pagado || 0);
-                    if (mp <= 0) continue;
-                    const reducir = Math.min(mp, exceso);
-                    const nuevoMonto = mp - reducir;
-                    await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', it.id);
-                    exceso -= reducir;
+                    if (itFresh && Number(sub.monto) > 0) {
+                        const nuevoMonto = Math.max(0, Number(itFresh.monto_pagado || 0) - Number(sub.monto));
+                        await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itFresh.id);
+                    }
+
+                    // Borrar la sub-entrada
+                    await supabase.from('cliente_pagos').delete().eq('id', sub.id);
                 }
             }
 
+            // 2. Borrar el movimiento de contabilidad
+            if (pago.caja_mov_id) {
+                await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
+            }
+
+            // 3. Borrar el registro raíz
+            await supabase.from('cliente_pagos').delete().eq('id', pago.id);
+
             await fetchData();
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
         } catch (e) {
             console.error(e);
             alert('Error al eliminar el abono: ' + e.message);
@@ -1506,14 +1519,15 @@ export default function ClientOrdersView() {
     const handleRevertirDistribucion = async (pago) => {
         const prefix = 'Asignado a: ';
         if (!pago.concepto?.startsWith(prefix)) return;
-        if (!confirm(`¿Deseas quitar la distribución de BS ${formatS(pago.monto)}?\nEl dinero volverá al saldo general del cliente.`)) return;
-
         const titulo = pago.concepto.replace(prefix, '').trim();
+        if (!confirm(`¿Quitar asignación de BS ${formatS(pago.monto)} a "${titulo}"?\nEl dinero volverá al saldo disponible del cliente.`)) return;
+
         const clienteId = pago.cliente_id;
-        
+
         try {
             setLoading(true);
-            // [BLOQUE 4] Búsqueda fresca del ítem
+
+            // 1. Restar del ítem correspondiente
             const { data: itFresh } = await supabase
                 .from('cliente_items')
                 .select('id, monto_pagado')
@@ -1521,30 +1535,54 @@ export default function ClientOrdersView() {
                 .eq('titulo', titulo)
                 .maybeSingle();
 
-            if (!itFresh) {
+            if (itFresh && Number(pago.monto) > 0) {
+                const nuevoMonto = Math.max(0, Number(itFresh.monto_pagado || 0) - Number(pago.monto));
+                await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itFresh.id);
+            }
+
+            // 2. Restaurar el saldo en el abono raíz original (via caja_mov_id)
+            let rootRestaurado = false;
+            if (pago.caja_mov_id) {
+                const { data: rootPago } = await supabase
+                    .from('cliente_pagos')
+                    .select('id, monto, concepto')
+                    .eq('caja_mov_id', pago.caja_mov_id)
+                    .eq('cliente_id', clienteId)
+                    .not('concepto', 'ilike', 'Asignado a:%')
+                    .maybeSingle();
+
+                if (rootPago) {
+                    const nuevoMontoRoot = Number(rootPago.monto) + Number(pago.monto);
+                    // Quitar el sufijo "(Totalmente Distribuido)" si ahora hay saldo
+                    const nuevoConcRoot = rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto;
+                    await supabase.from('cliente_pagos').update({
+                        monto: nuevoMontoRoot,
+                        concepto: nuevoConcRoot
+                    }).eq('id', rootPago.id);
+                    rootRestaurado = true;
+                }
+            }
+
+            // 3. Si no se encontró root (raíz eliminada o sin caja_mov_id),
+            //    convertir la sub-entrada en un abono general para no perder el saldo
+            if (!rootRestaurado) {
                 await supabase.from('cliente_pagos').update({
-                    concepto: `Crédito recuperado (ítem eliminado: ${titulo})`
+                    concepto: `Saldo recuperado (asignación quitada de: ${titulo})`,
+                    caja_mov_id: null
                 }).eq('id', pago.id);
                 await fetchData();
-                alert('El ítem ya no existe. El dinero quedó como crédito del cliente.');
+                alert('✓ Asignación quitada. (El abono raíz no se encontró, el saldo quedó como crédito general.)');
                 return;
             }
 
-            // 2. Restar el monto del ítem
-            const nuevoMonto = Math.max(0, Number(itFresh.monto_pagado || 0) - Number(pago.monto));
-            await supabase.from('cliente_items').update({ monto_pagado: nuevoMonto }).eq('id', itFresh.id);
-
-            // 3. Cambiar el registro de pago para que vuelva a contar como saldo disponible
-            // Lo marcamos como abono general nuevamente
-            await supabase.from('cliente_pagos').update({ 
-                concepto: `Saldo recuperado (de ${titulo})` 
-            }).eq('id', pago.id);
+            // 4. Eliminar la sub-entrada
+            await supabase.from('cliente_pagos').delete().eq('id', pago.id);
 
             await fetchData();
-            alert("✓ Distribución revertida con éxito.");
+            alert('✓ Asignación eliminada. El dinero volvió al saldo del cliente.');
         } catch (e) {
             console.error(e);
-            alert('Error al revertir distribución: ' + e.message);
+            alert('Error al quitar asignación: ' + e.message);
         } finally {
             setLoading(false);
         }
