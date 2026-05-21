@@ -93,6 +93,7 @@ export default function ClientOrdersView() {
     const [cartBulkSemana, setCartBulkSemana] = useState('');
     const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
     const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
+    const [expandedRoots, setExpandedRoots] = useState(new Set()); // IDs de raíces expandidas en historial
     const [editCliente, setEditCliente] = useState(null); // { id, nombre, celular, ci, ciudad, sucursal, direccion, notas_cliente }
     const [deleteCliente, setDeleteCliente] = useState(null); // { id, nombre } para confirmación
     const [showDamageModal, setShowDamageModal] = useState(false);
@@ -134,7 +135,7 @@ export default function ClientOrdersView() {
             const itemsToDelete = items.filter(i => selectedItems.has(i.id));
 
             for (const it of itemsToDelete) {
-                // [BLOQUE 1] Rescate de dinero antes de borrar
+                // Limpiar sub-entradas "Asignado a:" — el saldo vuelve al balance automáticamente
                 if (Number(it.monto_pagado || 0) > 0) {
                     const { data: pagosAsignados } = await supabase
                         .from('cliente_pagos')
@@ -142,11 +143,24 @@ export default function ClientOrdersView() {
                         .eq('cliente_id', it.cliente_id)
                         .eq('concepto', `Asignado a: ${it.titulo}`);
 
-                    for (const p of (pagosAsignados || [])) {
-                        await supabase.from('cliente_pagos').update({
-                            concepto: `Crédito recuperado (ítem eliminado: ${it.titulo})`,
-                            referencia: null
-                        }).eq('id', p.id);
+                    for (const sub of (pagosAsignados || [])) {
+                        if (sub.caja_mov_id) {
+                            const { data: rootPago } = await supabase
+                                .from('cliente_pagos')
+                                .select('id, monto, concepto')
+                                .eq('caja_mov_id', sub.caja_mov_id)
+                                .eq('cliente_id', it.cliente_id)
+                                .not('concepto', 'ilike', 'Asignado a:%')
+                                .maybeSingle();
+                            if (rootPago && Number(rootPago.monto) === 0) {
+                                const { data: cajaMov } = await supabase.from('caja_movimientos').select('monto').eq('id', sub.caja_mov_id).maybeSingle();
+                                await supabase.from('cliente_pagos').update({
+                                    monto: cajaMov ? Number(cajaMov.monto) : Number(sub.monto),
+                                    concepto: rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto
+                                }).eq('id', rootPago.id);
+                            }
+                        }
+                        await supabase.from('cliente_pagos').delete().eq('id', sub.id);
                     }
                 }
                 // Restore stock if it was physically in store
@@ -2524,7 +2538,9 @@ export default function ClientOrdersView() {
                                                                                     if (typeof catalogService !== 'undefined') catalogService.clearCache();
                                                                                 }
                                                                             }
-                                                                            // [BLOQUE 1] Rescate de dinero antes de borrar
+                                                                            // Limpiar sub-entradas "Asignado a:" del ítem eliminado
+                                                                            // El saldo vuelve automáticamente al balance disponible
+                                                                            // (getPagosRaiz - allPagadoItems sube porque allPaid baja)
                                                                             if (Number(it.monto_pagado || 0) > 0) {
                                                                                 const { data: pagosAsignados } = await supabase
                                                                                     .from('cliente_pagos')
@@ -2532,11 +2548,25 @@ export default function ClientOrdersView() {
                                                                                     .eq('cliente_id', it.cliente_id)
                                                                                     .eq('concepto', `Asignado a: ${it.titulo}`);
 
-                                                                                for (const p of (pagosAsignados || [])) {
-                                                                                    await supabase.from('cliente_pagos').update({
-                                                                                        concepto: `Crédito recuperado (ítem eliminado: ${it.titulo})`,
-                                                                                        referencia: null
-                                                                                    }).eq('id', p.id);
+                                                                                for (const sub of (pagosAsignados || [])) {
+                                                                                    // Si el ROOT fue reducido a 0 (datos viejos), restaurarlo
+                                                                                    if (sub.caja_mov_id) {
+                                                                                        const { data: rootPago } = await supabase
+                                                                                            .from('cliente_pagos')
+                                                                                            .select('id, monto, concepto')
+                                                                                            .eq('caja_mov_id', sub.caja_mov_id)
+                                                                                            .eq('cliente_id', it.cliente_id)
+                                                                                            .not('concepto', 'ilike', 'Asignado a:%')
+                                                                                            .maybeSingle();
+                                                                                        if (rootPago && Number(rootPago.monto) === 0) {
+                                                                                            const { data: cajaMov } = await supabase.from('caja_movimientos').select('monto').eq('id', sub.caja_mov_id).maybeSingle();
+                                                                                            await supabase.from('cliente_pagos').update({
+                                                                                                monto: cajaMov ? Number(cajaMov.monto) : Number(sub.monto),
+                                                                                                concepto: rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto
+                                                                                            }).eq('id', rootPago.id);
+                                                                                        }
+                                                                                    }
+                                                                                    await supabase.from('cliente_pagos').delete().eq('id', sub.id);
                                                                                 }
                                                                             }
                                                                             await supabase.from('cliente_items').delete().eq('id', it.id);
@@ -2599,47 +2629,87 @@ export default function ClientOrdersView() {
                                             </table>
                                         </div>
 
-                                        {/* HISTORIAL DE PAGOS */}
+                                        {/* HISTORIAL DE PAGOS — raíces con sub-entradas desplegables */}
                                         {(() => {
-                                            const clientePagos = pagos.filter(p => p.cliente_id === group.client.id).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-                                            if (clientePagos.length === 0) return null;
+                                            const todosLosPagos = pagos.filter(p => p.cliente_id === group.client.id).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+                                            if (todosLosPagos.length === 0) return null;
                                             const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
+                                            const raices = todosLosPagos.filter(p => !p.concepto?.startsWith('Asignado a:'));
+                                            const subEntradas = todosLosPagos.filter(p => p.concepto?.startsWith('Asignado a:'));
                                             return (
                                                 <div className="mt-3 pt-3 border-t border-border/40">
                                                     <div className="text-[9px] font-black uppercase text-muted tracking-widest mb-2 flex items-center gap-2">
                                                         <span>Historial de Pagos</span>
-                                                        <span className="text-primary font-black">({clientePagos.length})</span>
+                                                        <span className="text-primary font-black">({raices.length})</span>
                                                     </div>
-                                                    <div className="space-y-1">
-                                                        {clientePagos.map(p => (
-                                                            <div key={p.id} className="flex items-center justify-between bg-background/60 rounded-lg px-3 py-1.5 border border-border/30 group hover:border-border/60 transition-colors">
-                                                                <div className="flex items-center gap-2 min-w-0">
-                                                                    <span className="text-sm leading-none">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
-                                                                    <div className="min-w-0">
-                                                                        <div className="text-[10px] font-bold text-text truncate">{p.concepto || 'Abono'}</div>
-                                                                        <div className="text-[9px] text-muted flex items-center gap-1">
-                                                                            <span>{p.metodo_pago || 'Efectivo'}</span>
-                                                                            <span>·</span>
-                                                                            <span>{ffecha(p.fecha || p.created_at)}</span>
-                                                                            <span>·</span>
-                                                                            <span className="font-black text-primary uppercase">{vendedores.find(v => v.id === p.vendedor_id)?.nombre?.split(' ')[0] || 'Socio'}</span>
+                                                    <div className="space-y-1.5">
+                                                        {raices.map(p => {
+                                                            const subs = subEntradas.filter(s => s.caja_mov_id && s.caja_mov_id === p.caja_mov_id);
+                                                            const isExpanded = expandedRoots.has(p.id);
+                                                            return (
+                                                                <div key={p.id} className="rounded-xl border border-border/30 overflow-hidden">
+                                                                    {/* Raíz */}
+                                                                    <div className="flex items-center justify-between bg-background/60 px-3 py-1.5 group hover:border-border/60 transition-colors">
+                                                                        <div className="flex items-center gap-2 min-w-0">
+                                                                            <span className="text-sm leading-none">{METHOD_ICON[p.metodo_pago] || '💳'}</span>
+                                                                            <div className="min-w-0">
+                                                                                <div className="text-[10px] font-bold text-text truncate">{p.concepto || 'Abono'}</div>
+                                                                                <div className="text-[9px] text-muted flex items-center gap-1">
+                                                                                    <span>{p.metodo_pago || 'Efectivo'}</span>
+                                                                                    <span>·</span>
+                                                                                    <span>{ffecha(p.fecha || p.created_at)}</span>
+                                                                                    <span>·</span>
+                                                                                    <span className="font-black text-primary uppercase">{vendedores.find(v => v.id === p.vendedor_id)?.nombre?.split(' ')[0] || 'Socio'}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1 ml-2 shrink-0">
+                                                                            <span className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</span>
+                                                                            {subs.length > 0 && (
+                                                                                <button onClick={() => setExpandedRoots(prev => { const n = new Set(prev); isExpanded ? n.delete(p.id) : n.add(p.id); return n; })}
+                                                                                    className="p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all"
+                                                                                    title={isExpanded ? 'Ocultar distribuciones' : `Ver ${subs.length} distribución(es)`}>
+                                                                                    {isExpanded ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
+                                                                                </button>
+                                                                            )}
+                                                                            <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })}
+                                                                                title="Editar pago"
+                                                                                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
+                                                                                <Edit2 size={11} />
+                                                                            </button>
+                                                                            <button onClick={() => !loading && handleDeletePago(p)} title="Eliminar abono"
+                                                                                className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all ${loading ? 'cursor-not-allowed' : ''}`}>
+                                                                                <Trash2 size={11} />
+                                                                            </button>
                                                                         </div>
                                                                     </div>
+                                                                    {/* Sub-entradas desplegables */}
+                                                                    {isExpanded && subs.length > 0 && (
+                                                                        <div className="border-t border-border/20 bg-primary/3 divide-y divide-border/10">
+                                                                            {subs.map(s => (
+                                                                                <div key={s.id} className="flex items-center justify-between px-3 py-1.5 group/sub hover:bg-primary/5 transition-colors">
+                                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                                        <span className="text-muted text-xs pl-2">↳</span>
+                                                                                        <div className="min-w-0">
+                                                                                            <div className="text-[9px] font-bold text-muted truncate">{s.concepto.replace('Asignado a: ', '')}</div>
+                                                                                            <div className="text-[8px] text-muted/70">{ffecha(s.fecha || s.created_at)}</div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                                        <span className="text-[9px] font-black font-mono text-muted">BS {formatS(s.monto)}</span>
+                                                                                        <button onClick={() => !loading && handleRevertirDistribucion(s)}
+                                                                                            title="Quitar asignación (devuelve al saldo)"
+                                                                                            className="opacity-0 group-hover/sub:opacity-100 p-1 rounded bg-orange-500/10 text-orange-500 hover:bg-orange-500 hover:text-white transition-all">
+                                                                                            <RotateCcw size={9} strokeWidth={3}/>
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                                <div className="flex items-center gap-1 ml-2 shrink-0">
-                                                                    <span className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</span>
-                                                                    <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })}
-                                                                        title="Editar pago"
-                                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
-                                                                        <Edit2 size={11} />
-                                                                    </button>
-                                                                    <button onClick={() => !loading && handleDeletePago(p)} title="Eliminar pago"
-                                                                        className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-error/10 text-muted hover:text-error transition-all ${loading ? 'cursor-not-allowed' : ''}`}>
-                                                                        <Trash2 size={11} />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             );
