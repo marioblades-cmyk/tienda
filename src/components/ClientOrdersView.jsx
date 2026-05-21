@@ -1488,7 +1488,8 @@ export default function ClientOrdersView() {
                     // recibido del cliente y la fórmula balance = pagos - allPagadoItems lo maneja.
                     p.monto = availableInPago - take;
 
-                    // Crear el registro de "Dónder se fue el dinero" (Nuevo registro asignado)
+                    // Crear el registro de "Dónde se fue el dinero" (Nuevo registro asignado)
+                    // referencia = p.id vincula la sub-entrada al ROOT incluso cuando caja_mov_id es null
                     await supabase.from('cliente_pagos').insert([{
                         cliente_id: clienteId,
                         monto: take,
@@ -1496,7 +1497,7 @@ export default function ClientOrdersView() {
                         vendedor_id: user?.id,
                         metodo_pago: p.metodo_pago,
                         caja_mov_id: p.caja_mov_id, // Mantener vínculo para trazabilidad
-                        referencia: p.referencia 
+                        referencia: p.id             // ← ID del abono raíz (permite link incluso sin caja_mov_id)
                     }]);
 
                     restanteXItem -= take;
@@ -1550,7 +1551,34 @@ export default function ClientOrdersView() {
             // y el balance se ajusta automáticamente al reducir monto_pagado del ítem.
             // Si ROOT.monto === 0, fue reducido por el distribute viejo → hay que restaurarlo.
             let rootRestaurado = false;
-            if (pago.caja_mov_id) {
+
+            const tryRestoreRoot = async (rootPago) => {
+                if (!rootPago) return false;
+                if (Number(rootPago.monto) === 0) {
+                    // Datos viejos: ROOT fue reducido a 0 → restaurar con el monto del caja original
+                    const { data: cajaMov } = pago.caja_mov_id
+                        ? await supabase.from('caja_movimientos').select('monto').eq('id', pago.caja_mov_id).maybeSingle()
+                        : { data: null };
+                    const montoOriginal = cajaMov ? Number(cajaMov.monto) : Number(pago.monto);
+                    const nuevoConcRoot = rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto;
+                    await supabase.from('cliente_pagos').update({ monto: montoOriginal, concepto: nuevoConcRoot }).eq('id', rootPago.id);
+                }
+                // Si ROOT.monto > 0: el balance se ajusta solo al reducir el ítem → no tocar ROOT
+                return true;
+            };
+
+            // Primero intentar por referencia (datos nuevos: sub-entrada tiene referencia = root.id)
+            if (pago.referencia) {
+                const { data: rootPago } = await supabase
+                    .from('cliente_pagos')
+                    .select('id, monto, concepto')
+                    .eq('id', pago.referencia)
+                    .maybeSingle();
+                rootRestaurado = await tryRestoreRoot(rootPago);
+            }
+
+            // Si no encontró por referencia, intentar por caja_mov_id (datos existentes)
+            if (!rootRestaurado && pago.caja_mov_id) {
                 const { data: rootPago } = await supabase
                     .from('cliente_pagos')
                     .select('id, monto, concepto')
@@ -1558,25 +1586,7 @@ export default function ClientOrdersView() {
                     .eq('cliente_id', clienteId)
                     .not('concepto', 'ilike', 'Asignado a:%')
                     .maybeSingle();
-
-                if (rootPago) {
-                    rootRestaurado = true;
-                    if (Number(rootPago.monto) === 0) {
-                        // Datos viejos: ROOT fue reducido a 0 → restaurar con el monto del caja original
-                        const { data: cajaMov } = await supabase
-                            .from('caja_movimientos')
-                            .select('monto')
-                            .eq('id', pago.caja_mov_id)
-                            .maybeSingle();
-                        const montoOriginal = cajaMov ? Number(cajaMov.monto) : Number(pago.monto);
-                        const nuevoConcRoot = rootPago.concepto?.replace(' (Totalmente Distribuido)', '') || rootPago.concepto;
-                        await supabase.from('cliente_pagos').update({
-                            monto: montoOriginal,
-                            concepto: nuevoConcRoot
-                        }).eq('id', rootPago.id);
-                    }
-                    // Si ROOT.monto > 0: el balance se ajusta solo al reducir el ítem → no tocar ROOT
-                }
+                rootRestaurado = await tryRestoreRoot(rootPago);
             }
 
             // 3. Si no se encontró root (raíz eliminada o sin caja_mov_id),
@@ -2644,7 +2654,7 @@ export default function ClientOrdersView() {
                                                     </div>
                                                     <div className="space-y-1.5">
                                                         {raices.map(p => {
-                                                            const subs = subEntradas.filter(s => s.caja_mov_id && s.caja_mov_id === p.caja_mov_id);
+                                                            const subs = subEntradas.filter(s => s.referencia === p.id || (s.caja_mov_id && s.caja_mov_id === p.caja_mov_id));
                                                             const totalAsignado = subs.reduce((s, sub) => s + Number(sub.monto || 0), 0);
                                                             const disponible = Math.max(0, Number(p.monto) - totalAsignado);
                                                             const isExpanded = expandedRoots.has(p.id);
@@ -3971,37 +3981,120 @@ export default function ClientOrdersView() {
                                     </button>
                                 </div>
 
-                                {/* Lista de ítems (modes: items y distribute) */}
-                                {(payMode === 'items' || payMode === 'distribute') && (
+                                {/* ── MODO DISTRIBUIR: panel con inputs directos y contador ── */}
+                                {payMode === 'distribute' && (() => {
+                                    const totalAsignadoDist = Object.values(itemPayAmounts).reduce((s,v) => s + Number(v||0), 0);
+                                    const restanteDist = Math.max(0, saldoDisponible - totalAsignadoDist);
+                                    const pendientesDist = sortedItems.filter(i => Math.max(0, i.precio_venta - i.monto_pagado) > 0);
+                                    return (
+                                        <div className="space-y-3 animate-in fade-in duration-200">
+                                            {/* Contador disponible / asignado / restante */}
+                                            <div className="flex items-stretch gap-2 bg-secondary/5 border border-secondary/20 rounded-2xl px-3 py-2.5">
+                                                <div className="flex-1 text-center">
+                                                    <div className="text-[8px] font-black text-muted uppercase tracking-widest mb-0.5">Disponible</div>
+                                                    <div className="text-sm font-black font-mono text-secondary">BS {formatS(saldoDisponible)}</div>
+                                                </div>
+                                                <div className="w-px bg-border/50"/>
+                                                <div className="flex-1 text-center">
+                                                    <div className="text-[8px] font-black text-muted uppercase tracking-widest mb-0.5">Asignado</div>
+                                                    <div className={`text-sm font-black font-mono ${totalAsignadoDist > 0 ? 'text-primary' : 'text-muted'}`}>BS {formatS(totalAsignadoDist)}</div>
+                                                </div>
+                                                <div className="w-px bg-border/50"/>
+                                                <div className="flex-1 text-center">
+                                                    <div className="text-[8px] font-black text-muted uppercase tracking-widest mb-0.5">Restante</div>
+                                                    <div className={`text-sm font-black font-mono ${restanteDist > 0 ? 'text-success' : 'text-muted'}`}>BS {formatS(restanteDist)}</div>
+                                                </div>
+                                            </div>
+                                            {/* Lista de ítems con input directo (sin checkbox) */}
+                                            <div className="border border-border rounded-2xl bg-background overflow-hidden shadow-inner">
+                                                <div className="flex items-center justify-between px-3 py-2 bg-muted/10 border-b border-border/50">
+                                                    <span className="text-[9px] text-muted font-black uppercase tracking-widest">Asignar a ítems</span>
+                                                    <button onClick={() => {
+                                                        const newAmounts = {};
+                                                        let restante = saldoDisponible;
+                                                        for (const i of pendientesDist) {
+                                                            const d = Math.max(0, i.precio_venta - i.monto_pagado);
+                                                            const take = Math.min(d, restante);
+                                                            if (take > 0) newAmounts[i.id] = take;
+                                                            restante -= take;
+                                                            if (restante <= 0) break;
+                                                        }
+                                                        setItemPayAmounts(newAmounts);
+                                                    }} className="text-[9px] font-black uppercase text-secondary hover:text-primary transition-colors">
+                                                        Auto-distribuir
+                                                    </button>
+                                                </div>
+                                                <div className="max-h-44 overflow-y-auto divide-y divide-border/50">
+                                                    {pendientesDist.length === 0 && (
+                                                        <div className="py-8 text-center text-xs text-muted italic">No hay deudas pendientes</div>
+                                                    )}
+                                                    {pendientesDist.map(it => {
+                                                        const deuda = Math.max(0, it.precio_venta - it.monto_pagado);
+                                                        const asignado = Number(itemPayAmounts[it.id] || 0);
+                                                        return (
+                                                            <div key={it.id} className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${asignado > 0 ? 'bg-secondary/5' : 'hover:bg-muted/5'}`}>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="text-xs font-bold text-text leading-tight truncate">{it.titulo}</div>
+                                                                    <div className="text-[9px] text-muted">Saldo deuda: BS {formatS(deuda)}</div>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max={deuda}
+                                                                        step="0.1"
+                                                                        placeholder="0"
+                                                                        value={itemPayAmounts[it.id] ?? ''}
+                                                                        onChange={(e) => {
+                                                                            let val = e.target.value === '' ? '' : Number(e.target.value);
+                                                                            if (val !== '') {
+                                                                                if (val < 0) val = 0;
+                                                                                if (val > deuda) val = deuda;
+                                                                                // No exceder el saldo disponible total
+                                                                                const otrosAsignados = Object.entries(itemPayAmounts)
+                                                                                    .filter(([k]) => k !== it.id)
+                                                                                    .reduce((s, [, v]) => s + Number(v||0), 0);
+                                                                                const maxPara = Math.max(0, saldoDisponible - otrosAsignados);
+                                                                                if (val > maxPara) val = maxPara;
+                                                                            }
+                                                                            setItemPayAmounts(prev => {
+                                                                                const updated = { ...prev };
+                                                                                if (val === '' || val === 0) delete updated[it.id];
+                                                                                else updated[it.id] = val;
+                                                                                return updated;
+                                                                            });
+                                                                        }}
+                                                                        className={`w-20 bg-background border rounded-lg px-2 py-1.5 text-right text-xs font-black font-mono outline-none transition-colors ${asignado > 0 ? 'border-secondary text-secondary' : 'border-border text-text focus:border-secondary'}`}
+                                                                    />
+                                                                    <span className="text-[9px] font-black text-muted">BS</span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* ── MODO PAGAR ÍTEMS: lista con checkboxes ── */}
+                                {payMode === 'items' && (
                                     <div className="border border-border rounded-2xl bg-background overflow-hidden shadow-inner animate-in fade-in duration-200">
                                         <div className="flex items-center justify-between px-3 py-2 bg-muted/10 border-b border-border/50">
-                                            <span className="text-[9px] text-muted font-black uppercase tracking-widest">
-                                                {isDistribuir ? 'Asignar crédito disponible' : 'Selecciona ítems a pagar'}
-                                            </span>
+                                            <span className="text-[9px] text-muted font-black uppercase tracking-widest">Selecciona ítems a pagar</span>
                                             {(() => {
                                                 const pendientes = sortedItems.filter(i => (i.precio_venta - i.monto_pagado) > 0);
                                                 const todosSel = pendientes.length > 0 && pendientes.every(i => selectedPayItems.includes(i.id));
                                                 return (
                                                     <button onClick={() => {
-                                                        if (todosSel) { setSelectedPayItems([]); setItemPayAmounts({}); if (!isDistribuir) setPayMonto(''); }
+                                                        if (todosSel) { setSelectedPayItems([]); setItemPayAmounts({}); setPayMonto(''); }
                                                         else {
                                                             const ids = pendientes.map(i => i.id);
                                                             setSelectedPayItems(ids);
                                                             const newAmounts = {};
-                                                            if (isDistribuir) {
-                                                                let restante = saldoDisponible;
-                                                                for (const i of pendientes) {
-                                                                    const d = Math.max(0, i.precio_venta - i.monto_pagado);
-                                                                    const take = Math.min(d, restante);
-                                                                    newAmounts[i.id] = take;
-                                                                    restante -= take;
-                                                                    if (restante <= 0) break;
-                                                                }
-                                                            } else {
-                                                                pendientes.forEach(i => { newAmounts[i.id] = Math.max(0, i.precio_venta - i.monto_pagado); });
-                                                                const total = Object.values(newAmounts).reduce((s,v) => s + Number(v||0), 0);
-                                                                setPayMonto(total > 0 ? total : '');
-                                                            }
+                                                            pendientes.forEach(i => { newAmounts[i.id] = Math.max(0, i.precio_venta - i.monto_pagado); });
+                                                            const total = Object.values(newAmounts).reduce((s,v) => s + Number(v||0), 0);
+                                                            setPayMonto(total > 0 ? total : '');
                                                             setItemPayAmounts(newAmounts);
                                                         }
                                                     }} className="text-[9px] font-black uppercase text-primary hover:text-secondary transition-colors">
@@ -4023,16 +4116,11 @@ export default function ClientOrdersView() {
                                                                 let next = e.target.checked ? [...selectedPayItems, it.id] : selectedPayItems.filter(x=>x!==it.id);
                                                                 setSelectedPayItems(next);
                                                                 const newAmounts = { ...itemPayAmounts };
-                                                                if (e.target.checked) {
-                                                                    newAmounts[it.id] = deuda;
-                                                                } else {
-                                                                    delete newAmounts[it.id];
-                                                                }
+                                                                if (e.target.checked) { newAmounts[it.id] = deuda; }
+                                                                else { delete newAmounts[it.id]; }
                                                                 setItemPayAmounts(newAmounts);
-                                                                if (!isDistribuir) {
-                                                                    const total = Object.values(newAmounts).reduce((s, val) => s + Number(val || 0), 0);
-                                                                    setPayMonto(total > 0 ? total : '');
-                                                                }
+                                                                const total = Object.values(newAmounts).reduce((s, val) => s + Number(val || 0), 0);
+                                                                setPayMonto(total > 0 ? total : '');
                                                             }}/>
                                                         </div>
                                                         <div className="flex-1 min-w-0">
@@ -4053,10 +4141,8 @@ export default function ClientOrdersView() {
                                                                         if (val < 0) val = 0;
                                                                         const updated = { ...itemPayAmounts, [it.id]: e.target.value === '' ? '' : val };
                                                                         setItemPayAmounts(updated);
-                                                                        if (!isDistribuir) {
-                                                                            const newTotal = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
-                                                                            setPayMonto(newTotal > 0 ? newTotal : '');
-                                                                        }
+                                                                        const newTotal = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
+                                                                        setPayMonto(newTotal > 0 ? newTotal : '');
                                                                     }}
                                                                     className="w-16 bg-background border border-border focus:border-primary rounded-lg px-2 py-1 text-right text-xs font-black font-mono text-primary outline-none transition-colors"
                                                                 />
@@ -4181,7 +4267,7 @@ export default function ClientOrdersView() {
                                                                 </div>
                                                             </div>
                                                             {pagosAsignados
-                                                                .filter(pa => pa.caja_mov_id === p.caja_mov_id && pa.caja_mov_id !== null)
+                                                                .filter(pa => pa.referencia === p.id || (pa.caja_mov_id && pa.caja_mov_id === p.caja_mov_id))
                                                                 .map(pa => (
                                                                     <div key={pa.id} className="flex items-center justify-between py-1.5 pr-3 pl-10 bg-primary/5 rounded-lg border border-primary/5 group/sub">
                                                                         <div className="flex items-center gap-1.5 min-w-0">
