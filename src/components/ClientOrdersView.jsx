@@ -2645,6 +2645,8 @@ export default function ClientOrdersView() {
                                                     <div className="space-y-1.5">
                                                         {raices.map(p => {
                                                             const subs = subEntradas.filter(s => s.caja_mov_id && s.caja_mov_id === p.caja_mov_id);
+                                                            const totalAsignado = subs.reduce((s, sub) => s + Number(sub.monto || 0), 0);
+                                                            const disponible = Math.max(0, Number(p.monto) - totalAsignado);
                                                             const isExpanded = expandedRoots.has(p.id);
                                                             return (
                                                                 <div key={p.id} className="rounded-xl border border-border/30 overflow-hidden">
@@ -2664,7 +2666,15 @@ export default function ClientOrdersView() {
                                                                             </div>
                                                                         </div>
                                                                         <div className="flex items-center gap-1 ml-2 shrink-0">
-                                                                            <span className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</span>
+                                                                            <div className="text-right">
+                                                                                <div className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</div>
+                                                                                {disponible > 0 && (
+                                                                                    <div className="text-[8px] font-bold text-orange-500">Disp: BS {formatS(disponible)}</div>
+                                                                                )}
+                                                                                {disponible === 0 && subs.length > 0 && (
+                                                                                    <div className="text-[8px] text-muted">Asignado total</div>
+                                                                                )}
+                                                                            </div>
                                                                             {subs.length > 0 && (
                                                                                 <button onClick={() => setExpandedRoots(prev => { const n = new Set(prev); isExpanded ? n.delete(p.id) : n.add(p.id); return n; })}
                                                                                     className="p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all"
