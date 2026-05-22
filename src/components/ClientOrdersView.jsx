@@ -2678,7 +2678,7 @@ export default function ClientOrdersView() {
                                                                         <div className="flex items-center gap-1 ml-2 shrink-0">
                                                                             <div className="text-right">
                                                                                 <div className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</div>
-                                                                                {disponible > 0 && balanceDisponible > 0 && (
+                                                                                {disponible > 0 && (
                                                                                     <div className="text-[8px] font-bold text-orange-500">Disp: BS {formatS(disponible)}</div>
                                                                                 )}
                                                                                 {disponible === 0 && subs.length > 0 && (
