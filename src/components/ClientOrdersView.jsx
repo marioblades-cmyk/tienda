@@ -94,6 +94,7 @@ export default function ClientOrdersView() {
     const [cartBulkEstado, setCartBulkEstado] = useState('ENTREGADO');
     const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
     const [expandedRoots, setExpandedRoots] = useState(new Set()); // IDs de raíces expandidas en historial
+    const [showAllPagosHistory, setShowAllPagosHistory] = useState(new Set()); // cliente_ids que muestran historial completo
     const [editCliente, setEditCliente] = useState(null); // { id, nombre, celular, ci, ciudad, sucursal, direccion, notas_cliente }
     const [deleteCliente, setDeleteCliente] = useState(null); // { id, nombre } para confirmación
     const [showDamageModal, setShowDamageModal] = useState(false);
@@ -2651,14 +2652,28 @@ export default function ClientOrdersView() {
                                             const METHOD_ICON = { 'Efectivo': '💵', 'Yasta (QR)': '📲', 'Banco Unión (QR/Transf)': '🏦', 'BNB': '🏛️', 'Otros': '💳' };
                                             const raices = todosLosPagos.filter(p => !p.concepto?.startsWith('Asignado a:'));
                                             const subEntradas = todosLosPagos.filter(p => p.concepto?.startsWith('Asignado a:'));
+                                            // Títulos de ítems ENTREGADOS para filtrar pagos históricos
+                                            const entregadoConceptos = new Set(
+                                                group.fullItems
+                                                    .filter(i => i.estado === 'ENTREGADO')
+                                                    .map(i => `Asignado a: ${i.titulo}`)
+                                            );
+                                            const showAll = showAllPagosHistory.has(group.client.id);
+                                            const raicesOcultas = raices.filter(p => {
+                                                const subs = subEntradas.filter(s => s.referencia === p.id || (s.caja_mov_id && s.caja_mov_id === p.caja_mov_id));
+                                                const totalAsignado = subs.reduce((s, sub) => s + Number(sub.monto || 0), 0);
+                                                const disp = Math.max(0, Number(p.monto) - totalAsignado);
+                                                return disp === 0 && subs.length > 0 && subs.every(s => entregadoConceptos.has(s.concepto));
+                                            });
+                                            const raicesVisibles = showAll ? raices : raices.filter(p => !raicesOcultas.includes(p));
                                             return (
                                                 <div className="mt-3 pt-3 border-t border-border/40">
                                                     <div className="text-[9px] font-black uppercase text-muted tracking-widest mb-2 flex items-center gap-2">
                                                         <span>Historial de Pagos</span>
-                                                        <span className="text-primary font-black">({raices.length})</span>
+                                                        <span className="text-primary font-black">({raicesVisibles.length}{raicesOcultas.length > 0 && !showAll ? `+${raicesOcultas.length}` : ''})</span>
                                                     </div>
                                                     <div className="space-y-1.5">
-                                                        {raices.map(p => {
+                                                        {raicesVisibles.map(p => {
                                                             const subs = subEntradas.filter(s => s.referencia === p.id || (s.caja_mov_id && s.caja_mov_id === p.caja_mov_id));
                                                             const totalAsignado = subs.reduce((s, sub) => s + Number(sub.monto || 0), 0);
                                                             const disponible = Math.max(0, Number(p.monto) - totalAsignado);
@@ -2736,6 +2751,21 @@ export default function ClientOrdersView() {
                                                             );
                                                         })}
                                                     </div>
+                                                    {/* Toggle para pagos de ítems entregados */}
+                                                    {raicesOcultas.length > 0 && (
+                                                        <button
+                                                            onClick={() => setShowAllPagosHistory(prev => {
+                                                                const n = new Set(prev);
+                                                                showAll ? n.delete(group.client.id) : n.add(group.client.id);
+                                                                return n;
+                                                            })}
+                                                            className="mt-2 w-full text-center text-[9px] font-bold text-muted hover:text-primary transition-colors py-1 border border-dashed border-border/40 hover:border-primary/30 rounded-lg"
+                                                        >
+                                                            {showAll
+                                                                ? `▲ Ocultar pagos de ítems entregados`
+                                                                : `▼ Ver ${raicesOcultas.length} pago${raicesOcultas.length > 1 ? 's' : ''} de ítems entregados`}
+                                                        </button>
+                                                    )}
                                                 </div>
                                             );
                                         })()}
