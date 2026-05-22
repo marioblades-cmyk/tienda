@@ -1160,9 +1160,14 @@ export default function ClientOrdersView() {
             const cli = clientes.find(c => c.id === clienteId);
 
             // [BLOQUE 5] Calcular dinero realmente nuevo (descontando saldo flotante)
+            // Solo se cuenta como "balance" el dinero que pasó por caja (caja_mov_id != null).
+            // Los pagos históricos/manuales (caja_mov_id=null) no se descuentan para evitar
+            // que anulen nuevos pagos reales y dejen entradas de caja sin registrar.
             const pItemsParaBalance = items.filter(i => i.cliente_id === clienteId);
             const cPagItemsBal = pItemsParaBalance.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-            const groupPagosBal = getPagosRaiz(pagos, clienteId).reduce((s,p) => s + Number(p.monto), 0);
+            const groupPagosBal = getPagosRaiz(pagos, clienteId)
+                .filter(p => p.caja_mov_id != null)
+                .reduce((s,p) => s + Number(p.monto), 0);
             const balanceExistente = Math.max(0, groupPagosBal - cPagItemsBal);
             const montoNuevoReal = Math.max(0, amt - balanceExistente);
 
