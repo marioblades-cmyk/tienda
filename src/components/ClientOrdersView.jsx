@@ -95,6 +95,8 @@ export default function ClientOrdersView() {
     const [sinContabilidad, setSinContabilidad] = useState(false); // registrar pago sin caja_movimientos
     const [expandedRoots, setExpandedRoots] = useState(new Set()); // IDs de raíces expandidas en historial
     const [showAllPagosHistory, setShowAllPagosHistory] = useState(new Set()); // cliente_ids que muestran historial completo
+    const [clienteSugg, setClienteSugg] = useState([]); // Sugerencias autocomplete cliente
+    const [clienteSuggField, setClienteSuggField] = useState(''); // 'celular' | 'nombre'
     const [editCliente, setEditCliente] = useState(null); // { id, nombre, celular, ci, ciudad, sucursal, direccion, notas_cliente }
     const [deleteCliente, setDeleteCliente] = useState(null); // { id, nombre } para confirmación
     const [showDamageModal, setShowDamageModal] = useState(false);
@@ -2698,8 +2700,11 @@ export default function ClientOrdersView() {
                                                                         <div className="flex items-center gap-1 ml-2 shrink-0">
                                                                             <div className="text-right">
                                                                                 <div className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</div>
-                                                                                {disponible > 0 && (
+                                                                                {disponible > 0 && (subs.length > 0 || balanceDisponible > 0) && (
                                                                                     <div className="text-[8px] font-bold text-orange-500">Disp: BS {formatS(disponible)}</div>
+                                                                                )}
+                                                                                {disponible > 0 && subs.length === 0 && balanceDisponible === 0 && (
+                                                                                    <div className="text-[8px] text-muted">✓ Aplicado</div>
                                                                                 )}
                                                                                 {disponible === 0 && subs.length > 0 && (
                                                                                     <div className="text-[8px] text-muted">Asignado total</div>
@@ -3353,18 +3358,55 @@ export default function ClientOrdersView() {
                         <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-6 custom-scrollbar pb-64">
                             {/* DATOS CLIENTE (GRID RESPONSIVO) */}
                             <div className="p-4 bg-background/40 border border-border/60 rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end shadow-inner mb-6">
-                                <div>
+                                <div className="relative">
                                     <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Celular</label>
                                     <input type="text" value={addForm.celular} onChange={e=>{
                                         const val = e.target.value;
-                                        const cli = clientes.find(c=>c.celular===val);
-                                        if(cli) setAddForm({...addForm, celular:val, nombre:cli.nombre, ci:cli.ci||'', ciudad:cli.ciudad||'', sucursal:cli.sucursal||'', direccion:cli.direccion||'', notas_cliente:cli.notas||''});
-                                        else setAddForm({...addForm, celular:val});
-                                    }} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="6XXXXXXX..."/>
+                                        setAddForm({...addForm, celular:val});
+                                        if(val.length >= 1) {
+                                            const sugg = clientes.filter(c=>(c.celular||'').includes(val)).slice(0,6);
+                                            setClienteSugg(sugg); setClienteSuggField('celular');
+                                        } else { setClienteSugg([]); }
+                                    }} onBlur={()=>setTimeout(()=>setClienteSugg([]),150)}
+                                    className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="6XXXXXXX..."/>
+                                    {clienteSugg.length > 0 && clienteSuggField==='celular' && (
+                                        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden">
+                                            {clienteSugg.map(c=>(
+                                                <button key={c.id} onMouseDown={()=>{
+                                                    setAddForm({...addForm, celular:c.celular, nombre:c.nombre, ci:c.ci||'', ciudad:c.ciudad||'', sucursal:c.sucursal||'', direccion:c.direccion||'', notas_cliente:c.notas||''});
+                                                    setClienteSugg([]);
+                                                }} className="w-full text-left px-3 py-2 hover:bg-primary/10 flex items-center gap-3 border-b border-border/40 last:border-0 transition-colors">
+                                                    <span className="font-mono text-xs font-bold text-primary">{c.celular}</span>
+                                                    <span className="text-xs text-text truncate">{c.nombre}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                                <div>
+                                <div className="relative">
                                     <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Nombre Completo</label>
-                                    <input type="text" value={addForm.nombre} onChange={e=>setAddForm({...addForm, nombre:e.target.value.toUpperCase()})} className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Opcional..."/>
+                                    <input type="text" value={addForm.nombre} onChange={e=>{
+                                        const val = e.target.value.toUpperCase();
+                                        setAddForm({...addForm, nombre:val});
+                                        if(val.length >= 2) {
+                                            const sugg = clientes.filter(c=>c.nombre.toUpperCase().includes(val)).slice(0,6);
+                                            setClienteSugg(sugg); setClienteSuggField('nombre');
+                                        } else { setClienteSugg([]); }
+                                    }} onBlur={()=>setTimeout(()=>setClienteSugg([]),150)}
+                                    className="w-full bg-surface border border-border px-3 py-2.5 rounded-xl text-sm text-text outline-none focus:border-primary shadow-sm" placeholder="Opcional..."/>
+                                    {clienteSugg.length > 0 && clienteSuggField==='nombre' && (
+                                        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden">
+                                            {clienteSugg.map(c=>(
+                                                <button key={c.id} onMouseDown={()=>{
+                                                    setAddForm({...addForm, celular:c.celular, nombre:c.nombre, ci:c.ci||'', ciudad:c.ciudad||'', sucursal:c.sucursal||'', direccion:c.direccion||'', notas_cliente:c.notas||''});
+                                                    setClienteSugg([]);
+                                                }} className="w-full text-left px-3 py-2 hover:bg-primary/10 flex items-center gap-3 border-b border-border/40 last:border-0 transition-colors">
+                                                    <span className="text-xs font-bold text-text truncate">{c.nombre}</span>
+                                                    <span className="font-mono text-xs text-muted ml-auto">{c.celular}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-widest">Carnet (CI)</label>
