@@ -1034,56 +1034,46 @@ export default function ClientOrdersView() {
                 const clienteNombre = clientes.find(c => c.id === clienteId)?.nombre || addForm.nombre || clienteId;
                 let cajaMovId = null;
 
-                // 5.1 Crear Movimiento de Caja (Solo si no es modo histórico y hay dinero nuevo real)
-                // montoNuevoRealOrder declarado aquí para que esté disponible en 5.2
-                const cliItemsActuales = items.filter(i => i.cliente_id === clienteId);
-                const cliPagActuales = getPagosRaiz(pagos, clienteId).reduce((s,p) => s + Number(p.monto), 0);
-                const cliPagItemsActuales = cliItemsActuales.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                const creditoExistente = Math.max(0, cliPagActuales - cliPagItemsActuales);
-                const montoNuevoRealOrder = Math.max(0, totalAbonoCalculado - creditoExistente);
-
+                // 5.1 Crear Movimiento de Caja
+                // El pagoIndividual siempre es dinero NUEVO que entra ahora.
+                // El saldo existente del cliente NO se descuenta — queda intacto en su cuenta.
+                // En modo histórico no se crea entrada en caja (el dinero ya fue registrado antes).
                 if (!modoHistorico) {
+                    let turnoId = null;
+                    if (orderMethod === 'Efectivo') {
+                        const { data: activeTurnoArr } = await supabase
+                            .from('turnos_caja').select('id').eq('estado', 'ABIERTO')
+                            .order('abierto_at', { ascending: false }).limit(1);
 
-                    if (montoNuevoRealOrder > 0) {
-                        let turnoId = null;
-                        if (orderMethod === 'Efectivo') {
-                            const { data: activeTurnoArr } = await supabase
-                                .from('turnos_caja').select('id').eq('estado', 'ABIERTO')
-                                .order('abierto_at', { ascending: false }).limit(1);
-
-                            if (!activeTurnoArr || activeTurnoArr.length === 0) {
-                                alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
-                                setLoading(false);
-                                return;
-                            }
-                            turnoId = activeTurnoArr[0].id;
+                        if (!activeTurnoArr || activeTurnoArr.length === 0) {
+                            alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
+                            setLoading(false);
+                            return;
                         }
-                        const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
-                            turno_id: turnoId,
-                            tipo: 'INGRESO',
-                            categoria: 'Cobro Pedido',
-                            concepto: orderPayMode === 'items'
-                                ? `ABONO PEDIDO [${clienteNombre}] · ${cart.length} ítem(s)`
-                                : `ABONO INICIAL CRÉDITO [${clienteNombre}]`,
-                            monto: montoNuevoRealOrder,
-                            vendedor_id: user?.id,
-                            metodo_pago: orderMethod,
-                            origen: 'Pedidos'
-                        }]).select('id').single();
-                        cajaMovId = cajaMov?.id || null;
+                        turnoId = activeTurnoArr[0].id;
                     }
+                    const { data: cajaMov } = await supabase.from('caja_movimientos').insert([{
+                        turno_id: turnoId,
+                        tipo: 'INGRESO',
+                        categoria: 'Cobro Pedido',
+                        concepto: orderPayMode === 'items'
+                            ? `ABONO PEDIDO [${clienteNombre}] · ${cart.length} ítem(s)`
+                            : `ABONO INICIAL CRÉDITO [${clienteNombre}]`,
+                        monto: totalAbonoCalculado,
+                        vendedor_id: user?.id,
+                        metodo_pago: orderMethod,
+                        origen: 'Pedidos'
+                    }]).select('id').single();
+                    cajaMovId = cajaMov?.id || null;
                 }
 
                 // 5.2 Lógica según Modo de Pago
                 if (orderPayMode === 'items') {
-                    // Crear registro RAÍZ en cliente_pagos
-                    // monto = montoNuevoRealOrder para no inflar saldo cuando hay crédito existente
-                    // En modo histórico siempre se registra el total (sin crédito previo)
-                    const rootMontoOrder = modoHistorico ? totalAbonoCalculado : montoNuevoRealOrder;
-                    if (rootMontoOrder > 0) {
+                    // Crear registro RAÍZ en cliente_pagos por el total pagado ahora
+                    if (totalAbonoCalculado > 0) {
                         await supabase.from('cliente_pagos').insert([{
                             cliente_id: clienteId,
-                            monto: rootMontoOrder,
+                            monto: totalAbonoCalculado,
                             concepto: modoHistorico
                                 ? `Pago inicial (histórico) · ${cart.length} ítem(s)`
                                 : `Pago inicial · ${cart.length} ítem(s)`,
@@ -1094,19 +1084,19 @@ export default function ClientOrdersView() {
                         }]);
                     }
 
-                    // Distribución manual basada en lo ingresado en el carrito
+                    // Distribución: crear sub-entries vinculadas al nuevo root via caja_mov_id
                     for (let idx = 0; idx < cart.length; idx++) {
                         const cItemInput = cart[idx];
                         const dbItem = (insertedItems || [])[idx];
                         const amt = Number(cItemInput.pagoIndividual) || 0;
-                        
+
                         if (amt > 0 && dbItem) {
                             // Actualizar ítem en DB
                             await supabase.from('cliente_items')
                                 .update({ monto_pagado: (Number(dbItem.monto_pagado) || 0) + amt })
                                 .eq('id', dbItem.id);
-                            
-                            // Crear pago granular
+
+                            // Crear sub-entry vinculada al nuevo root (mismo caja_mov_id)
                             await supabase.from('cliente_pagos').insert([{
                                 cliente_id: clienteId,
                                 monto: amt,
