@@ -1152,19 +1152,9 @@ export default function ClientOrdersView() {
 
             const cli = clientes.find(c => c.id === clienteId);
 
-            // [BLOQUE 5] Calcular dinero realmente nuevo (descontando saldo flotante)
-            // Solo se cuenta como "balance" el dinero que pasó por caja (caja_mov_id != null).
-            // Los pagos históricos/manuales (caja_mov_id=null) no se descuentan para evitar
-            // que anulen nuevos pagos reales y dejen entradas de caja sin registrar.
-            const pItemsParaBalance = items.filter(i => i.cliente_id === clienteId);
-            const cPagItemsBal = pItemsParaBalance.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-            const groupPagosBal = getPagosRaiz(pagos, clienteId)
-                .filter(p => p.caja_mov_id != null)
-                .reduce((s,p) => s + Number(p.monto), 0);
-            const balanceExistente = Math.max(0, groupPagosBal - cPagItemsBal);
-            const montoNuevoReal = Math.max(0, amt - balanceExistente);
-
             // --- LEDGER: Registrar en caja_movimientos PRIMERO para capturar el ID ---
+            // El Abonar siempre es dinero nuevo que entra ahora — se registra el monto completo.
+            // El saldo existente del cliente NO se descuenta (ya fue registrado cuando pagó antes).
             let turnoId = null;
             if (payMethod === 'Efectivo') {
                 const { data: activeTurnoArr } = await supabase
@@ -1173,8 +1163,8 @@ export default function ClientOrdersView() {
                     .eq('estado', 'ABIERTO')
                     .order('abierto_at', { ascending: false })
                     .limit(1);
-                
-                if (!sinContabilidad && montoNuevoReal > 0 && (!activeTurnoArr || activeTurnoArr.length === 0)) {
+
+                if (!sinContabilidad && (!activeTurnoArr || activeTurnoArr.length === 0)) {
                     alert("No hay ningún turno abierto en el flujo de caja para recibir el dinero. Por favor, abre un turno en Contabilidad antes de continuar.");
                     setLoading(false);
                     return;
@@ -1183,14 +1173,14 @@ export default function ClientOrdersView() {
             }
 
             let cajaMov = null;
-            if (!sinContabilidad && montoNuevoReal > 0) {
+            if (!sinContabilidad) {
                 const concetoLedger = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
                 const { data: cajaMovData, error: moveErr } = await supabase.from('caja_movimientos').insert([{
                     turno_id: turnoId,
                     tipo: 'INGRESO',
                     categoria: 'Cobro Pedido',
                     concepto: concetoLedger,
-                    monto: montoNuevoReal, // ← solo el dinero nuevo
+                    monto: amt, // ← monto completo, siempre es dinero nuevo
                     vendedor_id: user?.id,
                     metodo_pago: payMethod,
                     origen: 'Pedidos'
