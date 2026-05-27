@@ -88,6 +88,8 @@ export default function AdminMasterView() {
                 let extractedCajasQty = 0;
                 let extractedCostoEnvio = 0;
                 let extractedTotalArs = 0;
+                // Acumula los "Total" por editorial (ya con descuento aplicado) para fallback preciso
+                let editorialTotals = [];
 
                 // Encontrar la primera fila de datos reales y totales
                 for (let i = 0; i < rows.length; i++) {
@@ -96,11 +98,19 @@ export default function AdminMasterView() {
 
                     const col0 = String(r[0] || '').trim().toLowerCase();
 
-                    // Buscar totales al final del archivo
+                    // Buscar total global de productos
                     if (col0.includes('total productos') || col0.includes('total producto')) {
                         extractedTotalProductos = parseFloat(r[3]) || 0;
                         continue;
                     }
+
+                    // "Total" por editorial (ej. "Total" después de "Descuento 35%")
+                    // col0 exacto 'total' para no confundir con 'total productos' o 'total a pagar'
+                    if (col0 === 'total' && parseFloat(r[3]) > 0) {
+                        editorialTotals.push(parseFloat(r[3]));
+                        continue;
+                    }
+
                     if (col0.includes('envio') || col0.includes('envío') || col0.includes('cajas')) {
                         extractedEnvioTexto = String(r[0] || '').trim();
                         extractedCostoEnvio = parseFloat(r[3]) || 0;
@@ -111,8 +121,9 @@ export default function AdminMasterView() {
                         continue;
                     }
 
-                    // Si la fila tiene al menos 3 columnas llenas y la segunda parece un precio/número (Es un ítem normal)
-                    if (r.length >= 3 && !isNaN(parseFloat(r[1])) && !isNaN(parseFloat(r[2]))) {
+                    // Solo incluir ítems con cantidad > 0
+                    // (el distribuidor a veces lista títulos con cant=0 que NO fueron pedidos)
+                    if (r.length >= 3 && !isNaN(parseFloat(r[1])) && !isNaN(parseFloat(r[2])) && parseInt(r[2]) > 0) {
                         parsedItems.push({
                             titulo: r[0],
                             precio_unitario: parseFloat(r[1]) || 0,
@@ -126,11 +137,15 @@ export default function AdminMasterView() {
                     throw new Error("No se pudo detectar la estructura esperada: [Título, Precio, Cantidad, Total]");
                 }
 
-                // Si no encontró un total final explícito, usamos la suma calculada
-                const sumaCalculada = parsedItems.reduce((acc, it) => acc + (it.precio_unitario * it.cantidad), 0);
+                // Fallback 1: suma de totales por editorial (ya con descuento) — más preciso
+                // Fallback 2: suma de precios de lista × cantidad (sin descuento) — último recurso
+                const sumaEditorialTotals = editorialTotals.reduce((acc, v) => acc + v, 0);
+                const sumaListaPrecios = parsedItems.reduce((acc, it) => acc + (it.precio_unitario * it.cantidad), 0);
 
                 // Setear defaults si no se extrajeron bien del excel
-                if (extractedTotalProductos === 0) extractedTotalProductos = sumaCalculada;
+                if (extractedTotalProductos === 0) {
+                    extractedTotalProductos = sumaEditorialTotals > 0 ? sumaEditorialTotals : sumaListaPrecios;
+                }
 
                 // Ignoramos filas "Total" raras del excel y FORZAMOS el cálculo algebraico:
                 extractedTotalArs = extractedTotalProductos + extractedCostoEnvio;
@@ -176,6 +191,20 @@ export default function AdminMasterView() {
         multiple: false
     });
 
+    // Normaliza títulos para comparación robusta:
+    // - Minúsculas, sin acentos, guiones → espacio, espacios múltiples → uno
+    const normalizeTitle = (str) =>
+        (str || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(/[-–—]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+    // Estados que NUNCA deben ser sobreescritos por una re-sincronización
+    const ESTADOS_TERMINALES = new Set(['EN TIENDA', 'ENTREGADO', 'ADJUDICADO', 'DAÑADO', 'DESPACHADO']);
+
     const syncOrdersWithMaster = async (semanaId, masterItems) => {
         if (!semanaId || !masterItems) return;
         setProcessing(true);
@@ -183,45 +212,52 @@ export default function AdminMasterView() {
         try {
             const semanaObj = semanas.find(s => s.id === semanaId);
             const wName = semanaObj ? semanaObj.nombre : '';
-            
+
             // 1. Fetch ALL cliente_items for this week
             const { data: clientItems, error: itemsError } = await supabase
                 .from('cliente_items')
                 .select('*')
                 .eq('semana_id', semanaId);
-            
+
             if (itemsError) throw itemsError;
 
-            // NUEVO: Fetch ALL pedido_items de mayoristas para esta semana (solo los pedidos a Entelequia)
+            // Fetch ALL pedido_items de mayoristas para esta semana (solo los pedidos a Entelequia)
             const { data: mayoristaItems, error: mayoristaError } = await supabase
                 .from('pedido_items')
                 .select('*, pedido:pedidos!inner(tipo, semana_id)')
                 .eq('pedido.semana_id', semanaId)
                 .eq('pedido.tipo', 'mayorista')
                 .eq('fuente', 'entelequia');
-            
+
             if (mayoristaError) console.error("Error fetching mayorista items:", mayoristaError);
 
-            // 2. Map master titles for faster lookup - SOLO LOS QUE TIENEN CANTIDAD > 0
+            // 2. Map master titles — solo qty > 0, con normalización robusta
             const masterTitles = new Set(
-                masterItems.filter(it => it.cantidad > 0).map(it => (it.titulo || '').toLowerCase().trim())
+                masterItems.filter(it => it.cantidad > 0).map(it => normalizeTitle(it.titulo))
             );
-            
+
             let confirmedCount = 0;
             let cutCount = 0;
+            let skippedCount = 0;
 
             const updateItems = async (itemsList, tableName) => {
                 for (let item of itemsList) {
-                    const itemTitle = (item.titulo || '').toLowerCase().trim();
+                    // 🔒 Nunca pisar estados terminales (libro ya llegó, entregado, etc.)
+                    if (ESTADOS_TERMINALES.has(item.estado)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    const itemTitle = normalizeTitle(item.titulo);
                     const isConfirmed = masterTitles.has(itemTitle);
-                    
+
                     let nuevoEstado = isConfirmed ? `CONFIRMADO ${wName}`.trim() : 'RECORTADO';
-                    
-                    // Only update if state changed
+
+                    // Solo actualizar si el estado cambió
                     if (item.estado !== nuevoEstado) {
                         const { error: updateErr } = await supabase.from(tableName).update({ estado: nuevoEstado }).eq('id', item.id);
                         if (updateErr) console.error(`Error al actualizar ${tableName} item:`, item.id, updateErr);
-                        
+
                         if (isConfirmed) confirmedCount++;
                         else cutCount++;
                     }
@@ -236,7 +272,8 @@ export default function AdminMasterView() {
                 await updateItems(mayoristaItems, 'pedido_items');
             }
             
-            setSuccess(`Sincronización completa: ${confirmedCount} pedidos confirmados, ${cutCount} marcados como recortados.`);
+            const skipMsg = skippedCount > 0 ? `, ${skippedCount} sin tocar (ya en tienda/entregados)` : '';
+            setSuccess(`Sincronización completa: ${confirmedCount} confirmados, ${cutCount} recortados${skipMsg}.`);
         } catch (e) {
             console.error("Error sincronizando pedidos:", e);
             setError("Error al sincronizar los estados de los pedidos de clientes y mayoristas.");
@@ -504,15 +541,34 @@ export default function AdminMasterView() {
                         <button onClick={() => setPreviewData(null)}><X size={20} /></button>
                     </div>
 
-                    <div className="p-8 flex justify-between items-center bg-[#f8f9fa] border-b">
-                        <div>
-                            <p className="text-[10px] uppercase font-black text-sky tracking-widest mb-1">Total Constatado</p>
-                            <p className="text-3xl font-black text-navy font-display uppercase italic">ARS {previewData.totalArs.toLocaleString()}</p>
+                    <div className="p-8 flex justify-between items-start bg-[#f8f9fa] border-b gap-6">
+                        <div className="flex-1">
+                            {/* Desglose financiero */}
+                            <div className="flex items-center gap-6 flex-wrap mb-3">
+                                <div>
+                                    <p className="text-[9px] uppercase font-black text-sky tracking-widest mb-0.5">Productos ({previewData.items.length} títulos)</p>
+                                    <p className="text-lg font-bold text-navy font-mono">ARS {previewData.totalProductos.toLocaleString()}</p>
+                                </div>
+                                {previewData.costoEnvio > 0 && (
+                                    <>
+                                        <span className="text-sky font-black text-xl">+</span>
+                                        <div>
+                                            <p className="text-[9px] uppercase font-black text-sky tracking-widest mb-0.5">{previewData.envioTexto || 'Envío'}</p>
+                                            <p className="text-lg font-bold text-navy font-mono">ARS {previewData.costoEnvio.toLocaleString()}</p>
+                                        </div>
+                                        <span className="text-sky font-black text-xl">=</span>
+                                    </>
+                                )}
+                                <div>
+                                    <p className="text-[9px] uppercase font-black text-sky tracking-widest mb-0.5">Total a Pagar</p>
+                                    <p className="text-3xl font-black text-navy font-display uppercase italic">ARS {previewData.totalArs.toLocaleString()}</p>
+                                </div>
+                            </div>
                         </div>
                         <button
                             onClick={handleSaveMaster}
                             disabled={processing}
-                            className="bg-accent text-navy px-10 py-4 rounded-2xl font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center gap-2"
+                            className="bg-accent text-navy px-10 py-4 rounded-2xl font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center gap-2 shrink-0"
                         >
                             {processing ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
                             CONFIRMAR TODO

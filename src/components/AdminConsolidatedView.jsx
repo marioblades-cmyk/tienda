@@ -5,6 +5,16 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { catalogService } from '../services/catalogService';
 
+// Normaliza títulos para comparación robusta: sin acentos, guiones→espacio, espacios múltiples→uno
+const normalizeTitle = (str) =>
+    (str || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[-–—]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
 export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [semanas, setSemanas] = useState([]);
     const [selectedSemana, setSelectedSemana] = useState('');
@@ -86,10 +96,10 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         // Master Confirmaciones puede ser null sin ser necesariamente un error grave para el flujo
         if (masterResult.data) {
             setMasterData(masterResult.data);
-            // Indexamos los confirmados por título para búsqueda O(1)
+            // Indexamos los confirmados por título (clave normalizada) para búsqueda O(1)
             const mapConf = {};
             (masterResult.data.datos_json || []).forEach(it => {
-                const safeTitle = String(it.titulo || '').toLowerCase().trim();
+                const safeTitle = normalizeTitle(it.titulo);
                 if (safeTitle) {
                     mapConf[safeTitle] = {
                         cantidad: it.cantidad,
@@ -124,8 +134,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
         const officialPrices = {};
         items.forEach(item => {
             if (!item) return;
-            const tKey = String(item.titulo || '').toLowerCase().trim();
-            
+            const tKey = normalizeTitle(item.titulo);
+
             // Prioridad 1: Master Conf (Entelequia directo)
             if (masterConf?.[tKey]) {
                 officialPrices[tKey] = masterConf[tKey].precio;
@@ -157,7 +167,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             const editorial = item.editorial || 'Otras';
 
             // USAR PRECIO ARS UNIFICADO
-            const searchTitle = String(item.titulo || '').toLowerCase().trim();
+            const searchTitle = normalizeTitle(item.titulo);
             const precioARS = officialPrices[searchTitle] || item.precio || 0;
             const amount = precioARS * (item.cantidad || 0);
 
@@ -182,7 +192,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
             const detailKey = `${item.editorial}|${item.titulo}|${item.isbn_raw}`;
             if (!editorialDetails[editorial]) editorialDetails[editorial] = {};
             if (!editorialDetails[editorial][detailKey]) {
-                const searchItemTitle = String(item.titulo || '').toLowerCase().trim();
+                const searchItemTitle = normalizeTitle(item.titulo);
                 const confItem = masterConf ? masterConf[searchItemTitle] : null;
 
                 editorialDetails[editorial][detailKey] = {
@@ -213,10 +223,11 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 const confItem = masterConf[titleKey];
 
                 // Buscar si este título ya fue procesado en detailData
+                // titleKey ya está normalizado (lo indexamos con normalizeTitle arriba)
                 let found = false;
                 for (const ed in editorialDetails) {
                     for (const key in editorialDetails[ed]) {
-                        const existingTitle = String(editorialDetails[ed][key].titulo || '').toLowerCase().trim();
+                        const existingTitle = normalizeTitle(editorialDetails[ed][key].titulo);
                         if (existingTitle === titleKey) {
                             found = true;
                             break;
@@ -271,7 +282,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 
                 if (itemVName === v && item?.pedido?.tipo !== 'tienda') {
                     // USAR PRECIO ARS UNIFICADO
-                    const searchTitle = String(item.titulo || '').toLowerCase().trim();
+                    const searchTitle = normalizeTitle(item.titulo);
                     const precioARS = officialPrices[searchTitle] || item.precio || 0;
                     const amount = precioARS * (item.cantidad || 0);
 
@@ -294,7 +305,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
                 if (item?.pedido?.vendedor_nombre === v && item?.pedido?.tipo === 'tienda') {
                     // USAR PRECIO ARS UNIFICADO
-                    const searchTitle = String(item.titulo || '').toLowerCase().trim();
+                    const searchTitle = normalizeTitle(item.titulo);
                     const precioARS = officialPrices[searchTitle] || item.precio || 0;
                     const amount = precioARS * (item.cantidad || 0);
 
