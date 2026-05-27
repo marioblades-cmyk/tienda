@@ -684,6 +684,9 @@ export default function FlujoCajaView({ user, profile }) {
 
     const totals = turnoActivo ? calculateTotals() : { ingresos: 0, egresos: 0, saldoActual: 0, efectivoIngresos: 0, efectivoEgresos: 0, digitalIngresos: 0, digitalEgresos: 0, totalIngresos: 0, totalEgresos: 0, efectivoEnCaja: 0 };
 
+    // Excluir transferencias internas del Libro de Operaciones (no son operaciones de tienda)
+    const movimientosDisplay = movimientos.filter(m => m.origen !== 'Transferencia');
+
     return (
         <div className="space-y-6 max-w-[1440px] mx-auto animate-in fade-in duration-700 pb-20 px-4">
 
@@ -1361,7 +1364,7 @@ export default function FlujoCajaView({ user, profile }) {
                                     <h4 className="text-xs font-bold text-navy uppercase tracking-widest px-1">Libro de Operaciones Diarias</h4>
                                 </div>
                                 <div className="flex items-center gap-4">
-                                    <span className="text-xs font-bold text-navy/30 uppercase tracking-widest">{movimientos.length} REGISTROS</span>
+                                    <span className="text-xs font-bold text-navy/30 uppercase tracking-widest">{movimientosDisplay.length} REGISTROS</span>
                                 </div>
                             </div>
                             <div className="overflow-x-auto custom-scrollbar">
@@ -1378,7 +1381,7 @@ export default function FlujoCajaView({ user, profile }) {
                                     </thead>
                                     <tbody className="divide-y divide-border/10">
                                         <AnimatePresence initial={false}>
-                                            {movimientos.map(m => {
+                                            {movimientosDisplay.map(m => {
                                                 const METHOD_META = {
                                                     'Efectivo':                   { icon: '💵', color: 'bg-success/10 text-success border-success/20' },
                                                     'Yasta (QR)':                 { icon: '📲', color: 'bg-blue-50 text-blue-600 border-blue-200' },
@@ -1430,7 +1433,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                 );
                                             })}
                                         </AnimatePresence>
-                                        {movimientos.length === 0 && (
+                                        {movimientosDisplay.length === 0 && (
                                             <tr>
                                                 <td colSpan="5" className="p-20 text-center text-navy/20 uppercase font-black tracking-widest text-xs italic">No se registran movimientos en esta sesión</td>
                                             </tr>

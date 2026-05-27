@@ -281,6 +281,8 @@ function MovimientosTab({ turnoActivo }) {
     };
 
     const filtered = useMemo(() => movimientos.filter(m => {
+        // Ocultar transferencias internas por defecto — solo mostrar si el usuario las filtra explícitamente
+        if ((m.origen || 'Tienda') === 'Transferencia' && filterOrigen !== 'Transferencia') return false;
         if (filterMetodo !== 'todos' && (m.metodo_pago || 'Efectivo') !== filterMetodo) return false;
         if (filterOrigen !== 'todos' && (m.origen || 'Tienda') !== filterOrigen) return false;
         if (filterTipo !== 'todos' && m.tipo !== filterTipo) return false;
@@ -550,7 +552,7 @@ function MovimientosTab({ turnoActivo }) {
                         <select value={filterOrigen} onChange={e => setFilterOrigen(e.target.value)}
                             className="bg-surface border border-border rounded-lg px-3 py-1.5 text-[11px] font-bold outline-none cursor-pointer hover:border-primary transition-colors min-w-[150px] shadow-sm">
                             <option value="todos">Todos los orígenes</option>
-                            {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
+                            {ORIGENES.map(o => <option key={o} value={o}>{o === 'Transferencia' ? '🔁 Transferencias internas' : o}</option>)}
                         </select>
                     </div>
                 </div>
