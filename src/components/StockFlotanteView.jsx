@@ -32,6 +32,10 @@ export default function ConfirmationInfoView() {
     const [clientItems, setClientItems] = useState([]);
     const [saving, setSaving] = useState(false);
     const [actionLoading, setActionLoading] = useState(null); // id del titulo cargando
+    const [reprogramModal, setReprogramModal] = useState(null); // { mi: pedido_item, weekId }
+    const [reprogramQty, setReprogramQty] = useState(1);
+    const [reprogramSemana, setReprogramSemana] = useState('');
+    const [reprogramLoading, setReprogramLoading] = useState(false);
 
     useEffect(() => {
         fetchDashboardData();
@@ -83,7 +87,7 @@ export default function ConfirmationInfoView() {
                 supabase.from('semanas').select('*').order('created_at', { ascending: false }),
                 supabase.from('master_confirmaciones').select('semana_id, datos_json'),
                 fetchAll('pedido_items_recepcion', 'semana_id, cantidad_recibida, titulo'),
-                fetchAll('pedido_items', 'id, cantidad, titulo, estado, pedido:pedidos(semana_id, tipo, vendedor_nombre)'),
+                fetchAll('pedido_items', 'id, cantidad, titulo, estado, precio, isbn_raw, editorial, pedido:pedidos(id, semana_id, tipo, vendedor_nombre, vendedor_id)'),
                 fetchAll('cliente_items', '*, clientes(nombre), vendedores(nombre)')
             ]);
 
@@ -271,6 +275,100 @@ export default function ConfirmationInfoView() {
             alert("⚠️ Error al cargar tablero: " + err.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // ── Re-programar ítem mayorista recortado a otra semana ──────────────────
+    const handleReProgramarMayorista = async () => {
+        if (!reprogramModal || !reprogramSemana) return;
+        const { mi } = reprogramModal;
+        setReprogramLoading(true);
+        try {
+            // 1. Buscar pedido mayorista existente del mismo vendedor en la semana destino
+            const { data: existingPedido } = await supabase
+                .from('pedidos')
+                .select('id')
+                .eq('semana_id', reprogramSemana)
+                .eq('tipo', 'mayorista')
+                .eq('vendedor_id', mi.pedido.vendedor_id)
+                .maybeSingle();
+
+            let pedidoId;
+            if (existingPedido) {
+                pedidoId = existingPedido.id;
+            } else {
+                // Crear nuevo pedido mayorista para esa semana
+                const { data: newPedido, error: pedErr } = await supabase
+                    .from('pedidos')
+                    .insert({
+                        semana_id: reprogramSemana,
+                        tipo: 'mayorista',
+                        vendedor_nombre: mi.pedido.vendedor_nombre,
+                        vendedor_id: mi.pedido.vendedor_id,
+                    })
+                    .select('id')
+                    .single();
+                if (pedErr) throw pedErr;
+                pedidoId = newPedido.id;
+            }
+
+            // 2. Verificar que no exista ya el mismo título en ese pedido (evitar duplicado)
+            const { data: dup } = await supabase
+                .from('pedido_items')
+                .select('id')
+                .eq('pedido_id', pedidoId)
+                .ilike('titulo', mi.titulo)
+                .maybeSingle();
+
+            if (dup) {
+                alert(`"${mi.titulo}" ya existe en el pedido de esa semana. No se creó un duplicado.`);
+                setReprogramModal(null);
+                return;
+            }
+
+            // 3. Crear nuevo pedido_item en la semana destino
+            const { error: insErr } = await supabase.from('pedido_items').insert({
+                pedido_id: pedidoId,
+                titulo: mi.titulo,
+                cantidad: reprogramQty,
+                precio: mi.precio || 0,
+                isbn_raw: mi.isbn_raw || null,
+                editorial: mi.editorial || null,
+                estado: null,
+            });
+            if (insErr) throw insErr;
+
+            // 4. Marcar el original como RECORTADO_REPEDIDO
+            const { error: updErr } = await supabase
+                .from('pedido_items')
+                .update({ estado: 'RECORTADO_REPEDIDO' })
+                .eq('id', mi.id);
+            if (updErr) throw updErr;
+
+            setReprogramModal(null);
+            await fetchDashboardData();
+        } catch (err) {
+            alert('Error al re-programar: ' + err.message);
+        } finally {
+            setReprogramLoading(false);
+        }
+    };
+
+    // ── Cancelar ítem mayorista recortado definitivamente ────────────────────
+    const handleCancelarMayorista = async (itemId) => {
+        if (!confirm('¿Cancelar definitivamente este ítem del pedido mayorista?')) return;
+        setSaving(true);
+        try {
+            const { error } = await supabase
+                .from('pedido_items')
+                .update({ estado: 'CANCELADO' })
+                .eq('id', itemId);
+            if (error) throw error;
+            await fetchDashboardData();
+        } catch (err) {
+            alert('Error al cancelar: ' + err.message);
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -612,18 +710,37 @@ export default function ConfirmationInfoView() {
                                                                                                     </div>
                                                                                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                                                                                         {t.mayoristaOrd.map(mi => {
-                                                                                                            const isConf = (mi.estado || '').startsWith('CONFIRMADO') || mi.estado === 'EN TIENDA' || mi.estado === 'DESPACHADO';
-                                                                                                            const isRec  = (mi.estado || '').includes('RECORTADO');
+                                                                                                            const isConf      = (mi.estado || '').startsWith('CONFIRMADO') || mi.estado === 'EN TIENDA' || mi.estado === 'DESPACHADO';
+                                                                                                            const isRec       = mi.estado === 'RECORTADO';
+                                                                                                            const isRepedido  = mi.estado === 'RECORTADO_REPEDIDO';
+                                                                                                            const isCancelado = mi.estado === 'CANCELADO';
+                                                                                                            const isDone      = isRepedido || isCancelado;
                                                                                                             return (
-                                                                                                                <div key={mi.id} className={`p-3 rounded-lg border flex items-center justify-between gap-2 ${isConf ? 'border-blue-200 bg-blue-50/60' : isRec ? 'border-red-200 bg-red-50/50 opacity-60' : 'border-border/40 bg-white/60'}`}>
-                                                                                                                    <div className="flex flex-col min-w-0">
-                                                                                                                        <span className="text-[12px] font-black truncate text-navy">{mi.pedido?.vendedor_nombre || 'Mayorista'}</span>
-                                                                                                                        <span className="text-[9px] text-muted">{mi.cantidad} unid.</span>
-                                                                                                                        <span className={`text-[8px] font-black uppercase mt-0.5 ${isConf ? 'text-blue-600' : isRec ? 'text-red-500' : 'text-orange-500'}`}>
-                                                                                                                            {isConf ? '✓ CONFIRMADO' : isRec ? '✂️ RECORTADO' : '⏳ PEDIDO'}
-                                                                                                                        </span>
+                                                                                                                <div key={mi.id} className={`p-3 rounded-lg border flex flex-col gap-1.5 ${isConf ? 'border-blue-200 bg-blue-50/60' : isRec ? 'border-red-200 bg-red-50/50' : isDone ? 'border-gray-200 bg-gray-50/50 opacity-60' : 'border-border/40 bg-white/60'}`}>
+                                                                                                                    <div className="flex items-center justify-between gap-2">
+                                                                                                                        <div className="flex flex-col min-w-0">
+                                                                                                                            <span className="text-[12px] font-black truncate text-navy">{mi.pedido?.vendedor_nombre || 'Mayorista'}</span>
+                                                                                                                            <span className="text-[9px] text-muted">{mi.cantidad} unid.</span>
+                                                                                                                            <span className={`text-[8px] font-black uppercase mt-0.5 ${isConf ? 'text-blue-600' : isRec ? 'text-red-500' : isRepedido ? 'text-emerald-600' : isCancelado ? 'text-gray-400' : 'text-orange-500'}`}>
+                                                                                                                                {isConf ? '✓ CONFIRMADO' : isRec ? '✂️ RECORTADO' : isRepedido ? '↻ REPEDIDO' : isCancelado ? '✗ CANCELADO' : '⏳ PEDIDO'}
+                                                                                                                            </span>
+                                                                                                                        </div>
+                                                                                                                        <ShoppingBag size={16} className={isConf ? 'text-blue-400' : 'text-muted/40'} />
                                                                                                                     </div>
-                                                                                                                    <ShoppingBag size={16} className={isConf ? 'text-blue-400' : 'text-muted/40'} />
+                                                                                                                    {/* Acciones para ítems RECORTADO (solo admin) */}
+                                                                                                                    {isAdmin && isRec && (
+                                                                                                                        <div className="flex gap-1.5 pt-1 border-t border-red-100">
+                                                                                                                            <button
+                                                                                                                                onClick={() => { setReprogramModal({ mi, weekId: w.id }); setReprogramQty(mi.cantidad); setReprogramSemana(''); }}
+                                                                                                                                className="flex-1 text-[9px] font-black text-white bg-blue-500 hover:bg-blue-600 rounded px-2 py-1 transition-colors"
+                                                                                                                            >↻ Re-programar</button>
+                                                                                                                            <button
+                                                                                                                                onClick={() => handleCancelarMayorista(mi.id)}
+                                                                                                                                disabled={saving}
+                                                                                                                                className="text-[9px] font-black text-red-500 hover:bg-red-100 border border-red-200 rounded px-2 py-1 transition-colors disabled:opacity-40"
+                                                                                                                            >✗ Cancelar</button>
+                                                                                                                        </div>
+                                                                                                                    )}
                                                                                                                 </div>
                                                                                                             );
                                                                                                         })}
@@ -725,6 +842,64 @@ export default function ConfirmationInfoView() {
                     <strong className="text-white">Auditando discrepancias</strong>: En esta vista, comparamos tus pedidos iniciales contra el Excel maestro. Los ítems marcados como <span className="text-red-400 font-bold">RECORTADOS</span> son aquellos que pediste pero el distribuidor no enviará. Los ítems <span className="text-green-400 font-bold">EXTRAS</span> son mangas que no pediste originalmente pero vienen en camino.
                 </div>
             </div>
+
+            {/* ── Modal Re-programar ítem mayorista ── */}
+            {reprogramModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={e => { if (e.target === e.currentTarget) setReprogramModal(null); }}>
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+                        <h3 className="text-base font-black text-navy mb-1">↻ Re-programar ítem mayorista</h3>
+                        <p className="text-[11px] text-muted mb-1 font-medium">Vendedor: <span className="font-black text-navy">{reprogramModal.mi.pedido?.vendedor_nombre}</span></p>
+                        <p className="text-[12px] font-black text-navy truncate mb-4">{reprogramModal.mi.titulo}</p>
+
+                        <div className="space-y-4">
+                            {/* Cantidad */}
+                            <div>
+                                <label className="text-[10px] font-black text-muted uppercase tracking-wider block mb-1">Cantidad a re-pedir</label>
+                                <div className="flex items-center gap-3">
+                                    <button onClick={() => setReprogramQty(q => Math.max(1, q - 1))} className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-base font-bold hover:bg-gray-50 transition-colors">−</button>
+                                    <span className="text-xl font-black w-8 text-center text-navy">{reprogramQty}</span>
+                                    <button onClick={() => setReprogramQty(q => q + 1)} className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-base font-bold hover:bg-gray-50 transition-colors">+</button>
+                                    <span className="text-[10px] text-muted ml-1">(original: {reprogramModal.mi.cantidad})</span>
+                                </div>
+                            </div>
+
+                            {/* Semana destino */}
+                            <div>
+                                <label className="text-[10px] font-black text-muted uppercase tracking-wider block mb-1">Semana destino</label>
+                                <select
+                                    value={reprogramSemana}
+                                    onChange={e => setReprogramSemana(e.target.value)}
+                                    className="w-full text-[11px] border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                >
+                                    <option value="">— Elegir semana —</option>
+                                    {semanaDetails
+                                        .filter(s => s.id !== reprogramModal.weekId)
+                                        .map(s => (
+                                            <option key={s.id} value={s.id}>{s.nombre}</option>
+                                        ))
+                                    }
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 mt-5">
+                            <button
+                                onClick={handleReProgramarMayorista}
+                                disabled={!reprogramSemana || reprogramLoading}
+                                className="flex-1 bg-primary text-white text-[11px] font-black rounded-xl py-2.5 hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                            >
+                                {reprogramLoading ? 'Guardando...' : '↻ Confirmar re-pedido'}
+                            </button>
+                            <button
+                                onClick={() => setReprogramModal(null)}
+                                className="px-4 text-[11px] font-black text-muted border border-border rounded-xl py-2.5 hover:bg-gray-50 transition-colors"
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
