@@ -998,8 +998,11 @@ export default function MayoristaUpload() {
                                     <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-3">Método</label>
                                     <select value={pagoForm.metodo} onChange={(e)=>setPagoForm({...pagoForm, metodo: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-[11px] font-black text-navy outline-none">
                                         <option value="Efectivo">Efectivo</option>
-                                        <option value="Transferencia">Transferencia</option>
                                         <option value="Yasta (QR)">Yasta (QR)</option>
+                                        <option value="Banco Unión (QR/Transf)">Banco Unión (QR/Transf)</option>
+                                        <option value="BNB">BNB</option>
+                                        <option value="Transferencia">Transferencia</option>
+                                        <option value="Otros">Otros</option>
                                     </select>
                                 </div>
                             </div>
