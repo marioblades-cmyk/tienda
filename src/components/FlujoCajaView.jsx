@@ -2032,19 +2032,47 @@ export default function FlujoCajaView({ user, profile }) {
                                 ))}
                             </div>
 
-                            {/* Total + acciones */}
-                            <div style={{ borderTop: '2px solid #f1f5f9', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                                <button
-                                    onClick={() => setCalcQty(initCalc())}
-                                    style={{ padding: '8px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', background: 'white', fontWeight: 700, fontSize: '12px', cursor: 'pointer', color: '#94a3b8' }}
-                                >
-                                    Limpiar
-                                </button>
-                                <div style={{ textAlign: 'right' }}>
-                                    <p style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: '#64748b', margin: 0 }}>Total en Caja</p>
-                                    <p style={{ fontSize: '26px', fontWeight: 900, color: '#1b3a57', fontFamily: 'monospace', margin: 0, lineHeight: 1.1 }}>Bs {total.toFixed(2)}</p>
-                                </div>
-                            </div>
+                            {/* Comparación: Esperado vs Contado */}
+                            {(() => {
+                                const esperado = totals.efectivoEnCaja;
+                                const diff = total - esperado;
+                                const exacto = Math.abs(diff) < 0.01;
+                                const diffColor = exacto ? '#16a34a' : diff > 0 ? '#d97706' : '#dc2626';
+                                const diffBg   = exacto ? '#f0fdf4' : diff > 0 ? '#fffbeb' : '#fef2f2';
+                                return (
+                                    <div style={{ borderTop: '2px solid #f1f5f9', padding: '12px 20px', background: diffBg, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {/* Fila de tres valores */}
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                                            {/* Esperado */}
+                                            <div style={{ flex: 1, background: 'white', borderRadius: '10px', padding: '8px 10px', border: '1.5px solid #e2e8f0', textAlign: 'center' }}>
+                                                <p style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', margin: '0 0 2px 0', letterSpacing: '0.08em' }}>Esperado</p>
+                                                <p style={{ fontSize: '16px', fontWeight: 900, color: '#1b3a57', fontFamily: 'monospace', margin: 0, lineHeight: 1 }}>Bs {esperado.toFixed(2)}</p>
+                                            </div>
+                                            {/* Contado */}
+                                            <div style={{ flex: 1, background: 'white', borderRadius: '10px', padding: '8px 10px', border: '1.5px solid #e2e8f0', textAlign: 'center' }}>
+                                                <p style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', margin: '0 0 2px 0', letterSpacing: '0.08em' }}>Contado</p>
+                                                <p style={{ fontSize: '16px', fontWeight: 900, color: '#1b3a57', fontFamily: 'monospace', margin: 0, lineHeight: 1 }}>Bs {total.toFixed(2)}</p>
+                                            </div>
+                                            {/* Diferencia */}
+                                            <div style={{ flex: 1, background: 'white', borderRadius: '10px', padding: '8px 10px', border: `1.5px solid ${diffColor}40`, textAlign: 'center' }}>
+                                                <p style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', margin: '0 0 2px 0', letterSpacing: '0.08em' }}>Diferencia</p>
+                                                <p style={{ fontSize: '16px', fontWeight: 900, color: diffColor, fontFamily: 'monospace', margin: 0, lineHeight: 1 }}>
+                                                    {exacto ? '✓ OK' : `${diff > 0 ? '+' : ''}${diff.toFixed(2)}`}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {/* Botón limpiar */}
+                                        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                                            <button
+                                                onClick={() => setCalcQty(initCalc())}
+                                                style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: 'white', fontWeight: 700, fontSize: '11px', cursor: 'pointer', color: '#94a3b8' }}
+                                            >
+                                                Limpiar
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 );
