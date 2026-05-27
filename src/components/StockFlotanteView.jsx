@@ -18,6 +18,9 @@ const normalizeTitle = (str) =>
         .replace(/\s+/g, ' ')
         .trim();
 
+// Estados terminales: ítems ya cumplidos, no cuentan como demanda activa al distribuidor
+const ESTADOS_TERMINALES = new Set(['EN TIENDA', 'ENTREGADO', 'ADJUDICADO', 'DAÑADO', 'DESPACHADO']);
+
 export default function ConfirmationInfoView() {
     const { isAdmin } = useAuth();
     const [semanaDetails, setSemanaDetails] = useState([]);
@@ -117,7 +120,8 @@ export default function ConfirmationInfoView() {
                 
                 // --- Merge Titles (Original vs Master) for Discrepancy detection ---
                 const allTitlesSet = new Set([
-                    ...weekOrders.map(o => normalizeTitle(o.titulo)),
+                    // Solo órdenes activas (excluir EN TIENDA, ENTREGADO, etc. ya cumplidos)
+                    ...weekOrders.filter(o => !ESTADOS_TERMINALES.has(o.estado)).map(o => normalizeTitle(o.titulo)),
                     ...masterData.map(m => normalizeTitle(m.titulo))
                 ]);
 
@@ -127,11 +131,13 @@ export default function ConfirmationInfoView() {
                     const ord = weekOrders.filter(o => normalizeTitle(o.titulo) === itTitle);
                     const mst = masterData.find(m => normalizeTitle(m.titulo) === itTitle);
 
-                    const qtyOrdered = ord.reduce((s, x) => s + (x.cantidad || 0), 0);
+                    // Solo órdenes activas: excluir EN TIENDA/ENTREGADO/ADJUDICADO (ya cumplidos, no son demanda nueva)
+                    const activeOrd = ord.filter(o => !ESTADOS_TERMINALES.has(o.estado));
+                    const qtyOrdered = activeOrd.reduce((s, x) => s + (x.cantidad || 0), 0);
                     const qtyConfirmed = mst?.cantidad || 0;
 
-                    // Separar pedidos de mayoristas del resto
-                    const mayoristaOrd = ord.filter(o => o.pedido?.tipo === 'mayorista');
+                    // Separar pedidos de mayoristas del resto (solo activos)
+                    const mayoristaOrd = activeOrd.filter(o => o.pedido?.tipo === 'mayorista');
                     const qtyMayorista = mayoristaOrd.reduce((s, x) => s + (x.cantidad || 0), 0);
 
                     // Unidades disponibles para clientes retail (después de reservar para mayoristas)
