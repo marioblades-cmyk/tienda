@@ -28,6 +28,9 @@ export default function MayoristaUpload() {
     const [processing, setProcessing] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const [showAddTienda, setShowAddTienda] = useState(false);
+    const [newTiendaNombre, setNewTiendaNombre] = useState('');
+    const [savingTienda, setSavingTienda] = useState(false);
 
     // --- 2. ESTADOS TAB 1: CARGA DE PEDIDO ---
     const [previewData, setPreviewData] = useState(null);
@@ -91,6 +94,27 @@ export default function MayoristaUpload() {
     }, [selectedVendedor, selectedSemana, activeTab]);
 
     // --- 7. FUNCIONES DE LOGICA ---
+
+    const handleAddTienda = async () => {
+        if (!newTiendaNombre.trim()) return;
+        setSavingTienda(true);
+        try {
+            const { data, error } = await supabase.from('vendedores').insert([{
+                nombre: newTiendaNombre.trim().toUpperCase(),
+                es_mayorista: true,
+                active: true
+            }]).select().single();
+            if (error) throw error;
+            setVendedores(prev => [...prev, data]);
+            setSelectedVendedor(data.id);
+            setNewTiendaNombre('');
+            setShowAddTienda(false);
+        } catch (e) {
+            alert('Error al agregar tienda: ' + e.message);
+        } finally {
+            setSavingTienda(false);
+        }
+    };
 
     const fetchInitialData = async () => {
         setLoading(true);
@@ -609,15 +633,46 @@ export default function MayoristaUpload() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-3">Mayorista Seleccionado</label>
-                        <select
-                            value={selectedVendedor}
-                            onChange={(e) => setSelectedVendedor(e.target.value)}
-                            className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl text-xs font-black bg-slate-50 focus:border-navy focus:bg-white outline-none transition-all"
-                        >
-                            <option value="">-- SELECCIONAR TIENDA --</option>
-                            {vendedores.map(v => <option key={v.id} value={v.id}>{v.nombre}</option>)}
-                        </select>
+                        <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Mayorista Seleccionado</label>
+                            <button
+                                onClick={() => { setShowAddTienda(v => !v); setNewTiendaNombre(''); }}
+                                className="text-[9px] font-black uppercase tracking-widest text-navy hover:text-blue-600 flex items-center gap-1 transition-colors"
+                            >
+                                <Plus size={11} strokeWidth={3} />
+                                {showAddTienda ? 'Cancelar' : 'Nueva tienda'}
+                            </button>
+                        </div>
+
+                        {showAddTienda ? (
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={newTiendaNombre}
+                                    onChange={e => setNewTiendaNombre(e.target.value.toUpperCase())}
+                                    onKeyDown={e => e.key === 'Enter' && handleAddTienda()}
+                                    placeholder="Nombre de la tienda..."
+                                    autoFocus
+                                    className="flex-1 px-4 py-3 border-2 border-navy/30 rounded-2xl text-xs font-black bg-white focus:border-navy outline-none transition-all"
+                                />
+                                <button
+                                    onClick={handleAddTienda}
+                                    disabled={savingTienda || !newTiendaNombre.trim()}
+                                    className="px-5 py-3 bg-navy text-white text-xs font-black rounded-2xl hover:bg-blue-700 disabled:opacity-40 transition-all"
+                                >
+                                    {savingTienda ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                                </button>
+                            </div>
+                        ) : (
+                            <select
+                                value={selectedVendedor}
+                                onChange={(e) => setSelectedVendedor(e.target.value)}
+                                className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl text-xs font-black bg-slate-50 focus:border-navy focus:bg-white outline-none transition-all"
+                            >
+                                <option value="">-- SELECCIONAR TIENDA --</option>
+                                {vendedores.map(v => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+                            </select>
+                        )}
                     </div>
                     {activeTab === 'carga' && (
                         <div className="space-y-1.5">
