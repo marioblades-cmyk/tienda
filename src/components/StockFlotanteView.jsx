@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabase';
-import { 
-    Truck, Package, Calendar, Clock, ChevronRight, 
+import {
+    Truck, Package, Calendar, Clock, ChevronRight,
     ChevronDown, AlertCircle, TrendingUp, ArrowUpRight,
-    Info, Activity, Check, X
+    Info, Activity, Check, X, ShoppingBag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Normalización robusta de títulos: sin acentos, guiones→espacio, espacios múltiples→uno
+const normalizeTitle = (str) =>
+    (str || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[-–—]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
 export default function ConfirmationInfoView() {
     const { isAdmin } = useAuth();
@@ -70,7 +80,7 @@ export default function ConfirmationInfoView() {
                 supabase.from('semanas').select('*').order('created_at', { ascending: false }),
                 supabase.from('master_confirmaciones').select('semana_id, datos_json'),
                 fetchAll('pedido_items_recepcion', 'semana_id, cantidad_recibida, titulo'),
-                fetchAll('pedido_items', 'cantidad, titulo, pedido:pedidos(semana_id, tipo)'),
+                fetchAll('pedido_items', 'id, cantidad, titulo, estado, pedido:pedidos(semana_id, tipo, vendedor_nombre)'),
                 fetchAll('cliente_items', '*, clientes(nombre), vendedores(nombre)')
             ]);
 
@@ -107,23 +117,39 @@ export default function ConfirmationInfoView() {
                 
                 // --- Merge Titles (Original vs Master) for Discrepancy detection ---
                 const allTitlesSet = new Set([
-                    ...weekOrders.map(o => (o.titulo || '').toLowerCase().trim()),
-                    ...masterData.map(m => (m.titulo || '').toLowerCase().trim())
+                    ...weekOrders.map(o => normalizeTitle(o.titulo)),
+                    ...masterData.map(m => normalizeTitle(m.titulo))
                 ]);
 
                 const titleDetails = Array.from(allTitlesSet).map(itTitle => {
                     if (!itTitle) return null;
-                    
-                    const ord = weekOrders.filter(o => (o.titulo || '').toLowerCase().trim() === itTitle);
-                    const mst = masterData.find(m => (m.titulo || '').toLowerCase().trim() === itTitle);
-                    
+
+                    const ord = weekOrders.filter(o => normalizeTitle(o.titulo) === itTitle);
+                    const mst = masterData.find(m => normalizeTitle(m.titulo) === itTitle);
+
                     const qtyOrdered = ord.reduce((s, x) => s + (x.cantidad || 0), 0);
                     const qtyConfirmed = mst?.cantidad || 0;
-                    
-                    const titleCItems = cItems.filter(ci => ci.semana_id === w.id && (ci.titulo || '').toLowerCase().trim() === itTitle);
-                    const qtyAllocated = titleCItems.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA').length;
+
+                    // Separar pedidos de mayoristas del resto
+                    const mayoristaOrd = ord.filter(o => o.pedido?.tipo === 'mayorista');
+                    const qtyMayorista = mayoristaOrd.reduce((s, x) => s + (x.cantidad || 0), 0);
+
+                    // Unidades disponibles para clientes retail (después de reservar para mayoristas)
+                    const qtyAvailableForRetail = Math.max(0, qtyConfirmed - qtyMayorista);
+
+                    // Clientes retail con pedido en esta semana
+                    const titleCItems = cItems.filter(ci =>
+                        ci.semana_id === w.id && normalizeTitle(ci.titulo) === itTitle
+                    );
+                    const qtyClientAllocated = titleCItems.filter(ci =>
+                        ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA'
+                    ).length;
+
+                    // Reparto total = retail adjudicado + todo lo que le toca al mayorista
+                    const qtyTotalAllocated = qtyClientAllocated + qtyMayorista;
+
                     const rec = weekReceptions
-                        .filter(r => (r.titulo || '').toLowerCase().trim() === itTitle)
+                        .filter(r => normalizeTitle(r.titulo) === itTitle)
                         .reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
 
                     return {
@@ -131,12 +157,17 @@ export default function ConfirmationInfoView() {
                         pedido: qtyOrdered,
                         confirmado: qtyConfirmed,
                         received: rec,
-                        allocated: qtyAllocated,
+                        allocated: qtyClientAllocated,       // solo retail (para auto-reparto)
+                        qtyMayorista,                        // unidades reservadas para mayoristas
+                        qtyAvailableForRetail,               // límite real para adjudicar a retail
+                        qtyTotalAllocated,                   // retail + mayoristas (para badge visual)
+                        mayoristaOrd,                        // items de mayoristas (para panel expandido)
                         pending: Math.max(0, qtyConfirmed - rec),
                         isExtra: qtyConfirmed > qtyOrdered,
                         isCut: qtyConfirmed < qtyOrdered && qtyOrdered > 0,
                         isMissing: qtyConfirmed === 0 && qtyOrdered > 0,
-                        needsAllocation: qtyConfirmed > qtyAllocated && titleCItems.length > qtyAllocated
+                        // needsAllocation: ¿quedan clientes retail sin adjudicar dentro del cupo disponible?
+                        needsAllocation: qtyAvailableForRetail > qtyClientAllocated && titleCItems.length > qtyClientAllocated
                     };
                 }).filter(Boolean).sort((a, b) => b.pedido - a.pedido);
 
@@ -171,23 +202,24 @@ export default function ConfirmationInfoView() {
                 return a.isPending ? -1 : 1;
             });
 
-            // Auto-adjudicar títulos sin recorte (confirmado >= pedido)
+            // Auto-adjudicar títulos sin recorte (confirmado >= pedido retail)
             const toAutoAdjudicate = [];
             for (const week of details) {
                 for (const t of week.titleDetails) {
                     if (t.isCut || t.isMissing || t.confirmado === 0) continue; // recorte o sin confirmación → manual
-                    const key = (t.titulo || '').toLowerCase().trim();
+                    const key = normalizeTitle(t.titulo);
                     const pending = (cItems || []).filter(ci =>
                         ci.semana_id === week.id &&
-                        (ci.titulo || '').toLowerCase().trim() === key &&
+                        normalizeTitle(ci.titulo) === key &&
                         ((ci.estado || '').startsWith('PEDIDO') || (ci.estado || '').startsWith('CONFIRMADO'))
                     ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                     const alreadyAllocated = (cItems || []).filter(ci =>
                         ci.semana_id === week.id &&
-                        (ci.titulo || '').toLowerCase().trim() === key &&
+                        normalizeTitle(ci.titulo) === key &&
                         (ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA')
                     ).length;
-                    const available = Math.max(0, t.confirmado - alreadyAllocated);
+                    // Límite = cupo disponible para retail (confirmado - reserva mayoristas)
+                    const available = Math.max(0, t.qtyAvailableForRetail - alreadyAllocated);
                     const toUpdate = pending.slice(0, available);
                     toAutoAdjudicate.push(...toUpdate.map(ci => ci.id));
                 }
@@ -208,9 +240,15 @@ export default function ConfirmationInfoView() {
                 // Recalcular el reparto en details para que la interfaz se actualice inmediatamente
                 for (const week of details) {
                     for (const t of week.titleDetails) {
-                        const titleCItems = cItems.filter(ci => ci.semana_id === week.id && (ci.titulo || '').toLowerCase().trim() === (t.titulo || '').toLowerCase().trim());
-                        t.allocated = titleCItems.filter(ci => ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA').length;
-                        t.needsAllocation = t.confirmado > t.allocated && titleCItems.length > t.allocated;
+                        const key = normalizeTitle(t.titulo);
+                        const titleCItems = cItems.filter(ci =>
+                            ci.semana_id === week.id && normalizeTitle(ci.titulo) === key
+                        );
+                        t.allocated = titleCItems.filter(ci =>
+                            ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA'
+                        ).length;
+                        t.qtyTotalAllocated = t.allocated + t.qtyMayorista;
+                        t.needsAllocation = t.qtyAvailableForRetail > t.allocated && titleCItems.length > t.allocated;
                     }
                 }
             }
@@ -230,22 +268,23 @@ export default function ConfirmationInfoView() {
         }
     };
 
-    const handleAutoAdjudicate = async (weekId, title, qtyConfirmed) => {
+    const handleAutoAdjudicate = async (weekId, title, qtyAvailableForRetail) => {
         if (!isAdmin) return;
-        const key = title.toLowerCase().trim();
+        const key = normalizeTitle(title);
         const pendingItems = clientItems
-            .filter(ci => ci.semana_id === weekId && (ci.titulo || '').toLowerCase().trim() === key)
+            .filter(ci => ci.semana_id === weekId && normalizeTitle(ci.titulo) === key)
             .filter(ci => (ci.estado || '').startsWith('PEDIDO') || (ci.estado || '').startsWith('CONFIRMADO'))
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
         const currentlyAllocated = clientItems
-            .filter(ci => ci.semana_id === weekId && (ci.titulo || '').toLowerCase().trim() === key)
+            .filter(ci => ci.semana_id === weekId && normalizeTitle(ci.titulo) === key)
             .filter(ci => ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA').length;
 
-        const availableToAllocate = Math.max(0, qtyConfirmed - currentlyAllocated);
+        // Límite = cupo real para retail (ya descontada la reserva de mayoristas)
+        const availableToAllocate = Math.max(0, qtyAvailableForRetail - currentlyAllocated);
 
         if (availableToAllocate <= 0) {
-            alert("No hay unidades disponibles para auto-adjudicar (Ya está todo repartido o el confirmado es 0).");
+            alert("No hay unidades disponibles para clientes retail (todo el cupo está adjudicado o reservado para mayoristas).");
             return;
         }
 
@@ -277,9 +316,9 @@ export default function ConfirmationInfoView() {
         if (!isAdmin) return;
         if (!confirm("¿Estás seguro de limpiar TODO el reparto preventivo de este título? (Los ítems volverán a estado CONFIRMADO)")) return;
 
-        const key = title.toLowerCase().trim();
+        const key = normalizeTitle(title);
         const itemsToReset = clientItems
-            .filter(ci => ci.semana_id === weekId && (ci.titulo || '').toLowerCase().trim() === key)
+            .filter(ci => ci.semana_id === weekId && normalizeTitle(ci.titulo) === key)
             .filter(ci => ci.estado === 'ADJUDICADO');
 
         if (itemsToReset.length === 0) return;
@@ -486,9 +525,16 @@ export default function ConfirmationInfoView() {
                                                                                 <td className="px-2 md:px-4 py-3 text-center font-black text-navy">{t.confirmado || 0}</td>
                                                                                 <td className="px-2 md:px-4 py-3 text-center">
                                                                                     <div className="flex flex-col items-center gap-1">
-                                                                                        <div className={`text-[9px] md:text-[10px] font-black px-2 py-0.5 rounded-full ${t.allocated >= t.confirmado && t.confirmado > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
-                                                                                            {t.allocated} / {t.confirmado}
+                                                                                        {/* Badge total: retail adjudicado + mayoristas */}
+                                                                                        <div className={`text-[9px] md:text-[10px] font-black px-2 py-0.5 rounded-full ${t.qtyTotalAllocated >= t.confirmado && t.confirmado > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                                                            {t.qtyTotalAllocated} / {t.confirmado}
                                                                                         </div>
+                                                                                        {/* Indicador de reserva para mayoristas */}
+                                                                                        {t.qtyMayorista > 0 && (
+                                                                                            <span className="flex items-center gap-1 text-[8px] font-black text-blue-500">
+                                                                                                <ShoppingBag size={8} /> {t.qtyMayorista} may.
+                                                                                            </span>
+                                                                                        )}
                                                                                         {t.needsAllocation && (
                                                                                             <span className="flex items-center gap-1 text-[8px] font-black text-orange-500 animate-pulse">
                                                                                                 <AlertCircle size={8} /> PENDIENTE
@@ -521,7 +567,9 @@ export default function ConfirmationInfoView() {
                                                                             {isTitleExp && (
                                                                                 <tr className="bg-white/60">
                                                                                     <td colSpan="7" className="p-4 border-b border-secondary/10">
-                                                                                        <div className="flex flex-col gap-3">
+                                                                                        <div className="flex flex-col gap-4">
+
+                                                                                            {/* ── Encabezado del panel ── */}
                                                                                             <div className="flex justify-between items-center">
                                                                                                 <div className="text-[10px] font-black text-secondary uppercase tracking-widest flex items-center gap-2">
                                                                                                     <TrendingUp size={12} /> Adjudicación Preventiva (Planificar Reparto)
@@ -529,14 +577,14 @@ export default function ConfirmationInfoView() {
                                                                                                 <div className="flex items-center gap-2">
                                                                                                     {isAdmin && (
                                                                                                         <>
-                                                                                                            <button 
-                                                                                                                onClick={() => handleAutoAdjudicate(week.id, t.titulo, t.confirmado)}
-                                                                                                                disabled={actionLoading === titleKey || t.allocated >= t.confirmado}
+                                                                                                            <button
+                                                                                                                onClick={() => handleAutoAdjudicate(week.id, t.titulo, t.qtyAvailableForRetail)}
+                                                                                                                disabled={actionLoading === titleKey || t.allocated >= t.qtyAvailableForRetail}
                                                                                                                 className="bg-secondary text-white text-[9px] font-black px-3 py-1 rounded hover:bg-secondary/90 disabled:opacity-50 flex items-center gap-1 transition-all"
                                                                                                             >
                                                                                                                 {actionLoading === titleKey ? '...' : <><Check size={10} /> AUTO-REPARTO</>}
                                                                                                             </button>
-                                                                                                            <button 
+                                                                                                            <button
                                                                                                                 onClick={() => handleClearAllocation(week.id, t.titulo)}
                                                                                                                 className="bg-red-100 text-red-600 text-[9px] font-black px-3 py-1 rounded hover:bg-red-200 transition-all"
                                                                                                             >
@@ -545,51 +593,87 @@ export default function ConfirmationInfoView() {
                                                                                                         </>
                                                                                                     )}
                                                                                                     <div className="text-[10px] font-bold text-muted ml-2">
-                                                                                                        Asignado: {allocatedCount} de {t.confirmado} unidades confirmadas
+                                                                                                        Retail: {allocatedCount}/{t.qtyAvailableForRetail} · Total: {t.qtyTotalAllocated}/{t.confirmado}
                                                                                                     </div>
                                                                                                 </div>
                                                                                             </div>
-                                                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                                                                                {titleOrders.map(ci => {
-                                                                                                    const isAdjudicado = ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA';
-                                                                                                    const isRecortado = ci.estado === 'RECORTADO';
-                                                                                                    const canAdjudicate = allocatedCount < t.confirmado || isAdjudicado;
-                                                                                                    const vendedorNombre = ci.vendedores?.nombre || 'Sin vendedor';
 
-                                                                                                    return (
-                                                                                                        <div
-                                                                                                            key={ci.id}
-                                                                                                            onClick={async () => {
-                                                                                                                if (!isAdmin || saving || (!isAdjudicado && !canAdjudicate)) return;
-                                                                                                                setSaving(true);
-                                                                                                                try {
-                                                                                                                    const newStatus = isAdjudicado ? 'CONFIRMADO' : 'ADJUDICADO';
-                                                                                                                    const { error } = await supabase.from('cliente_items').update({ estado: newStatus }).eq('id', ci.id);
-                                                                                                                    if (error) throw error;
-                                                                                                                    await fetchDashboardData();
-                                                                                                                } catch (err) { alert(err.message); }
-                                                                                                                finally { setSaving(false); }
-                                                                                                            }}
-                                                                                                            className={`p-3 rounded-lg border flex items-center justify-between gap-2 transition-all ${isAdmin ? 'cursor-pointer' : ''} ${isAdjudicado ? 'border-secondary bg-secondary/5' : (isRecortado ? 'border-red-200 bg-red-50/50 opacity-60' : (canAdjudicate ? 'border-border/40 hover:border-secondary/30' : 'opacity-40 grayscale pointer-events-none'))}`}
-                                                                                                        >
-                                                                                                            <div className="flex flex-col min-w-0">
-                                                                                                                <span className={`text-[12px] font-black truncate ${isRecortado ? 'text-red-900/60 line-through' : 'text-navy'}`}>{ci.clientes?.nombre || 'Cliente desconocido'}</span>
-                                                                                                                <span className="text-[9px] text-muted truncate">{ci.clientes?.celular || ''}{vendedorNombre !== 'Sin vendedor' ? ` · ${vendedorNombre}` : ''}</span>
-                                                                                                                <span className={`text-[8px] font-black uppercase mt-0.5 ${isAdjudicado ? 'text-secondary' : (isRecortado ? 'text-red-500' : 'text-orange-500')}`}>{isAdjudicado ? '✓ ADJUDICADO' : (isRecortado ? '✂️ RECORTADO' : '⏳ PENDIENTE')}</span>
+                                                                                            {/* ── Sección MAYORISTAS (si hay) ── */}
+                                                                                            {t.mayoristaOrd && t.mayoristaOrd.length > 0 && (
+                                                                                                <div>
+                                                                                                    <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-1 mb-2">
+                                                                                                        <ShoppingBag size={10} /> Mayoristas — {t.qtyMayorista} unid. reservadas
+                                                                                                    </div>
+                                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                                                                        {t.mayoristaOrd.map(mi => {
+                                                                                                            const isConf = (mi.estado || '').startsWith('CONFIRMADO') || mi.estado === 'EN TIENDA' || mi.estado === 'DESPACHADO';
+                                                                                                            const isRec  = (mi.estado || '').includes('RECORTADO');
+                                                                                                            return (
+                                                                                                                <div key={mi.id} className={`p-3 rounded-lg border flex items-center justify-between gap-2 ${isConf ? 'border-blue-200 bg-blue-50/60' : isRec ? 'border-red-200 bg-red-50/50 opacity-60' : 'border-border/40 bg-white/60'}`}>
+                                                                                                                    <div className="flex flex-col min-w-0">
+                                                                                                                        <span className="text-[12px] font-black truncate text-navy">{mi.pedido?.vendedor_nombre || 'Mayorista'}</span>
+                                                                                                                        <span className="text-[9px] text-muted">{mi.cantidad} unid.</span>
+                                                                                                                        <span className={`text-[8px] font-black uppercase mt-0.5 ${isConf ? 'text-blue-600' : isRec ? 'text-red-500' : 'text-orange-500'}`}>
+                                                                                                                            {isConf ? '✓ CONFIRMADO' : isRec ? '✂️ RECORTADO' : '⏳ PEDIDO'}
+                                                                                                                        </span>
+                                                                                                                    </div>
+                                                                                                                    <ShoppingBag size={16} className={isConf ? 'text-blue-400' : 'text-muted/40'} />
+                                                                                                                </div>
+                                                                                                            );
+                                                                                                        })}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            )}
+
+                                                                                            {/* ── Sección CLIENTES RETAIL ── */}
+                                                                                            <div>
+                                                                                                {t.mayoristaOrd?.length > 0 && (
+                                                                                                    <div className="text-[9px] font-black text-secondary uppercase tracking-widest flex items-center gap-1 mb-2">
+                                                                                                        <TrendingUp size={10} /> Clientes Retail — {allocatedCount}/{t.qtyAvailableForRetail} adjudicados
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                                                                    {titleOrders.map(ci => {
+                                                                                                        const isAdjudicado = ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA';
+                                                                                                        const isRecortado = ci.estado === 'RECORTADO';
+                                                                                                        const canAdjudicate = allocatedCount < t.qtyAvailableForRetail || isAdjudicado;
+                                                                                                        const vendedorNombre = ci.vendedores?.nombre || 'Sin vendedor';
+                                                                                                        return (
+                                                                                                            <div
+                                                                                                                key={ci.id}
+                                                                                                                onClick={async () => {
+                                                                                                                    if (!isAdmin || saving || (!isAdjudicado && !canAdjudicate)) return;
+                                                                                                                    setSaving(true);
+                                                                                                                    try {
+                                                                                                                        const newStatus = isAdjudicado ? 'CONFIRMADO' : 'ADJUDICADO';
+                                                                                                                        const { error } = await supabase.from('cliente_items').update({ estado: newStatus }).eq('id', ci.id);
+                                                                                                                        if (error) throw error;
+                                                                                                                        await fetchDashboardData();
+                                                                                                                    } catch (err) { alert(err.message); }
+                                                                                                                    finally { setSaving(false); }
+                                                                                                                }}
+                                                                                                                className={`p-3 rounded-lg border flex items-center justify-between gap-2 transition-all ${isAdmin ? 'cursor-pointer' : ''} ${isAdjudicado ? 'border-secondary bg-secondary/5' : (isRecortado ? 'border-red-200 bg-red-50/50 opacity-60' : (canAdjudicate ? 'border-border/40 hover:border-secondary/30' : 'opacity-40 grayscale pointer-events-none'))}`}
+                                                                                                            >
+                                                                                                                <div className="flex flex-col min-w-0">
+                                                                                                                    <span className={`text-[12px] font-black truncate ${isRecortado ? 'text-red-900/60 line-through' : 'text-navy'}`}>{ci.clientes?.nombre || 'Cliente desconocido'}</span>
+                                                                                                                    <span className="text-[9px] text-muted truncate">{ci.clientes?.celular || ''}{vendedorNombre !== 'Sin vendedor' ? ` · ${vendedorNombre}` : ''}</span>
+                                                                                                                    <span className={`text-[8px] font-black uppercase mt-0.5 ${isAdjudicado ? 'text-secondary' : (isRecortado ? 'text-red-500' : 'text-orange-500')}`}>{isAdjudicado ? '✓ ADJUDICADO' : (isRecortado ? '✂️ RECORTADO' : '⏳ PENDIENTE')}</span>
+                                                                                                                </div>
+                                                                                                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isAdjudicado ? 'bg-secondary border-secondary text-white' : (isRecortado ? 'border-red-300 text-red-400' : 'border-border')}`}>
+                                                                                                                    {isAdjudicado && <Check size={11} />}
+                                                                                                                    {isRecortado && <X size={11} />}
+                                                                                                                </div>
                                                                                                             </div>
-                                                                                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isAdjudicado ? 'bg-secondary border-secondary text-white' : (isRecortado ? 'border-red-300 text-red-400' : 'border-border')}`}>
-                                                                                                                {isAdjudicado && <Check size={11} />}
-                                                                                                                {isRecortado && <X size={11} />}
-                                                                                                            </div>
-                                                                                                        </div>
-                                                                                                    );
-                                                                                                })}
-                                                                                                {titleOrders.length === 0 && <div className="col-span-full py-2 text-center text-[10px] text-muted italic">No hay pedidos de clientes registrados para este título.</div>}
+                                                                                                        );
+                                                                                                    })}
+                                                                                                    {titleOrders.length === 0 && <div className="col-span-full py-2 text-center text-[10px] text-muted italic">No hay pedidos de clientes retail para este título.</div>}
+                                                                                                </div>
                                                                                             </div>
-                                                                                            
+
+                                                                                            {/* ── Botón procesar recortes ── */}
                                                                                             {isAdmin && t.isCut && titleOrders.some(ci => ci.estado !== 'ADJUDICADO' && ci.estado !== 'EN TIENDA' && ci.estado !== 'RECORTADO') && (
-                                                                                                <div className="mt-2 pt-2 border-t border-border/10">
-                                                                                                    <button 
+                                                                                                <div className="pt-2 border-t border-border/10">
+                                                                                                    <button
                                                                                                         onClick={async () => {
                                                                                                             if (!confirm("¿Deseas marcar los pedidos no adjudicados como RECORTADOS?")) return;
                                                                                                             setSaving(true);
@@ -607,6 +691,7 @@ export default function ConfirmationInfoView() {
                                                                                                     </button>
                                                                                                 </div>
                                                                                             )}
+
                                                                                         </div>
                                                                                     </td>
                                                                                 </tr>
