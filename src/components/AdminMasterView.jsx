@@ -327,21 +327,31 @@ export default function AdminMasterView() {
                 await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
             }
             
-            // 3. Inject a placeholder row into 'remitos' (Gestión Integral)
+            // 3. Sincronizar fila en 'remitos' (Gestión Integral)
+            // Buscar por sufijo de semana para tolerar cambios en el nombre del archivo
             const { data: remDataRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
             let remRows = Array.isArray(remDataRes?.data) ? remDataRes.data : (remDataRes?.data?.rows || []);
-            const existsInRemitos = remRows.some(r => r.pedido === pedidoName);
-            
-            if (!existsInRemitos) {
+            const getSufijo = (n) => { const m = (n||'').match(/\(([^)]+)\)\s*$/); return m ? m[1].trim().toLowerCase() : ''; };
+            const sufijoNuevo = getSufijo(pedidoName);
+            const idxExistente = sufijoNuevo ? remRows.findIndex(r => getSufijo(r.pedido || '') === sufijoNuevo) : remRows.findIndex(r => r.pedido === pedidoName);
+
+            if (idxExistente >= 0) {
+                // ✅ Ya existe → solo actualizar nombre y monto, conservar todos los demás datos (cajas, TC, etc.)
+                remRows = remRows.map((r, i) => i === idxExistente
+                    ? { ...r, pedido: pedidoName, pago_aprox: previewData.totalArs }
+                    : r
+                );
+            } else {
+                // Nueva entrada
                 const newId = remRows.length > 0 ? Math.max(...remRows.map(r => r.id || 0)) + 1 : 1;
-                const newRow = {
-                    id: newId, nro: `${newId}`, fecha: new Date().toISOString().split('T')[0], cajas: '0', 
-                    kg: '0', precio_remito: '0', compre: '0', cambio: '0', cg: '0', cm: '0', cp: '0', 
+                remRows = [...remRows, {
+                    id: newId, nro: `${newId}`, fecha: new Date().toISOString().split('T')[0], cajas: '0',
+                    kg: '0', precio_remito: '0', compre: '0', cambio: '0', cg: '0', cm: '0', cp: '0',
                     skg: '0', scaj: '0', smonto: '0', pedido: pedidoName, pago_aprox: previewData.totalArs,
                     pagos_dist: '0', tc_dist: '0', selected: false
-                };
-                await supabase.from('app_state').upsert({ id: 'remitos', data: [...remRows, newRow] });
+                }];
             }
+            await supabase.from('app_state').upsert({ id: 'remitos', data: remRows });
 
             // 4. NUEVO: Sincronización automática de pedidos de clientes tras guardar
             await syncOrdersWithMaster(selectedSemana, previewData.items);
