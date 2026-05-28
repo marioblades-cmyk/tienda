@@ -314,9 +314,18 @@ export default function AdminMasterView() {
             const nombreMostrar = semanaGuardada ? semanaGuardada.nombre : selectedSemana;
             const pedidoName = `${previewData.titulo} (${nombreMostrar})`;
 
-            distData.pedidos.push({ nombre: pedidoName, monto: previewData.totalArs });
-
-            await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
+            // ✅ Solo agregar si NO existe ya una entrada con el mismo nombre (evitar duplicados al re-subir)
+            const existsInDist = (distData.pedidos || []).some(p => p.nombre === pedidoName);
+            if (!existsInDist) {
+                distData.pedidos.push({ nombre: pedidoName, monto: previewData.totalArs });
+                await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
+            } else {
+                // Si ya existe, actualizar el monto por si cambió (re-subida con corrección de monto)
+                distData.pedidos = distData.pedidos.map(p =>
+                    p.nombre === pedidoName ? { ...p, monto: previewData.totalArs } : p
+                );
+                await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
+            }
             
             // 3. Inject a placeholder row into 'remitos' (Gestión Integral)
             const { data: remDataRes } = await supabase.from('app_state').select('data').eq('id', 'remitos').maybeSingle();
@@ -354,6 +363,22 @@ export default function AdminMasterView() {
         setError('');
         try {
             await supabase.from('master_confirmaciones').delete().eq('id', existingMaster.id);
+
+            // ✅ También quitar la entrada correspondiente del distribuidor en app_state
+            const semanaGuardada = semanas.find(s => s.id === selectedSemana);
+            const nombreMostrar = semanaGuardada ? semanaGuardada.nombre : selectedSemana;
+            const pedidoName = `${existingMaster.titulo_despacho} (${nombreMostrar})`;
+
+            const { data: distRes } = await supabase.from('app_state').select('data').eq('id', 'distribuidor').maybeSingle();
+            if (distRes?.data) {
+                let distData = { ...distRes.data };
+                const before = (distData.pedidos || []).length;
+                distData.pedidos = (distData.pedidos || []).filter(p => p.nombre !== pedidoName);
+                if (distData.pedidos.length !== before) {
+                    await supabase.from('app_state').upsert({ id: 'distribuidor', data: distData });
+                }
+            }
+
             setExistingMaster(null);
             setSuccess("Base Maestra eliminada correctamente.");
         } catch (err) {
