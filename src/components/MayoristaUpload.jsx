@@ -1025,28 +1025,47 @@ export default function MayoristaUpload() {
                             <div className="space-y-2">
                                 <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-3">Monto de Cobro (Bs)</label>
                                 <input type="number" value={pagoForm.monto} onChange={(e)=>setPagoForm({...pagoForm, monto: e.target.value})} placeholder="0.00" className="w-full px-6 py-5 bg-slate-50 border-2 border-slate-100 rounded-3xl text-2xl font-black text-navy focus:border-orange-500 focus:bg-white outline-none transition-all shadow-inner" />
-                                {/* Advertencia si el monto redondea por encima de la deuda (< Bs 1 de diferencia) */}
+                                {/* Chip informativo según el monto ingresado vs. la deuda */}
                                 {(() => {
                                     const montoNum = Number(pagoForm.monto);
                                     const saldoRestante = balance.totalDeuda - balance.totalPagado;
                                     const exceso = montoNum - saldoRestante;
-                                    if (montoNum > 0 && exceso > 0 && exceso < 1) {
+                                    if (montoNum <= 0 || saldoRestante <= 0) return null;
+
+                                    // Redondeo menor a Bs 1 → verde, se absorbe, contabilidad recibe el monto real
+                                    if (exceso > 0 && exceso < 1) {
                                         return (
-                                            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 mt-2">
-                                                <p className="text-[10px] font-bold text-amber-700 leading-snug">
-                                                    ⚠ Excede la deuda por <span className="font-black">Bs {exceso.toFixed(2)}</span>.<br/>
-                                                    <span className="opacity-70">¿Registrar el saldo exacto para no generar crédito?</span>
-                                                </p>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPagoForm(f => ({ ...f, monto: saldoRestante.toFixed(2) }))}
-                                                    className="ml-3 text-[9px] font-black text-amber-700 hover:text-white hover:bg-amber-500 border border-amber-300 hover:border-amber-500 px-2.5 py-1.5 rounded-xl transition-all whitespace-nowrap flex-shrink-0"
-                                                >
-                                                    Ajustar a Bs {saldoRestante.toFixed(2)}
-                                                </button>
+                                            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-2.5 mt-2">
+                                                <span className="text-emerald-500 text-base flex-shrink-0">✓</span>
+                                                <div>
+                                                    <p className="text-[10px] font-black text-emerald-700">
+                                                        Cubre la deuda completa — el saldo quedará en Bs 0
+                                                    </p>
+                                                    <p className="text-[9px] text-emerald-600 opacity-70">
+                                                        Redondeo de Bs {exceso.toFixed(2)} absorbido · Contabilidad registra Bs {montoNum.toLocaleString()}
+                                                    </p>
+                                                </div>
                                             </div>
                                         );
                                     }
+
+                                    // Exceso real ≥ Bs 1 → naranja, genera saldo a favor
+                                    if (exceso >= 1) {
+                                        return (
+                                            <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 mt-2">
+                                                <span className="text-amber-500 text-base flex-shrink-0">⚠</span>
+                                                <div>
+                                                    <p className="text-[10px] font-black text-amber-700">
+                                                        El pago genera un saldo a favor de Bs {exceso.toFixed(2)}
+                                                    </p>
+                                                    <p className="text-[9px] text-amber-600 opacity-70">
+                                                        Si no querés generar crédito, usá el botón "Saldar Cuenta" de arriba.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
                                     return null;
                                 })()}
                             </div>
