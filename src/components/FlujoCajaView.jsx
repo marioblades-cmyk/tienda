@@ -2034,7 +2034,11 @@ export default function FlujoCajaView({ user, profile }) {
 
                             {/* Comparación: Esperado vs Contado */}
                             {(() => {
-                                const esperado = totals.efectivoEnCaja;
+                                // Si hay turno activo: esperado = efectivo calculado del turno
+                                // Si NO hay turno: esperado = saldo final del último turno (lo que quedó en el cajón)
+                                const esperado = turnoActivo
+                                    ? totals.efectivoEnCaja
+                                    : (ultimoTurno?.monto_final ?? 0);
                                 const diff = total - esperado;
                                 const exacto = Math.abs(diff) < 0.01;
                                 const diffColor = exacto ? '#16a34a' : diff > 0 ? '#d97706' : '#dc2626';
@@ -2045,7 +2049,9 @@ export default function FlujoCajaView({ user, profile }) {
                                         <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
                                             {/* Esperado */}
                                             <div style={{ flex: 1, background: 'white', borderRadius: '10px', padding: '8px 10px', border: '1.5px solid #e2e8f0', textAlign: 'center' }}>
-                                                <p style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', margin: '0 0 2px 0', letterSpacing: '0.08em' }}>Esperado</p>
+                                                <p style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', color: '#94a3b8', margin: '0 0 2px 0', letterSpacing: '0.08em' }}>
+                                                    {turnoActivo ? 'Esperado' : 'Turno Anterior'}
+                                                </p>
                                                 <p style={{ fontSize: '16px', fontWeight: 900, color: '#1b3a57', fontFamily: 'monospace', margin: 0, lineHeight: 1 }}>Bs {esperado.toFixed(2)}</p>
                                             </div>
                                             {/* Contado */}

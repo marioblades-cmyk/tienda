@@ -486,7 +486,9 @@ export default function MayoristaUpload() {
         doc.setTextColor(0, 150, 0);
         doc.text(`Bs ${balance.totalPagado.toLocaleString()}`, 85, 65);
         
-        const saldo = balance.totalDeuda - balance.totalPagado;
+        const saldoRaw = balance.totalDeuda - balance.totalPagado;
+        // Absorber diferencias de redondeo menores a Bs 1
+        const saldo = (saldoRaw < 0 && Math.abs(saldoRaw) < 1) ? 0 : saldoRaw;
         if (saldo > 0) doc.setTextColor(200, 0, 0);
         else doc.setTextColor(0, 150, 0);
         doc.text(`Bs ${saldo.toLocaleString()}`, 150, 65);
@@ -815,9 +817,24 @@ export default function MayoristaUpload() {
                                 </div>
                                 <div className="bg-orange-50 p-8 rounded-[2rem] border border-orange-100 shadow-sm">
                                     <p className="text-[10px] uppercase font-black text-orange-600 tracking-widest mb-2">Saldo Deudor</p>
-                                    <p className={`text-3xl font-black ${balance.totalDeuda - balance.totalPagado > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                                        Bs {(balance.totalDeuda - balance.totalPagado).toLocaleString()}
-                                    </p>
+                                    {(() => {
+                                        const saldoRaw = balance.totalDeuda - balance.totalPagado;
+                                        // Absorber diferencias de redondeo menores a Bs 1
+                                        const esRedondeo = saldoRaw < 0 && Math.abs(saldoRaw) < 1;
+                                        const saldoDisplay = esRedondeo ? 0 : saldoRaw;
+                                        return (
+                                            <>
+                                                <p className={`text-3xl font-black ${saldoDisplay > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                                                    Bs {saldoDisplay.toLocaleString()}
+                                                </p>
+                                                {esRedondeo && (
+                                                    <p className="text-[9px] font-bold text-amber-600 mt-1">
+                                                        ↳ Redondeo de Bs {Math.abs(saldoRaw).toFixed(2)} absorbido
+                                                    </p>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
@@ -985,9 +1002,53 @@ export default function MayoristaUpload() {
                             <button onClick={() => setShowPagoModal(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24} /></button>
                         </div>
                         <div className="p-10 space-y-8">
+                            {/* Chip de saldo restante */}
+                            {(() => {
+                                const saldoRestante = balance.totalDeuda - balance.totalPagado;
+                                if (saldoRestante <= 0) return null;
+                                return (
+                                    <div className="bg-orange-50 border border-orange-200 rounded-2xl px-5 py-3 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-[9px] font-black text-orange-500 uppercase tracking-widest">Saldo pendiente del cliente</p>
+                                            <p className="text-xl font-black text-orange-700 font-mono">Bs {saldoRestante.toLocaleString()}</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPagoForm(f => ({ ...f, monto: saldoRestante.toFixed(2) }))}
+                                            className="text-[9px] font-black text-orange-600 hover:text-white hover:bg-orange-500 uppercase tracking-widest border border-orange-300 hover:border-orange-500 px-3 py-1.5 rounded-xl transition-all whitespace-nowrap"
+                                        >
+                                            Saldar Cuenta
+                                        </button>
+                                    </div>
+                                );
+                            })()}
                             <div className="space-y-2">
                                 <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-3">Monto de Cobro (Bs)</label>
                                 <input type="number" value={pagoForm.monto} onChange={(e)=>setPagoForm({...pagoForm, monto: e.target.value})} placeholder="0.00" className="w-full px-6 py-5 bg-slate-50 border-2 border-slate-100 rounded-3xl text-2xl font-black text-navy focus:border-orange-500 focus:bg-white outline-none transition-all shadow-inner" />
+                                {/* Advertencia si el monto redondea por encima de la deuda (< Bs 1 de diferencia) */}
+                                {(() => {
+                                    const montoNum = Number(pagoForm.monto);
+                                    const saldoRestante = balance.totalDeuda - balance.totalPagado;
+                                    const exceso = montoNum - saldoRestante;
+                                    if (montoNum > 0 && exceso > 0 && exceso < 1) {
+                                        return (
+                                            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 mt-2">
+                                                <p className="text-[10px] font-bold text-amber-700 leading-snug">
+                                                    ⚠ Excede la deuda por <span className="font-black">Bs {exceso.toFixed(2)}</span>.<br/>
+                                                    <span className="opacity-70">¿Registrar el saldo exacto para no generar crédito?</span>
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPagoForm(f => ({ ...f, monto: saldoRestante.toFixed(2) }))}
+                                                    className="ml-3 text-[9px] font-black text-amber-700 hover:text-white hover:bg-amber-500 border border-amber-300 hover:border-amber-500 px-2.5 py-1.5 rounded-xl transition-all whitespace-nowrap flex-shrink-0"
+                                                >
+                                                    Ajustar a Bs {saldoRestante.toFixed(2)}
+                                                </button>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                             </div>
                             <div className="grid grid-cols-2 gap-6">
                                 <div className="space-y-2">
