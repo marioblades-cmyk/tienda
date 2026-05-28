@@ -287,21 +287,25 @@ const CatalogUpdatedView = () => {
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'personal')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // 3. Ya recibido de esta semana
+                        // 3. Unidades reservadas para mayoristas (pedido tipo 'mayorista')
+                        const mayoristaQty = week.allOrdersData
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'mayorista')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+
+                        // 4. Ya recibido de esta semana
                         const received = week.receptionData
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
-                        // 4. Unidades ya adjudicadas/confirmadas a clientes (retail + mayoristas)
-                        // Usamos cliente_items directamente porque el RPC get_floating_stock_summary
-                        // no siempre devuelve los adjudicados de mayoristas correctamente
+                        // 5. Clientes retail ya adjudicados (ADJUDICADO o EN TIENDA)
+                        // CONFIRMADO es el estado "pendiente" del retail (antes de adjudicar), no cuenta
                         const clientReserved = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle &&
-                                /ADJUDICADO|CONFIRMADO/i.test(it.estado || ''))
+                                (it.estado === 'ADJUDICADO' || it.estado === 'EN TIENDA'))
                             .reduce((s, it) => s + (Number(it.cantidad) || 1), 0);
 
-                        // Stock disponible = confirmado − vendedores − recibido − adjudicado a clientes
-                        qty = Math.max(0, totalConfirmedForTitle - sellerRequestedQty - received - clientReserved);
+                        // Stock disponible = confirmado − personal − mayoristas − recibido − retail adjudicado
+                        qty = Math.max(0, totalConfirmedForTitle - sellerRequestedQty - mayoristaQty - received - clientReserved);
                     } else {
                         // Sin confirmar: disponible = pedido tienda − clientes en lista de espera
                         const storeTotal = week.allOrdersData
