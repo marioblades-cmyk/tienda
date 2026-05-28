@@ -684,8 +684,8 @@ export default function FlujoCajaView({ user, profile }) {
 
     const totals = turnoActivo ? calculateTotals() : { ingresos: 0, egresos: 0, saldoActual: 0, efectivoIngresos: 0, efectivoEgresos: 0, digitalIngresos: 0, digitalEgresos: 0, totalIngresos: 0, totalEgresos: 0, efectivoEnCaja: 0 };
 
-    // Excluir transferencias internas del Libro de Operaciones (no son operaciones de tienda)
-    const movimientosDisplay = movimientos.filter(m => m.origen !== 'Transferencia');
+    // Mostrar TODOS los movimientos — los retiros/transferencias se muestran con estilo distinto
+    const movimientosDisplay = movimientos;
 
     return (
         <div className="space-y-6 max-w-[1440px] mx-auto animate-in fade-in duration-700 pb-20 px-4">
@@ -1392,21 +1392,29 @@ export default function FlujoCajaView({ user, profile }) {
                                                 const metodo = m.metodo_pago || 'Efectivo';
                                                 const meta = METHOD_META[metodo] || METHOD_META['Otros'];
                                                 const label = metodo === 'Banco Unión (QR/Transf)' ? 'B. Unión' : metodo;
+                                                const esRetiro = m.origen === 'Transferencia';
                                                 return (
                                                 <motion.tr
                                                     key={m.id}
                                                     initial={{ opacity: 0, x: -15 }}
                                                     animate={{ opacity: 1, x: 0 }}
                                                     exit={{ opacity: 0, x: 15 }}
-                                                    className="hover:bg-slate-50/50 transition-all group"
+                                                    className={`transition-all group ${esRetiro ? 'bg-orange-50/40 hover:bg-orange-50/70' : 'hover:bg-slate-50/50'}`}
                                                 >
                                                     <td className="p-5 font-mono text-navy/60 text-xs font-bold leading-tight">
                                                         {fhora(m.created_at)}
                                                     </td>
                                                     <td className="p-5">
-                                                        <span className={`px-3 py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider border shadow-sm ${m.tipo === 'INGRESO' ? 'bg-success/10 text-success border-success/20' : 'bg-error/10 text-error border-error/20'}`}>
-                                                            {m.categoria}
-                                                        </span>
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className={`px-3 py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider border shadow-sm ${m.tipo === 'INGRESO' ? 'bg-success/10 text-success border-success/20' : 'bg-error/10 text-error border-error/20'}`}>
+                                                                {m.categoria}
+                                                            </span>
+                                                            {esRetiro && (
+                                                                <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-orange-100 text-orange-500 border border-orange-200 w-fit">
+                                                                    🔄 Transfer. Interna
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                     <td className="p-5 text-navy font-bold text-sm uppercase tracking-tight">{m.concepto || '—'}</td>
                                                     <td className="p-5">

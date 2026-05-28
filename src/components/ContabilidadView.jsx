@@ -281,8 +281,7 @@ function MovimientosTab({ turnoActivo }) {
     };
 
     const filtered = useMemo(() => movimientos.filter(m => {
-        // Ocultar transferencias internas por defecto — solo mostrar si el usuario las filtra explícitamente
-        if ((m.origen || 'Tienda') === 'Transferencia' && filterOrigen !== 'Transferencia') return false;
+        // Mostrar todos los movimientos — retiros y transferencias internas también son visibles
         if (filterMetodo !== 'todos' && (m.metodo_pago || 'Efectivo') !== filterMetodo) return false;
         if (filterOrigen !== 'todos' && (m.origen || 'Tienda') !== filterOrigen) return false;
         if (filterTipo !== 'todos' && m.tipo !== filterTipo) return false;
