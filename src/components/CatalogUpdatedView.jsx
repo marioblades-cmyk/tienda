@@ -211,9 +211,9 @@ const CatalogUpdatedView = () => {
                     .select('dto_niveles')
                     .eq('editorial', 'GLOBAL_SETTINGS')
                     .maybeSingle(),
-                // cliente_items: una sola query para todas las semanas
+                // cliente_items: una sola query para todas las semanas (incluye cantidad para mayoristas)
                 supabase.from('cliente_items')
-                    .select('semana_id, titulo, estado')
+                    .select('semana_id, titulo, estado, cantidad')
                     .in('semana_id', weekIds)
                     .limit(5000),
                 // pedido_items: una query por semana (requiere filtrar por join)
@@ -292,10 +292,13 @@ const CatalogUpdatedView = () => {
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
-                        // 4. Unidades ya adjudicadas a clientes del stock flotante
-                        const clientReserved = week.floatingSummary
-                            .filter(c => normalizeTitle(c.titulo) === prodTitle)
-                            .reduce((s, c) => s + (c.reservado || 0), 0);
+                        // 4. Unidades ya adjudicadas/confirmadas a clientes (retail + mayoristas)
+                        // Usamos cliente_items directamente porque el RPC get_floating_stock_summary
+                        // no siempre devuelve los adjudicados de mayoristas correctamente
+                        const clientReserved = (week.clientItemsData || [])
+                            .filter(it => normalizeTitle(it.titulo) === prodTitle &&
+                                /ADJUDICADO|CONFIRMADO/i.test(it.estado || ''))
+                            .reduce((s, it) => s + (Number(it.cantidad) || 1), 0);
 
                         // Stock disponible = confirmado − vendedores − recibido − adjudicado a clientes
                         qty = Math.max(0, totalConfirmedForTitle - sellerRequestedQty - received - clientReserved);
@@ -309,7 +312,7 @@ const CatalogUpdatedView = () => {
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
                         const clientWaitlist = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle && (it.estado || '').includes('PEDIDO'))
-                            .length;
+                            .reduce((s, it) => s + (Number(it.cantidad) || 1), 0);
                         const storeClientWaitlist = Math.max(0, clientWaitlist - personalTotal);
                         qty = Math.max(0, storeTotal - storeClientWaitlist);
                     }
