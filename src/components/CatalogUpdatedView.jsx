@@ -63,6 +63,8 @@ const CatalogUpdatedView = () => {
     const [showAudit, setShowAudit] = useState(false);
     const [isCuratorOpen, setIsCuratorOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [isLoadingFloating, setIsLoadingFloating] = useState(false);
+    const [priceLevels, setPriceLevels] = useState([5, 10, 15]);
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -159,59 +161,93 @@ const CatalogUpdatedView = () => {
     }, []);
 
     const loadCatalog = async (force = false) => {
-        setIsLoading(true);
         if (force) {
             console.log('🧹 Limpiando caché local por solicitud forzosa...');
             localStorage.removeItem('mcb_catalog_full_cache');
             localStorage.removeItem('mcb_catalog_cache_time');
         }
+        setIsLoading(true);
+        setIsLoadingFloating(false);
+
         try {
+            // ── FASE 1: Mostrar catálogo inmediatamente desde caché ──────────
             const results = await catalogService.fetchFullCatalog(force);
-            
-            // --- NEW: Load Integrated Stock Data ---
-            const { data: weeks } = await supabase.from('semanas').select('*').order('created_at', { ascending: false }).limit(10);
+
+            const eds = [...new Set(results.map(i => i.editorial))].filter(Boolean).sort();
+            setEditorialesList(eds);
+            // Mostrar la tabla de inmediato con stock flotante vacío por ahora
+            setCatalogData(results.map(prod => ({
+                ...prod,
+                floatingByWeek: {},
+                stock_total: prod.stock_fisico || 0
+            })));
+            setIsLoading(false);        // ← tabla visible ahora
+            setIsLoadingFloating(true); // ← indicador secundario mientras carga el stock flotante
+
+            // ── FASE 2: Semanas (necesarias para saber qué queries hacer) ──
+            const { data: weeks } = await supabase
+                .from('semanas').select('*').order('created_at', { ascending: false }).limit(10);
             const weekIds = (weeks || []).map(w => w.id);
 
-            const [masters, receptions, { data: floatingSummary }] = await Promise.all([
-                supabase.from('master_confirmaciones').select('semana_id, datos_json').in('semana_id', weekIds),
-                supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').in('semana_id', weekIds),
-                supabase.rpc('get_floating_stock_summary')
-            ]);
+            if (weekIds.length === 0) {
+                setActiveWeeks([]);
+                setIsLoadingFloating(false);
+                return;
+            }
 
-            // Fetch order items per week to completely bypass the Supabase 1000 records limit
-            const [allOrdersResults, clientItemsResults] = await Promise.all([
-                Promise.all(
-                    weekIds.map(id => supabase.from('pedido_items')
+            // ── FASE 3: Todas las queries de stock flotante en paralelo ──────
+            // cliente_items: consulta única batched (.in) → de 10 queries a 1
+            // pedido_items: siguen siendo N queries (filter por join), pero ahora
+            //   corren en paralelo junto con los demás (antes eran una ronda separada)
+            const weekQueryResults = await Promise.all([
+                supabase.from('master_confirmaciones')
+                    .select('semana_id, datos_json')
+                    .in('semana_id', weekIds),
+                supabase.from('pedido_items_recepcion')
+                    .select('semana_id, titulo, cantidad_recibida')
+                    .in('semana_id', weekIds),
+                supabase.rpc('get_floating_stock_summary'),
+                supabase.from('price_analysis_settings')
+                    .select('dto_niveles')
+                    .eq('editorial', 'GLOBAL_SETTINGS')
+                    .maybeSingle(),
+                // cliente_items: una sola query para todas las semanas
+                supabase.from('cliente_items')
+                    .select('semana_id, titulo, estado')
+                    .in('semana_id', weekIds)
+                    .limit(5000),
+                // pedido_items: una query por semana (requiere filtrar por join)
+                ...weekIds.map(id =>
+                    supabase.from('pedido_items')
                         .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)')
                         .eq('pedido.semana_id', id)
-                        .order('id', { ascending: false })
                         .limit(2000)
-                    )
-                ),
-                Promise.all(
-                    weekIds.map(id => supabase.from('cliente_items')
-                        .select('semana_id, titulo, estado')
-                        .eq('semana_id', id)
-                        .limit(2000)
-                    )
                 )
             ]);
 
-            const allOrdersData = allOrdersResults.flatMap(res => res.data || []);
-            const clientItemsData = clientItemsResults.flatMap(res => res.data || []);
+            const [mastersRes, receptionsRes, floatingSummaryRes, settingsRes, clientItemsRes, ...allOrdersResultsArr] = weekQueryResults;
+
+            // Actualizar niveles de descuento para los encabezados del catálogo
+            if (settingsRes.data?.dto_niveles?.length >= 2) {
+                setPriceLevels(settingsRes.data.dto_niveles);
+            }
+
+            const allOrdersData = allOrdersResultsArr.flatMap(res => res.data || []);
+            const clientItemsData = clientItemsRes.data || [];
+            const floatingSummary = floatingSummaryRes.data || [];
 
             const weekStats = (weeks || []).map(w => {
-                const master = masters.data?.find(m => m.semana_id === w.id);
-                const weekReceptions = (receptions.data || []).filter(r => r.semana_id === w.id);
+                const master = mastersRes.data?.find(m => m.semana_id === w.id);
+                const weekReceptions = (receptionsRes.data || []).filter(r => r.semana_id === w.id);
                 const weekAllOrders = allOrdersData.filter(o => o.pedido.semana_id === w.id);
-                const weekFloatingSummary = (floatingSummary || []).filter(c => c.semana_id === w.id);
+                const weekFloatingSummary = floatingSummary.filter(c => c.semana_id === w.id);
                 const weekClientItems = clientItemsData.filter(ci => ci.semana_id === w.id);
-                
+
                 const totalConfirmed = (master?.datos_json || []).reduce((sum, it) => sum + (it.cantidad || 0), 0);
                 const totalReceived = weekReceptions.reduce((sum, r) => sum + (r.cantidad_recibida || 0), 0);
                 const totalRequestedStore = weekAllOrders.filter(o => o.pedido.tipo === 'tienda').reduce((sum, o) => sum + (o.cantidad || 0), 0);
 
-                const fechaArribo = w.fecha_estimada_llegada 
+                const fechaArribo = w.fecha_estimada_llegada
                     ? new Date(w.fecha_estimada_llegada)
                     : new Date(new Date(w.created_at).getTime() + (22 * 24 * 60 * 60 * 1000));
 
@@ -236,36 +272,35 @@ const CatalogUpdatedView = () => {
             const enrichedResults = results.map(prod => {
                 const prodTitle = normalizeTitle(prod.titulo);
                 const floatingByWeek = {};
-                
+
                 weekStats.forEach(week => {
                     let qty = 0;
-                    
+
                     if (week.isConfirmed) {
-                        // 1. Total confirmed by distributor (Total)
+                        // 1. Total confirmado por el distribuidor
                         const totalConfirmedForTitle = week.masterData
                             .filter(it => normalizeTitle(it.titulo) === prodTitle)
                             .reduce((s, i) => s + (i.cantidad || 0), 0);
-                        
-                        // 2. Units requested by Sellers (Personal) - These are NOT store stock
+
+                        // 2. Unidades pedidas por vendedores (personal) — no son stock de tienda
                         const sellerRequestedQty = week.allOrdersData
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'personal')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
-                        
-                        // 3. What we already received specifically for this week
+
+                        // 3. Ya recibido de esta semana
                         const received = week.receptionData
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
-                        
-                        // 4. Client Reservations (Floating confirmed/allocated bounds) - From Anonymous RPC
+
+                        // 4. Unidades ya adjudicadas a clientes del stock flotante
                         const clientReserved = week.floatingSummary
                             .filter(c => normalizeTitle(c.titulo) === prodTitle)
                             .reduce((s, c) => s + (c.reservado || 0), 0);
-                        
-                        // Store stock is ALL confirmed units MINUS what was for sellers, MINUS what arrived.
-                        // Clients (ADJUDICADO) take from vendor personal allocations, not from tienda copies.
-                        qty = Math.max(0, (totalConfirmedForTitle - sellerRequestedQty) - received);
+
+                        // Stock disponible = confirmado − vendedores − recibido − adjudicado a clientes
+                        qty = Math.max(0, totalConfirmedForTitle - sellerRequestedQty - received - clientReserved);
                     } else {
-                        // Not confirmed yet: available = storeTotal minus store-assigned clients
+                        // Sin confirmar: disponible = pedido tienda − clientes en lista de espera
                         const storeTotal = week.allOrdersData
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'tienda')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
@@ -281,7 +316,6 @@ const CatalogUpdatedView = () => {
                     if (qty > 0) floatingByWeek[week.id] = { qty, isConfirmed: week.isConfirmed };
                 });
 
-                // Calculate TOTAL STOCK (Physical + All Floating)
                 const totalFloating = Object.values(floatingByWeek).reduce((sum, d) => sum + d.qty, 0);
                 const stockTotal = (prod.stock_fisico || 0) + totalFloating;
 
@@ -289,69 +323,45 @@ const CatalogUpdatedView = () => {
             });
 
             setCatalogData(enrichedResults);
-            // --- END NEW ---
 
             // ═══ REPORTE CATÁLOGO ADMIN ═══
             const reporteAdmin = {};
-
             enrichedResults.forEach(prod => {
-                const weeks = Object.keys(prod.floatingByWeek || {});
-                if (weeks.length === 0) return;
-                
-                weeks.forEach(weekId => {
+                const wks = Object.keys(prod.floatingByWeek || {});
+                if (wks.length === 0) return;
+                wks.forEach(weekId => {
                     const weekData = weekStats.find(w => w.id === weekId);
                     const semNombre = weekData?.nombre || weekId;
                     const qty = prod.floatingByWeek[weekId]?.qty || 0;
-                    
                     if (!reporteAdmin[semNombre]) {
                         reporteAdmin[semNombre] = {
                             semana: semNombre,
-                            fecha: weekData?.fechaArribo?.toLocaleDateString(
-                                'es-BO', {day:'numeric', month:'short'}
-                            ) || 'N/A',
+                            fecha: weekData?.fechaArribo?.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' }) || 'N/A',
                             confirmada: weekData?.isConfirmed ? '✅' : '⏳',
                             titulos: [],
                             totalUnidades: 0
                         };
                     }
-                    reporteAdmin[semNombre].titulos.push({
-                        titulo: prod.titulo,
-                        qty
-                    });
+                    reporteAdmin[semNombre].titulos.push({ titulo: prod.titulo, qty });
                     reporteAdmin[semNombre].totalUnidades += qty;
                 });
             });
-
-            const fullReport = {
+            window.mcb_last_admin_report = {
                 timestamp: new Date().toISOString(),
                 floatingStock: reporteAdmin,
                 resumen: Object.values(reporteAdmin).map(s => ({
-                    semana: s.semana,
-                    fecha: s.fecha,
-                    confirmada: s.confirmada,
-                    totalTitulos: s.titulos.length,
-                    totalUnidades: s.totalUnidades
+                    semana: s.semana, fecha: s.fecha, confirmada: s.confirmada,
+                    totalTitulos: s.titulos.length, totalUnidades: s.totalUnidades
                 })),
-                // Casos específicos para comparar
-                alice03: enrichedResults
-                    .find(p => p.titulo?.toLowerCase()
-                        .includes('alice on border road 03'))
-                    ?.floatingByWeek,
-                boticaria01: enrichedResults
-                    .find(p => p.titulo?.toLowerCase()
-                        .includes('boticaria 01'))
-                    ?.floatingByWeek
+                alice03: enrichedResults.find(p => p.titulo?.toLowerCase().includes('alice on border road 03'))?.floatingByWeek,
+                boticaria01: enrichedResults.find(p => p.titulo?.toLowerCase().includes('boticaria 01'))?.floatingByWeek
             };
 
-            window.mcb_last_admin_report = fullReport; // Guardar para descarga
-            window.mcb_last_admin_report = fullReport; // Guardar para descarga
-
-            const eds = [...new Set(results.map(i => i.editorial))].filter(Boolean).sort();
-            setEditorialesList(eds);
         } catch (err) {
             console.error('Error cargando catálogo:', err);
         } finally {
             setIsLoading(false);
+            setIsLoadingFloating(false);
         }
     };
 
@@ -1036,20 +1046,46 @@ const CatalogUpdatedView = () => {
                             </button>
                         )}
                         <button
+                            onClick={() => loadCatalog(true)}
+                            title="Forzar recarga del catálogo desde el servidor"
+                            disabled={isLoading || isLoadingFloating}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.625rem 1rem',
+                                borderRadius: '12px',
+                                border: '1px solid #e2e8f0',
+                                background: 'white',
+                                cursor: (isLoading || isLoadingFloating) ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                fontSize: '0.875rem',
+                                transition: 'all 0.2s ease',
+                                color: (isLoading || isLoadingFloating) ? '#94a3b8' : '#1e293b',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                opacity: (isLoading || isLoadingFloating) ? 0.6 : 1
+                            }}
+                            onMouseEnter={(e) => { if (!isLoading && !isLoadingFloating) { e.currentTarget.style.borderColor = '#2563eb'; e.currentTarget.style.color = '#2563eb'; } }}
+                            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#1e293b'; }}
+                        >
+                            <RefreshCw size={16} style={(isLoading || isLoadingFloating) ? { animation: 'spin 1s linear infinite' } : {}} />
+                            Actualizar
+                        </button>
+                        <button
                             onClick={() => setIsExportModalOpen(true)}
                             title="Generar PDF o Excel del catálogo"
-                            style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '0.5rem', 
-                                padding: '0.625rem 1rem', 
-                                borderRadius: '12px', 
-                                border: '1px solid #e2e8f0', 
-                                background: 'white', 
-                                cursor: 'pointer', 
-                                fontWeight: 700, 
-                                fontSize: '0.875rem', 
-                                transition: 'all 0.2s ease', 
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.625rem 1rem',
+                                borderRadius: '12px',
+                                border: '1px solid #e2e8f0',
+                                background: 'white',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                fontSize: '0.875rem',
+                                transition: 'all 0.2s ease',
                                 color: '#1e293b',
                                 boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
                             }}
@@ -1179,7 +1215,7 @@ const CatalogUpdatedView = () => {
                         <span style={{ fontSize: '0.875rem', fontWeight: 700, color: showOnlyWithStock ? '#16a34a' : '#64748b' }}>Solo con Stock</span>
                     </label>
 
-                    <select 
+                    <select
                         value={weekFilter}
                         onChange={(e) => setWeekFilter(e.target.value)}
                         style={{ padding: '0.75rem 1rem', borderRadius: '12px', border: '2px solid #f1f5f9', outline: 'none', fontSize: '0.9rem', background: 'white', fontWeight: 600, color: '#0f172a', minWidth: '220px' }}
@@ -1189,6 +1225,13 @@ const CatalogUpdatedView = () => {
                             <option key={w.id} value={w.id}>{w.nombre} (~{w.fechaArribo.toLocaleDateString('es', { day: 'numeric', month: 'short' })})</option>
                         ))}
                     </select>
+
+                    {isLoadingFloating && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0.6rem 1rem', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe', fontSize: '0.75rem', color: '#2563eb', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            <div style={{ width: '12px', height: '12px', border: '2px solid #bfdbfe', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                            Cargando stock flotante…
+                        </div>
+                    )}
 
                 </div>
             </div>
@@ -1401,9 +1444,9 @@ const CatalogUpdatedView = () => {
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9' }}>Categoría</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>Precio Tapa</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#f07d2a', fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>G PV (BS)</th>
-                                <th style={{ padding: '1.25rem 1rem', color: '#16a34a', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N1 -10%</th>
-                                <th style={{ padding: '1.25rem 1rem', color: '#2563eb', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N2 -15%</th>
-                                <th style={{ padding: '1.25rem 1rem', color: '#7c3aed', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N3 -20%</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#16a34a', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N1 -{priceLevels[0] ?? 5}%</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#2563eb', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N2 -{priceLevels[1] ?? 10}%</th>
+                                <th style={{ padding: '1.25rem 1rem', color: '#7c3aed', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>N3 -{priceLevels[2] ?? 15}%</th>
                                 <th style={{ padding: '1.25rem 1rem', color: '#64748b', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #f1f5f9', textAlign: 'right' }}>Mayoreo</th>
                                 
                                 {/* DYNAMIC STOCK COLUMNS */}
@@ -1546,24 +1589,22 @@ const CatalogUpdatedView = () => {
                                         </div>
                                     </td>
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
-                                        {item.precio_n1_bs 
-                                            ? `BS ${item.precio_n1_bs.toFixed(2)}` 
-                                            : item.precio_venta_bs 
-                                                ? `BS ${(item.precio_venta_bs * 0.90).toFixed(2)}` 
-                                                : '--'}
+                                        {item.precio_venta_bs
+                                            ? `BS ${(item.precio_venta_bs * (1 - (priceLevels[0] ?? 5) / 100)).toFixed(2)}`
+                                            : '--'}
                                     </td>
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
-                                        {item.precio_n2_bs 
-                                            ? `BS ${item.precio_n2_bs.toFixed(2)}` 
-                                            : item.precio_venta_bs 
-                                                ? `BS ${(item.precio_venta_bs * 0.85).toFixed(2)}` 
+                                        {item.precio_n2_bs
+                                            ? `BS ${item.precio_n2_bs.toFixed(2)}`
+                                            : item.precio_venta_bs
+                                                ? `BS ${(item.precio_venta_bs * (1 - (priceLevels[1] ?? 10) / 100)).toFixed(2)}`
                                                 : '--'}
                                     </td>
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, color: '#7c3aed' }}>
-                                        {item.precio_n3_bs 
-                                            ? `BS ${item.precio_n3_bs.toFixed(2)}` 
-                                            : item.precio_venta_bs 
-                                                ? `BS ${(item.precio_venta_bs * 0.80).toFixed(2)}` 
+                                        {item.precio_n3_bs
+                                            ? `BS ${item.precio_n3_bs.toFixed(2)}`
+                                            : item.precio_venta_bs
+                                                ? `BS ${(item.precio_venta_bs * (1 - (priceLevels[2] ?? 15) / 100)).toFixed(2)}`
                                                 : '--'}
                                     </td>
                                     <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 600, color: '#334155' }}>

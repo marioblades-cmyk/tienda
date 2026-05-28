@@ -382,7 +382,7 @@ export default function PriceAnalysisTool() {
           const resultsMap = {};
           rows.forEach(r => {
             const arsKey = Math.round(Number(r.ars));
-            resultsMap[arsKey] = { pv: r.pvFinal, n3: r.dtos[2], pm: r.pMayor };
+            resultsMap[arsKey] = { pv: r.pvFinal, n2: r.dtos[1], n3: r.dtos[2], pm: r.pMayor };
           });
 
           const payload = [];
@@ -397,6 +397,7 @@ export default function PriceAnalysisTool() {
                 editorial: item.editorial,
                 precio_tapa: item.precio_tapa,
                 precio_venta_bs: Number(calc.pv.toFixed(2)),
+                precio_n2_bs: Number(calc.n2.toFixed(2)),
                 precio_n3_bs: Number(calc.n3.toFixed(2)),
                 precio_mayoreo_bs: Number(calc.pm.toFixed(2)),
                 updated_at: new Date()
