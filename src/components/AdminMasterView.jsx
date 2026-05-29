@@ -128,6 +128,10 @@ export default function AdminMasterView() {
                     console.warn('Header detection failed, using default columns:', _headerErr);
                 }
 
+                // Acumular subtotal por editorial para calcular descuentos
+                let currentEditorialSubtotal = 0;
+                let currentDiscountPct = 0;
+
                 // Encontrar la primera fila de datos reales y totales
                 for (let i = 0; i < rows.length; i++) {
                     const r = rows[i];
@@ -141,10 +145,27 @@ export default function AdminMasterView() {
                         continue;
                     }
 
-                    // "Total" por editorial (ej. "Total" después de "Descuento 35%")
-                    // col0 exacto 'total' para no confundir con 'total productos' o 'total a pagar'
-                    if (col0 === 'total' && parseFloat(r[colTotal]) > 0) {
-                        editorialTotals.push(parseFloat(r[colTotal]));
+                    // "Subtotal" por editorial — solo marcador, ignorar
+                    if (col0 === 'subtotal') continue;
+
+                    // "Descuento X%" — extraer porcentaje para aplicar al subtotal de la editorial
+                    const matchDesc = col0.match(/^descuento\s+(\d+(?:\.\d+)?)%/i);
+                    if (matchDesc) {
+                        currentDiscountPct = parseFloat(matchDesc[1]);
+                        continue;
+                    }
+
+                    // "Total" por editorial — intentar leer del Excel; si está vacío, calcular con descuento
+                    if (col0 === 'total') {
+                        const excelTotal = parseFloat(r[colTotal]);
+                        if (excelTotal > 0) {
+                            editorialTotals.push(excelTotal);
+                        } else if (currentEditorialSubtotal > 0) {
+                            // Aplicar descuento y redondear para evitar floating-point (ej: 239399.99...)
+                            editorialTotals.push(Math.round(currentEditorialSubtotal * (1 - currentDiscountPct / 100)));
+                        }
+                        currentEditorialSubtotal = 0;
+                        currentDiscountPct = 0;
                         continue;
                     }
 
@@ -171,6 +192,8 @@ export default function AdminMasterView() {
                             cantidad: vCant,
                             precio_total: parseFloat(r[colTotal]) || 0
                         });
+                        // Acumular subtotal de la editorial actual (para calcular el descuento)
+                        currentEditorialSubtotal += vPrecio * vCant;
                     }
                 }
 
