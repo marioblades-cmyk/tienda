@@ -586,26 +586,47 @@ export default function MayoristaUpload() {
         }
     };
 
-    // Cancelar parcialmente un ítem CONFIRMADO (divide: N quedan confirmadas, M se cancelan)
+    // Cancelar/corregir parcialmente un ítem CONFIRMADO o RECORTADO
+    // - CONFIRMADO: quedanQty siguen confirmadas, cancelQty → CANCELADO (nuevas filas)
+    // - RECORTADO:  cancelQty → CANCELADO (original), quedanQty → CONFIRMADO (nueva fila)
     const handleCancelarParcial = async () => {
         if (!cancelarParcialModal || cancelarParcialQty < 1) return;
-        const { item } = cancelarParcialModal;
+        const { item, pedido } = cancelarParcialModal;
         const cancelQty = parseInt(cancelarParcialQty);
         const quedanQty = item.cantidad - cancelQty;
+        const wasRecortado = item.estado === 'RECORTADO';
         setCancelarParcialLoading(true);
         try {
             if (quedanQty <= 0) {
-                // Cancelar todo el ítem
-                const { error } = await supabase.from('pedido_items').update({ estado: 'CANCELADO' }).eq('id', item.id);
+                // Cancelar todo → marcar ítem original como CANCELADO
+                const { error } = await supabase.from('pedido_items')
+                    .update({ estado: 'CANCELADO' })
+                    .eq('id', item.id);
                 if (error) throw error;
+            } else if (wasRecortado) {
+                // Corregir recorte: marcar original como CANCELADO (cancelQty) + crear CONFIRMADO (quedanQty)
+                const { error: updErr } = await supabase.from('pedido_items')
+                    .update({ cantidad: cancelQty, estado: 'CANCELADO' })
+                    .eq('id', item.id);
+                if (updErr) throw updErr;
+                const semanaNombre = pedido.semana?.nombre || '';
+                const { error: insErr } = await supabase.from('pedido_items').insert({
+                    pedido_id: pedido.id,
+                    titulo: item.titulo,
+                    cantidad: quedanQty,
+                    precio: item.precio || 0,
+                    fuente: item.fuente || null,
+                    estado: `CONFIRMADO ${semanaNombre}`.trim(),
+                });
+                if (insErr) throw insErr;
             } else {
-                // Reducir cantidad del ítem original + crear ítem CANCELADO
+                // Ítem CONFIRMADO: reducir original (quedanQty) + crear CANCELADO (cancelQty)
                 const { error: updErr } = await supabase.from('pedido_items')
                     .update({ cantidad: quedanQty })
                     .eq('id', item.id);
                 if (updErr) throw updErr;
                 const { error: insErr } = await supabase.from('pedido_items').insert({
-                    pedido_id: item.pedido_id || cancelarParcialModal.pedido.id,
+                    pedido_id: pedido.id,
                     titulo: item.titulo,
                     cantidad: cancelQty,
                     precio: item.precio || 0,
@@ -1169,9 +1190,17 @@ export default function MayoristaUpload() {
                                                                 ✂ Cancelar uds.
                                                             </button>
                                                         )}
-                                                        {/* Botones para items RECORTADOS: cancelar definitivo o reprogramar */}
+                                                        {/* Botones para items RECORTADOS: corregir (si >1 ud), re-programar o cancelar todo */}
                                                         {it.fuente !== 'stock' && it.estado === 'RECORTADO' && (
                                                             <div className="flex gap-1 flex-wrap">
+                                                                {it.cantidad > 1 && (
+                                                                    <button
+                                                                        onClick={() => { setCancelarParcialModal({ item: it, pedido: pedido }); setCancelarParcialQty(1); }}
+                                                                        className="text-[8px] font-black text-purple-600 hover:text-white hover:bg-purple-500 border border-purple-300 hover:border-purple-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                                    >
+                                                                        ✎ Corregir
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     onClick={() => { setReprogramarModal({ item: it, pedido: pedido }); setReprogramarSemanaId(''); }}
                                                                     className="text-[8px] font-black text-blue-600 hover:text-white hover:bg-blue-500 border border-blue-300 hover:border-blue-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
@@ -1424,68 +1453,82 @@ export default function MayoristaUpload() {
                 </div>
             )}
 
-            {/* Modal Cancelar Parcial — para reducir unidades de un ítem CONFIRMADO */}
-            {cancelarParcialModal && (
+            {/* Modal Cancelar/Corregir Parcial */}
+            {cancelarParcialModal && (() => {
+                const esRecortado = cancelarParcialModal.item.estado === 'RECORTADO';
+                const total = cancelarParcialModal.item.cantidad;
+                const quedanQty = total - cancelarParcialQty;
+                return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 flex flex-col gap-5">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-black text-navy">Cancelar Unidades</h3>
+                            <h3 className="text-lg font-black text-navy">
+                                {esRecortado ? '✎ Corregir Recorte' : '✂ Cancelar Unidades'}
+                            </h3>
                             <button onClick={() => setCancelarParcialModal(null)} className="text-slate-400 hover:text-navy transition-colors">✕</button>
                         </div>
 
-                        <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
-                            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-0.5">Ítem confirmado</p>
+                        <div className={`rounded-2xl px-4 py-3 ${esRecortado ? 'bg-red-50 border border-red-200' : 'bg-blue-50 border border-blue-200'}`}>
+                            <p className={`text-[9px] font-black uppercase tracking-widest mb-0.5 ${esRecortado ? 'text-red-500' : 'text-blue-500'}`}>
+                                {esRecortado ? 'Ítem recortado (corregir datos)' : 'Ítem confirmado'}
+                            </p>
                             <p className="font-black text-navy text-sm">{cancelarParcialModal.item.titulo}</p>
-                            <p className="text-[10px] text-slate-500">{cancelarParcialModal.item.cantidad} unidades confirmadas · {cancelarParcialModal.item.estado}</p>
+                            <p className="text-[10px] text-slate-500">
+                                {total} unidades · {cancelarParcialModal.item.estado}
+                            </p>
                         </div>
 
                         <div>
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
-                                ¿Cuántas unidades cancelar?
+                                {esRecortado ? '¿Cuántas se van a CANCELAR? (el resto queda CONFIRMADO)' : '¿Cuántas unidades cancelar?'}
                             </label>
                             <div className="flex items-center gap-3">
-                                <button
-                                    type="button"
+                                <button type="button"
                                     onClick={() => setCancelarParcialQty(q => Math.max(1, q - 1))}
                                     className="w-10 h-10 rounded-xl border-2 border-slate-200 text-lg font-black text-slate-500 hover:border-orange-400 hover:text-orange-500 transition-all"
                                 >−</button>
                                 <span className="text-2xl font-black text-navy w-12 text-center">{cancelarParcialQty}</span>
-                                <button
-                                    type="button"
-                                    onClick={() => setCancelarParcialQty(q => Math.min(cancelarParcialModal.item.cantidad, q + 1))}
+                                <button type="button"
+                                    onClick={() => setCancelarParcialQty(q => Math.min(total, q + 1))}
                                     className="w-10 h-10 rounded-xl border-2 border-slate-200 text-lg font-black text-slate-500 hover:border-orange-400 hover:text-orange-500 transition-all"
                                 >+</button>
-                                <span className="text-[10px] text-slate-400 font-bold">de {cancelarParcialModal.item.cantidad}</span>
+                                <span className="text-[10px] text-slate-400 font-bold">de {total}</span>
                             </div>
                         </div>
 
                         {cancelarParcialQty > 0 && (
-                            <div className={`rounded-2xl px-4 py-2.5 text-[10px] font-bold ${cancelarParcialQty >= cancelarParcialModal.item.cantidad ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-orange-50 border border-orange-200 text-orange-700'}`}>
-                                {cancelarParcialQty >= cancelarParcialModal.item.cantidad
-                                    ? `✗ Se cancelarán las ${cancelarParcialQty} unidades — el ítem quedará CANCELADO`
-                                    : `✂ Quedarán ${cancelarParcialModal.item.cantidad - cancelarParcialQty} confirmadas · ${cancelarParcialQty} se marcarán CANCELADO y quedarán disponibles en stock flotante`
-                                }
+                            <div className={`rounded-2xl px-4 py-2.5 text-[10px] font-bold space-y-1 ${cancelarParcialQty >= total ? 'bg-red-50 border border-red-200 text-red-700' : esRecortado ? 'bg-purple-50 border border-purple-200 text-purple-700' : 'bg-orange-50 border border-orange-200 text-orange-700'}`}>
+                                {cancelarParcialQty >= total ? (
+                                    <p>✗ Todo el ítem quedará CANCELADO ({total} uds.)</p>
+                                ) : esRecortado ? (
+                                    <>
+                                        <p>✓ {quedanQty} unidad{quedanQty > 1 ? 'es' : ''} → <strong>CONFIRMADO</strong> (llegaron de Entelequia)</p>
+                                        <p>✗ {cancelarParcialQty} unidad{cancelarParcialQty > 1 ? 'es' : ''} → <strong>CANCELADO</strong> (no llegaron)</p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p>✓ {quedanQty} unidad{quedanQty > 1 ? 'es' : ''} siguen <strong>CONFIRMADAS</strong></p>
+                                        <p>✗ {cancelarParcialQty} unidad{cancelarParcialQty > 1 ? 'es' : ''} → <strong>CANCELADO</strong> (libera stock flotante)</p>
+                                    </>
+                                )}
                             </div>
                         )}
 
                         <div className="flex gap-3 pt-1">
-                            <button
-                                onClick={() => setCancelarParcialModal(null)}
+                            <button onClick={() => setCancelarParcialModal(null)}
                                 className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 font-black text-sm hover:bg-slate-50 transition-all"
-                            >
-                                Cerrar
-                            </button>
-                            <button
-                                onClick={handleCancelarParcial}
+                            >Cerrar</button>
+                            <button onClick={handleCancelarParcial}
                                 disabled={cancelarParcialQty < 1 || cancelarParcialLoading}
-                                className="flex-1 px-4 py-3 rounded-2xl bg-orange-500 text-white font-black text-sm hover:bg-orange-600 disabled:opacity-40 transition-all"
+                                className={`flex-1 px-4 py-3 rounded-2xl text-white font-black text-sm disabled:opacity-40 transition-all ${esRecortado ? 'bg-purple-600 hover:bg-purple-700' : 'bg-orange-500 hover:bg-orange-600'}`}
                             >
-                                {cancelarParcialLoading ? '...' : `✂ Cancelar ${cancelarParcialQty} ud${cancelarParcialQty > 1 ? 's' : ''}.`}
+                                {cancelarParcialLoading ? '...' : esRecortado ? '✎ Guardar corrección' : `✂ Cancelar ${cancelarParcialQty} ud${cancelarParcialQty > 1 ? 's' : ''}.`}
                             </button>
                         </div>
                     </div>
                 </div>
-            )}
+                );
+            })()}
         </div>
     );
 }
