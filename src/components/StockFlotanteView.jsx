@@ -372,6 +372,23 @@ export default function ConfirmationInfoView() {
         }
     };
 
+    // ── Marcar como RECORTADO un ítem CONFIRMADO con recorte parcial ─────────
+    const handleMarcarRecortado = async (itemId) => {
+        setSaving(true);
+        try {
+            const { error } = await supabase
+                .from('pedido_items')
+                .update({ estado: 'RECORTADO' })
+                .eq('id', itemId);
+            if (error) throw error;
+            await fetchDashboardData();
+        } catch (err) {
+            alert('Error: ' + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handleAutoAdjudicate = async (weekId, title, qtyAvailableForRetail) => {
         if (!isAdmin) return;
         const key = normalizeTitle(title);
@@ -710,22 +727,25 @@ export default function ConfirmationInfoView() {
                                                                                                     </div>
                                                                                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                                                                                         {t.mayoristaOrd.map(mi => {
-                                                                                                            const isConf      = (mi.estado || '').startsWith('CONFIRMADO') || mi.estado === 'EN TIENDA' || mi.estado === 'DESPACHADO';
-                                                                                                            const isRec       = mi.estado === 'RECORTADO';
-                                                                                                            const isRepedido  = mi.estado === 'RECORTADO_REPEDIDO';
-                                                                                                            const isCancelado = mi.estado === 'CANCELADO';
-                                                                                                            const isDone      = isRepedido || isCancelado;
+                                                                                                            const isConf       = (mi.estado || '').startsWith('CONFIRMADO') || mi.estado === 'EN TIENDA' || mi.estado === 'DESPACHADO';
+                                                                                                            const isRec        = mi.estado === 'RECORTADO';
+                                                                                                            const isRepedido   = mi.estado === 'RECORTADO_REPEDIDO';
+                                                                                                            const isCancelado  = mi.estado === 'CANCELADO';
+                                                                                                            const isDone       = isRepedido || isCancelado;
+                                                                                                            // Recorte parcial: item CONFIRMADO pero el título tuvo corte
+                                                                                                            const faltanteQty  = (t.pedido > t.confirmado && t.confirmado > 0) ? (t.pedido - t.confirmado) : 0;
+                                                                                                            const isConfParcial = isConf && faltanteQty > 0;
                                                                                                             return (
-                                                                                                                <div key={mi.id} className={`p-3 rounded-lg border flex flex-col gap-1.5 ${isConf ? 'border-blue-200 bg-blue-50/60' : isRec ? 'border-red-200 bg-red-50/50' : isDone ? 'border-gray-200 bg-gray-50/50 opacity-60' : 'border-border/40 bg-white/60'}`}>
+                                                                                                                <div key={mi.id} className={`p-3 rounded-lg border flex flex-col gap-1.5 ${isConfParcial ? 'border-orange-200 bg-orange-50/50' : isConf ? 'border-blue-200 bg-blue-50/60' : isRec ? 'border-red-200 bg-red-50/50' : isDone ? 'border-gray-200 bg-gray-50/50 opacity-60' : 'border-border/40 bg-white/60'}`}>
                                                                                                                     <div className="flex items-center justify-between gap-2">
                                                                                                                         <div className="flex flex-col min-w-0">
                                                                                                                             <span className="text-[12px] font-black truncate text-navy">{mi.pedido?.vendedor_nombre || 'Mayorista'}</span>
                                                                                                                             <span className="text-[9px] text-muted">{mi.cantidad} unid.</span>
-                                                                                                                            <span className={`text-[8px] font-black uppercase mt-0.5 ${isConf ? 'text-blue-600' : isRec ? 'text-red-500' : isRepedido ? 'text-emerald-600' : isCancelado ? 'text-gray-400' : 'text-orange-500'}`}>
-                                                                                                                                {isConf ? '✓ CONFIRMADO' : isRec ? '✂️ RECORTADO' : isRepedido ? '↻ REPEDIDO' : isCancelado ? '✗ CANCELADO' : '⏳ PEDIDO'}
+                                                                                                                            <span className={`text-[8px] font-black uppercase mt-0.5 ${isConfParcial ? 'text-orange-600' : isConf ? 'text-blue-600' : isRec ? 'text-red-500' : isRepedido ? 'text-emerald-600' : isCancelado ? 'text-gray-400' : 'text-orange-500'}`}>
+                                                                                                                                {isConfParcial ? `⚠️ PARCIAL (${faltanteQty} FALTANTE${faltanteQty > 1 ? 'S' : ''})` : isConf ? '✓ CONFIRMADO' : isRec ? '✂️ RECORTADO' : isRepedido ? '↻ REPEDIDO' : isCancelado ? '✗ CANCELADO' : '⏳ PEDIDO'}
                                                                                                                             </span>
                                                                                                                         </div>
-                                                                                                                        <ShoppingBag size={16} className={isConf ? 'text-blue-400' : 'text-muted/40'} />
+                                                                                                                        <ShoppingBag size={16} className={isConfParcial ? 'text-orange-400' : isConf ? 'text-blue-400' : 'text-muted/40'} />
                                                                                                                     </div>
                                                                                                                     {/* Acciones para ítems RECORTADO (solo admin) */}
                                                                                                                     {isAdmin && isRec && (
@@ -739,6 +759,25 @@ export default function ConfirmationInfoView() {
                                                                                                                                 disabled={saving}
                                                                                                                                 className="text-[9px] font-black text-red-500 hover:bg-red-100 border border-red-200 rounded px-2 py-1 transition-colors disabled:opacity-40"
                                                                                                                             >✗ Cancelar</button>
+                                                                                                                        </div>
+                                                                                                                    )}
+                                                                                                                    {/* Acciones para recorte parcial: CONFIRMADO pero con unidades faltantes */}
+                                                                                                                    {isAdmin && isConfParcial && (
+                                                                                                                        <div className="flex flex-col gap-1 pt-1 border-t border-orange-200">
+                                                                                                                            <p className="text-[8px] text-orange-600 font-bold">
+                                                                                                                                Entelequia entregó {t.confirmado}/{t.pedido} — ¿qué hacemos con {faltanteQty} unidad{faltanteQty > 1 ? 'es' : ''}?
+                                                                                                                            </p>
+                                                                                                                            <div className="flex gap-1.5">
+                                                                                                                                <button
+                                                                                                                                    onClick={() => { setReprogramModal({ mi: { ...mi, cantidad: faltanteQty }, weekId: w.id }); setReprogramQty(faltanteQty); setReprogramSemana(''); }}
+                                                                                                                                    className="flex-1 text-[9px] font-black text-white bg-blue-500 hover:bg-blue-600 rounded px-2 py-1 transition-colors"
+                                                                                                                                >↻ Re-prog. siguiente semana</button>
+                                                                                                                                <button
+                                                                                                                                    onClick={() => handleMarcarRecortado(mi.id)}
+                                                                                                                                    disabled={saving}
+                                                                                                                                    className="text-[9px] font-black text-red-500 hover:bg-red-100 border border-red-200 rounded px-2 py-1 transition-colors disabled:opacity-40"
+                                                                                                                                >✗ Cancelar faltante</button>
+                                                                                                                            </div>
                                                                                                                         </div>
                                                                                                                     )}
                                                                                                                 </div>
