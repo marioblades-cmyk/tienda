@@ -2183,7 +2183,8 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                     <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '2px 4px' }}>
                                                         {(() => {
                                                             const restanteCosto = calcs.costoBS - num(r.costo_monto_pagado);
-                                                            if (r.costo_caja_id && restanteCosto > 0.01) {
+                                                            // Diferencias < Bs 1 se absorben como redondeo → mostrar Registrado
+                                                            if (r.costo_caja_id && restanteCosto >= 1) {
                                                                 return (
                                                                     <button
                                                                         onClick={() => { setCostoModal({ rowId: r.id, costoBS: restanteCosto, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio, isRestante: true }); setCostoMetodo('Efectivo Personal'); setCostoPagadoBS(restanteCosto.toFixed(2)); }}
