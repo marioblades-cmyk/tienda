@@ -453,6 +453,16 @@ export default function MayoristaUpload() {
         }
     };
 
+    // Cambiar estado de un ítem individual (ej: "PEDIDO (Siguiente)" → "EN TIENDA")
+    const handleUpdateItemEstado = async (itemId, newEstado) => {
+        try {
+            await supabase.from('pedido_items').update({ estado: newEstado }).eq('id', itemId);
+            fetchAccountData();
+        } catch (err) {
+            alert("Error al actualizar ítem: " + err.message);
+        }
+    };
+
     const generatePDF = () => {
         const storeName = vendedores.find(v => v.id === selectedVendedor)?.nombre || 'Socio Mayorista';
         const doc = new jsPDF();
@@ -973,11 +983,33 @@ export default function MayoristaUpload() {
                                                                         );
                                                                     })()}
                                                                 </td>
-                                                                <td className="py-3 text-right font-black text-slate-600">Bs {(pBs * it.cantidad).toLocaleString()}</td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
+                                                                <td className="py-3 text-right font-black text-slate-600">
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        <span>Bs {(pBs * it.cantidad).toLocaleString()}</span>
+                                                        {/* Botón rápido para items PEDIDO / PEDIDO (Siguiente) → EN TIENDA */}
+                                                        {it.fuente !== 'stock' && (it.estado || '').startsWith('PEDIDO') && (
+                                                            <button
+                                                                onClick={() => handleUpdateItemEstado(it.id, 'EN TIENDA')}
+                                                                className="text-[8px] font-black text-emerald-600 hover:text-white hover:bg-emerald-500 border border-emerald-300 hover:border-emerald-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                            >
+                                                                ✓ Llegó → EN TIENDA
+                                                            </button>
+                                                        )}
+                                                        {/* Botón para volver a PEDIDO si estaba en EN TIENDA y fue un error */}
+                                                        {it.fuente !== 'stock' && it.estado === 'EN TIENDA' && (
+                                                            <button
+                                                                onClick={() => handleUpdateItemEstado(it.id, 'PENDIENTE')}
+                                                                className="text-[8px] font-black text-slate-400 hover:text-slate-600 border border-slate-200 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                            >
+                                                                ↩ Revertir
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
                                             </table>
                                         </div>
                                     )}
