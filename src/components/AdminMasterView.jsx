@@ -91,6 +91,34 @@ export default function AdminMasterView() {
                 // Acumula los "Total" por editorial (ya con descuento aplicado) para fallback preciso
                 let editorialTotals = [];
 
+                // Auto-detectar posición de columnas desde la fila de encabezados
+                // Soporta formato viejo [Título, Precio, Cantidad, Total]
+                // y formato nuevo Entelequia [TITULO, ISBN, PRECIO, CANT, SUBTOTAL ARS]
+                let colTitulo = 0;
+                let colPrecio = 1;
+                let colCant = 2;
+                let colTotal = 3;
+
+                for (let i = 0; i < Math.min(rows.length, 15); i++) {
+                    const r = rows[i];
+                    if (!r || r.length === 0) continue;
+                    const rn = r.map(c => String(c || '').trim().toLowerCase().replace(/\s+/g, ' '));
+
+                    const iTitulo = rn.findIndex(c => c.includes('titulo') || c.includes('título'));
+                    const iPrecio = rn.findIndex(c => c === 'precio' || c.startsWith('precio ') || c.startsWith('precio\n'));
+                    const iCant   = rn.findIndex(c => c === 'cant' || c === 'cantidad' || c.startsWith('cant ') || c.startsWith('cantidad '));
+                    const iSub    = rn.findIndex(c => c.includes('subtotal'));
+                    const iTot    = rn.findIndex(c => c.includes('total') && !c.includes('titulo') && !c.includes('subtotal'));
+
+                    if (iTitulo !== -1 && iPrecio !== -1 && iCant !== -1) {
+                        colTitulo = iTitulo;
+                        colPrecio = iPrecio;
+                        colCant   = iCant;
+                        colTotal  = iSub !== -1 ? iSub : (iTot !== -1 ? iTot : iCant + 1);
+                        break;
+                    }
+                }
+
                 // Encontrar la primera fila de datos reales y totales
                 for (let i = 0; i < rows.length; i++) {
                     const r = rows[i];
@@ -100,20 +128,20 @@ export default function AdminMasterView() {
 
                     // Buscar total global de productos
                     if (col0.includes('total productos') || col0.includes('total producto')) {
-                        extractedTotalProductos = parseFloat(r[3]) || 0;
+                        extractedTotalProductos = parseFloat(r[colTotal]) || 0;
                         continue;
                     }
 
                     // "Total" por editorial (ej. "Total" después de "Descuento 35%")
                     // col0 exacto 'total' para no confundir con 'total productos' o 'total a pagar'
-                    if (col0 === 'total' && parseFloat(r[3]) > 0) {
-                        editorialTotals.push(parseFloat(r[3]));
+                    if (col0 === 'total' && parseFloat(r[colTotal]) > 0) {
+                        editorialTotals.push(parseFloat(r[colTotal]));
                         continue;
                     }
 
                     if (col0.includes('envio') || col0.includes('envío') || col0.includes('cajas')) {
                         extractedEnvioTexto = String(r[0] || '').trim();
-                        extractedCostoEnvio = parseFloat(r[3]) || 0;
+                        extractedCostoEnvio = parseFloat(r[colTotal]) || 0;
 
                         // Intentar extraer cantidad de cajas del texto (ej. "Envío (2 cajas)")
                         const matchCajas = extractedEnvioTexto.match(/(\d+)\s*caja/i);
@@ -123,18 +151,22 @@ export default function AdminMasterView() {
 
                     // Solo incluir ítems con cantidad > 0
                     // (el distribuidor a veces lista títulos con cant=0 que NO fueron pedidos)
-                    if (r.length >= 3 && !isNaN(parseFloat(r[1])) && !isNaN(parseFloat(r[2])) && parseInt(r[2]) > 0) {
+                    // Usar columnas detectadas dinámicamente
+                    const vPrecio = parseFloat(r[colPrecio]);
+                    const vCant   = parseInt(r[colCant]);
+                    if (r.length > colCant && !isNaN(vPrecio) && !isNaN(vCant) && vCant > 0
+                            && vPrecio < 10_000_000) { // sanidad: precio no puede ser un EAN de 13 dígitos
                         parsedItems.push({
-                            titulo: r[0],
-                            precio_unitario: parseFloat(r[1]) || 0,
-                            cantidad: parseInt(r[2]) || 0,
-                            precio_total: parseFloat(r[3]) || 0
+                            titulo: r[colTitulo],
+                            precio_unitario: vPrecio,
+                            cantidad: vCant,
+                            precio_total: parseFloat(r[colTotal]) || 0
                         });
                     }
                 }
 
                 if (parsedItems.length === 0) {
-                    throw new Error("No se pudo detectar la estructura esperada: [Título, Precio, Cantidad, Total]");
+                    throw new Error("No se pudo detectar la estructura del Excel. Formatos soportados: [Título, Precio, Cantidad, Total] o [TITULO, ISBN, PRECIO, CANT, SUBTOTAL ARS]");
                 }
 
                 // Fallback 1: suma de totales por editorial (ya con descuento) — más preciso
