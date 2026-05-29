@@ -373,14 +373,30 @@ export default function ConfirmationInfoView() {
     };
 
     // ── Marcar como RECORTADO un ítem CONFIRMADO con recorte parcial ─────────
-    const handleMarcarRecortado = async (itemId) => {
+    // Divide el ítem: una fila RECORTADO (faltanteQty) + una fila CONFIRMADO (confirmadoQty)
+    const handleMarcarRecortado = async (mi, confirmadoQty, faltanteQty, weekName) => {
         setSaving(true);
         try {
-            const { error } = await supabase
+            // 1. Actualizar ítem original → solo la parte recortada
+            const { error: updErr } = await supabase
                 .from('pedido_items')
-                .update({ estado: 'RECORTADO' })
-                .eq('id', itemId);
-            if (error) throw error;
+                .update({ cantidad: faltanteQty, estado: 'RECORTADO' })
+                .eq('id', mi.id);
+            if (updErr) throw updErr;
+
+            // 2. Crear nuevo ítem para la parte confirmada (si hay confirmados)
+            if (confirmadoQty > 0) {
+                const { error: insErr } = await supabase.from('pedido_items').insert({
+                    pedido_id: mi.pedido.id,
+                    titulo: mi.titulo,
+                    cantidad: confirmadoQty,
+                    precio: mi.precio || 0,
+                    fuente: mi.fuente || null,
+                    estado: `CONFIRMADO ${weekName || ''}`.trim(),
+                });
+                if (insErr) throw insErr;
+            }
+
             await fetchDashboardData();
         } catch (err) {
             alert('Error: ' + err.message);
@@ -773,7 +789,7 @@ export default function ConfirmationInfoView() {
                                                                                                                                     className="flex-1 text-[9px] font-black text-white bg-blue-500 hover:bg-blue-600 rounded px-2 py-1 transition-colors"
                                                                                                                                 >↻ Re-prog. siguiente semana</button>
                                                                                                                                 <button
-                                                                                                                                    onClick={() => handleMarcarRecortado(mi.id)}
+                                                                                                                                    onClick={() => handleMarcarRecortado(mi, t.confirmado, faltanteQty, week.nombre)}
                                                                                                                                     disabled={saving}
                                                                                                                                     className="text-[9px] font-black text-red-500 hover:bg-red-100 border border-red-200 rounded px-2 py-1 transition-colors disabled:opacity-40"
                                                                                                                                 >✗ Cancelar faltante</button>
