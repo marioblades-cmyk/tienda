@@ -202,6 +202,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     const [costoModal, setCostoModal] = useState(null); // null | { rowId, costoBS, nro, fecha, compre, cambio }
     const [costoMetodo, setCostoMetodo] = useState('Efectivo Personal');
     const [costoSaving, setCostoSaving] = useState(false);
+    const [costoPagadoBS, setCostoPagadoBS] = useState(''); // monto realmente pagado (puede diferir del calculado por redondeo)
 
     // Custom Confirmation Modal State
     const [confirmModal, setConfirmModal] = useState({ show: false, title: '', msg: '', onConfirm: null });
@@ -532,25 +533,31 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         if (!costoModal) return;
         const { rowId, costoBS, nro, fecha, compre, cambio } = costoModal;
         if (!costoBS || costoBS <= 0) { showToast('El costo es 0, no hay nada que registrar.', 'error'); return; }
+        // Usar el monto realmente pagado; si no se modificó, usar el calculado
+        const montoPagado = parseFloat(costoPagadoBS) > 0 ? parseFloat(costoPagadoBS) : costoBS;
         setCostoSaving(true);
         try {
             const nroLabel = nro ? `Remito ${nro}` : 'Remito s/n';
             const fechaLabel = fecha ? ` (${fecha})` : '';
             const detalle = compre && cambio ? ` · ARS ${Number(compre).toLocaleString()} × ${cambio}` : '';
-            const concepto = `Envío AR — ${nroLabel}${detalle}${fechaLabel}`;
+            // Si el monto pagado difiere del calculado, lo indicamos en el concepto
+            const ajuste = Math.abs(montoPagado - costoBS) > 0.001
+                ? ` [pagado Bs ${montoPagado.toFixed(2)} / calc. Bs ${costoBS.toFixed(2)}]`
+                : '';
+            const concepto = `Envío AR — ${nroLabel}${detalle}${fechaLabel}${ajuste}`;
             const { data: cajaMov, error } = await supabase.from('caja_movimientos').insert([{
                 turno_id: null,
                 tipo: 'EGRESO',
                 categoria: 'Envío Argentina',
                 concepto,
-                monto: costoBS,
+                monto: montoPagado,
                 metodo_pago: costoMetodo,
                 origen: 'Proveedores',
             }]).select('id').single();
             if (error) throw error;
             const costo_caja_id = cajaMov?.id || null;
             const newRows = rows.map(r => r.id === rowId
-                ? { ...r, costo_caja_id, costo_monto_pagado: costoBS }
+                ? { ...r, costo_caja_id, costo_monto_pagado: montoPagado }
                 : r);
             setRows(newRows);
             await saveRemitos(newRows);
@@ -601,24 +608,28 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         if (!costoModal) return;
         const { rowId, costoBS, nro, fecha, compre, cambio } = costoModal;
         if (!costoBS || costoBS <= 0) return;
+        const montoPagado = parseFloat(costoPagadoBS) > 0 ? parseFloat(costoPagadoBS) : costoBS;
         setCostoSaving(true);
         try {
             const row = rows.find(r => r.id === rowId);
             const nroLabel = nro ? `Remito ${nro}` : 'Remito s/n';
             const fechaLabel = fecha ? ` (${fecha})` : '';
             const detalle = compre && cambio ? ` · ARS ${Number(compre).toLocaleString()} × ${cambio}` : '';
-            const concepto = `Envío AR (restante) — ${nroLabel}${detalle}${fechaLabel}`;
+            const ajuste = Math.abs(montoPagado - costoBS) > 0.001
+                ? ` [pagado Bs ${montoPagado.toFixed(2)} / calc. Bs ${costoBS.toFixed(2)}]`
+                : '';
+            const concepto = `Envío AR (restante) — ${nroLabel}${detalle}${fechaLabel}${ajuste}`;
             const { data: cajaMov, error } = await supabase.from('caja_movimientos').insert([{
                 turno_id: null, tipo: 'EGRESO', categoria: 'Envío Argentina',
-                concepto, monto: costoBS, metodo_pago: costoMetodo, origen: 'Proveedores',
+                concepto, monto: montoPagado, metodo_pago: costoMetodo, origen: 'Proveedores',
             }]).select('id').single();
             if (error) throw error;
-            const nuevoPagado = (num(row?.costo_monto_pagado) + costoBS);
+            const nuevoPagado = (num(row?.costo_monto_pagado) + montoPagado);
             const newRows = rows.map(r => r.id === rowId ? { ...r, costo_monto_pagado: nuevoPagado } : r);
             setRows(newRows);
             await saveRemitos(newRows);
             setCostoModal(null);
-            showToast(`Restante de envío AR (Bs ${costoBS.toFixed(2)}) registrado.`, 'success');
+            showToast(`Restante de envío AR (Bs ${montoPagado.toFixed(2)}) registrado.`, 'success');
         } catch (e) {
             showToast('Error: ' + e.message, 'error');
         } finally {
@@ -1945,16 +1956,38 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         {costoModal.nro ? `Remito ${costoModal.nro}` : 'Remito s/n'}
                                         {costoModal.fecha ? ` · ${costoModal.fecha}` : ''}
                                     </p>
-                                    <div style={{ marginBottom: '12px', padding: '12px', background: '#f8f8f8', borderRadius: '6px', textAlign: 'center' }}>
-                                        <span style={{ fontSize: '0.75rem', color: '#666', display: 'block', marginBottom: '2px' }}>Monto a registrar</span>
-                                        <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--navy)' }}>
+                                    {/* Referencia: monto calculado */}
+                                    <div style={{ marginBottom: '12px', padding: '10px 12px', background: '#f8f8f8', borderRadius: '6px', textAlign: 'center' }}>
+                                        <span style={{ fontSize: '0.72rem', color: '#999', display: 'block', marginBottom: '2px' }}>Monto calculado (referencia)</span>
+                                        <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#888' }}>
                                             BS {costoModal.costoBS.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                         {costoModal.compre && costoModal.cambio && (
-                                            <span style={{ fontSize: '0.72rem', color: '#888', display: 'block', marginTop: '2px' }}>
+                                            <span style={{ fontSize: '0.72rem', color: '#aaa', display: 'block', marginTop: '2px' }}>
                                                 ARS {Number(costoModal.compre).toLocaleString()} × TC {costoModal.cambio}
                                             </span>
                                         )}
+                                    </div>
+                                    {/* Monto realmente pagado — editable */}
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '6px', color: '#444' }}>
+                                            Monto pagado (BS)
+                                            {Math.abs(parseFloat(costoPagadoBS) - costoModal.costoBS) > 0.001 && parseFloat(costoPagadoBS) > 0 && (
+                                                <span style={{ marginLeft: '8px', fontSize: '0.7rem', color: '#e67e22', fontWeight: 'normal' }}>
+                                                    ≠ calculado
+                                                </span>
+                                            )}
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={costoPagadoBS}
+                                            onChange={e => setCostoPagadoBS(e.target.value)}
+                                            onFocus={e => e.target.select()}
+                                            style={{ width: '100%', padding: '10px 12px', border: '2px solid var(--border)', borderRadius: '6px', fontSize: '1.3rem', fontWeight: 'bold', color: 'var(--navy)', textAlign: 'center', outline: 'none', boxSizing: 'border-box',
+                                                borderColor: Math.abs(parseFloat(costoPagadoBS) - costoModal.costoBS) > 0.001 && parseFloat(costoPagadoBS) > 0 ? '#e67e22' : 'var(--border)' }}
+                                        />
                                     </div>
                                     <div style={{ marginBottom: '20px' }}>
                                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px', color: '#666' }}>Forma de Pago</label>
@@ -2153,7 +2186,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                             if (r.costo_caja_id && restanteCosto > 0.01) {
                                                                 return (
                                                                     <button
-                                                                        onClick={() => { setCostoModal({ rowId: r.id, costoBS: restanteCosto, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio, isRestante: true }); setCostoMetodo('Efectivo Personal'); }}
+                                                                        onClick={() => { setCostoModal({ rowId: r.id, costoBS: restanteCosto, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio, isRestante: true }); setCostoMetodo('Efectivo Personal'); setCostoPagadoBS(restanteCosto.toFixed(2)); }}
                                                                         style={{ padding: '3px 8px', background: '#e67e22', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
                                                                         title={`Falta pagar BS ${restanteCosto.toFixed(2)}`}
                                                                     >
@@ -2167,7 +2200,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                             if (calcs.costoBS > 0) {
                                                                 return (
                                                                     <button
-                                                                        onClick={() => { setCostoModal({ rowId: r.id, costoBS: calcs.costoBS, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio }); setCostoMetodo('Efectivo Personal'); }}
+                                                                        onClick={() => { setCostoModal({ rowId: r.id, costoBS: calcs.costoBS, nro: r.nro || '', fecha: r.fecha || '', compre: r.compre, cambio: r.cambio }); setCostoMetodo('Efectivo Personal'); setCostoPagadoBS(calcs.costoBS.toFixed(2)); }}
                                                                         style={{ padding: '3px 8px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
                                                                         title={`Registrar BS ${calcs.costoBS.toFixed(2)} como egreso "Envío Argentina"`}
                                                                     >
