@@ -176,7 +176,7 @@ export default function MayoristaUpload() {
             const enrichedOrders = (orders || []).map(order => {
                 let orderTotalBs = 0;
                 order.items.forEach(it => {
-                    if (it.estado?.includes('RECORTADO')) return; // EXCLUIR RECORTADOS DEL TOTAL
+                    if (it.estado?.includes('RECORTADO') || it.estado === 'CANCELADO') return; // EXCLUIR RECORTADOS Y CANCELADOS DEL TOTAL
                     const prod = catalog[normalizeTitle(it.titulo)];
                     const unitPriceBs = prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0;
                     orderTotalBs += (unitPriceBs * it.cantidad);
