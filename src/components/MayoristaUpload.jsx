@@ -37,6 +37,9 @@ export default function MayoristaUpload() {
     const [reprogramarModal, setReprogramarModal] = useState(null); // { item, pedido }
     const [reprogramarSemanaId, setReprogramarSemanaId] = useState('');
     const [reprogramarLoading, setReprogramarLoading] = useState(false);
+    const [cancelarParcialModal, setCancelarParcialModal] = useState(null); // { item, pedido }
+    const [cancelarParcialQty, setCancelarParcialQty] = useState(1);
+    const [cancelarParcialLoading, setCancelarParcialLoading] = useState(false);
 
     // --- 2. ESTADOS TAB 1: CARGA DE PEDIDO ---
     const [previewData, setPreviewData] = useState(null);
@@ -583,6 +586,44 @@ export default function MayoristaUpload() {
         }
     };
 
+    // Cancelar parcialmente un ítem CONFIRMADO (divide: N quedan confirmadas, M se cancelan)
+    const handleCancelarParcial = async () => {
+        if (!cancelarParcialModal || cancelarParcialQty < 1) return;
+        const { item } = cancelarParcialModal;
+        const cancelQty = parseInt(cancelarParcialQty);
+        const quedanQty = item.cantidad - cancelQty;
+        setCancelarParcialLoading(true);
+        try {
+            if (quedanQty <= 0) {
+                // Cancelar todo el ítem
+                const { error } = await supabase.from('pedido_items').update({ estado: 'CANCELADO' }).eq('id', item.id);
+                if (error) throw error;
+            } else {
+                // Reducir cantidad del ítem original + crear ítem CANCELADO
+                const { error: updErr } = await supabase.from('pedido_items')
+                    .update({ cantidad: quedanQty })
+                    .eq('id', item.id);
+                if (updErr) throw updErr;
+                const { error: insErr } = await supabase.from('pedido_items').insert({
+                    pedido_id: item.pedido_id || cancelarParcialModal.pedido.id,
+                    titulo: item.titulo,
+                    cantidad: cancelQty,
+                    precio: item.precio || 0,
+                    fuente: item.fuente || null,
+                    estado: 'CANCELADO',
+                });
+                if (insErr) throw insErr;
+            }
+            setCancelarParcialModal(null);
+            setCancelarParcialQty(1);
+            fetchAccountData();
+        } catch (err) {
+            alert('Error al cancelar: ' + err.message);
+        } finally {
+            setCancelarParcialLoading(false);
+        }
+    };
+
     const generatePDF = () => {
         const storeName = vendedores.find(v => v.id === selectedVendedor)?.nombre || 'Socio Mayorista';
         const doc = new jsPDF();
@@ -1119,6 +1160,15 @@ export default function MayoristaUpload() {
                                                                 📋 Adjudicar semana
                                                             </button>
                                                         )}
+                                                        {/* Botón para cancelar parcialmente ítems CONFIRMADO */}
+                                                        {it.fuente !== 'stock' && (it.estado || '').startsWith('CONFIRMADO') && it.cantidad > 0 && (
+                                                            <button
+                                                                onClick={() => { setCancelarParcialModal({ item: it, pedido: pedido }); setCancelarParcialQty(1); }}
+                                                                className="text-[8px] font-black text-orange-500 hover:text-white hover:bg-orange-500 border border-orange-300 hover:border-orange-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                            >
+                                                                ✂ Cancelar uds.
+                                                            </button>
+                                                        )}
                                                         {/* Botones para items RECORTADOS: cancelar definitivo o reprogramar */}
                                                         {it.fuente !== 'stock' && it.estado === 'RECORTADO' && (
                                                             <div className="flex gap-1 flex-wrap">
@@ -1368,6 +1418,69 @@ export default function MayoristaUpload() {
                                 className="flex-1 px-4 py-3 rounded-2xl bg-amber-500 text-white font-black text-sm hover:bg-amber-600 disabled:opacity-40 transition-all"
                             >
                                 {reprogramarLoading ? '...' : '↻ Re-programar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Cancelar Parcial — para reducir unidades de un ítem CONFIRMADO */}
+            {cancelarParcialModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 flex flex-col gap-5">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-black text-navy">Cancelar Unidades</h3>
+                            <button onClick={() => setCancelarParcialModal(null)} className="text-slate-400 hover:text-navy transition-colors">✕</button>
+                        </div>
+
+                        <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
+                            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-0.5">Ítem confirmado</p>
+                            <p className="font-black text-navy text-sm">{cancelarParcialModal.item.titulo}</p>
+                            <p className="text-[10px] text-slate-500">{cancelarParcialModal.item.cantidad} unidades confirmadas · {cancelarParcialModal.item.estado}</p>
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                                ¿Cuántas unidades cancelar?
+                            </label>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setCancelarParcialQty(q => Math.max(1, q - 1))}
+                                    className="w-10 h-10 rounded-xl border-2 border-slate-200 text-lg font-black text-slate-500 hover:border-orange-400 hover:text-orange-500 transition-all"
+                                >−</button>
+                                <span className="text-2xl font-black text-navy w-12 text-center">{cancelarParcialQty}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setCancelarParcialQty(q => Math.min(cancelarParcialModal.item.cantidad, q + 1))}
+                                    className="w-10 h-10 rounded-xl border-2 border-slate-200 text-lg font-black text-slate-500 hover:border-orange-400 hover:text-orange-500 transition-all"
+                                >+</button>
+                                <span className="text-[10px] text-slate-400 font-bold">de {cancelarParcialModal.item.cantidad}</span>
+                            </div>
+                        </div>
+
+                        {cancelarParcialQty > 0 && (
+                            <div className={`rounded-2xl px-4 py-2.5 text-[10px] font-bold ${cancelarParcialQty >= cancelarParcialModal.item.cantidad ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-orange-50 border border-orange-200 text-orange-700'}`}>
+                                {cancelarParcialQty >= cancelarParcialModal.item.cantidad
+                                    ? `✗ Se cancelarán las ${cancelarParcialQty} unidades — el ítem quedará CANCELADO`
+                                    : `✂ Quedarán ${cancelarParcialModal.item.cantidad - cancelarParcialQty} confirmadas · ${cancelarParcialQty} se marcarán CANCELADO y quedarán disponibles en stock flotante`
+                                }
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 pt-1">
+                            <button
+                                onClick={() => setCancelarParcialModal(null)}
+                                className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 font-black text-sm hover:bg-slate-50 transition-all"
+                            >
+                                Cerrar
+                            </button>
+                            <button
+                                onClick={handleCancelarParcial}
+                                disabled={cancelarParcialQty < 1 || cancelarParcialLoading}
+                                className="flex-1 px-4 py-3 rounded-2xl bg-orange-500 text-white font-black text-sm hover:bg-orange-600 disabled:opacity-40 transition-all"
+                            >
+                                {cancelarParcialLoading ? '...' : `✂ Cancelar ${cancelarParcialQty} ud${cancelarParcialQty > 1 ? 's' : ''}.`}
                             </button>
                         </div>
                     </div>

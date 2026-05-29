@@ -19,7 +19,7 @@ const normalizeTitle = (str) =>
         .trim();
 
 // Estados terminales: ítems ya cumplidos, no cuentan como demanda activa al distribuidor
-const ESTADOS_TERMINALES = new Set(['EN TIENDA', 'ENTREGADO', 'ADJUDICADO', 'DAÑADO', 'DESPACHADO']);
+const ESTADOS_TERMINALES = new Set(['EN TIENDA', 'ENTREGADO', 'ADJUDICADO', 'DAÑADO', 'DESPACHADO', 'CANCELADO']);
 
 export default function ConfirmationInfoView() {
     const { isAdmin } = useAuth();
