@@ -102,7 +102,8 @@ export default function AdminMasterView() {
                 for (let i = 0; i < Math.min(rows.length, 15); i++) {
                     const r = rows[i];
                     if (!r || r.length === 0) continue;
-                    const rn = r.map(c => String(c || '').trim().toLowerCase().replace(/\s+/g, ' '));
+                    // Array.from crea array denso (sin huecos) — evita undefined en findIndex
+                    const rn = Array.from({ length: r.length }, (_, k) => String(r[k] == null ? '' : r[k]).trim().toLowerCase().replace(/\s+/g, ' '));
 
                     const iTitulo = rn.findIndex(c => c.includes('titulo') || c.includes('título'));
                     const iPrecio = rn.findIndex(c => c === 'precio' || c.startsWith('precio ') || c.startsWith('precio\n'));
