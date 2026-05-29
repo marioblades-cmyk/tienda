@@ -99,25 +99,33 @@ export default function AdminMasterView() {
                 let colCant = 2;
                 let colTotal = 3;
 
-                for (let i = 0; i < Math.min(rows.length, 15); i++) {
-                    const r = rows[i];
-                    if (!r || r.length === 0) continue;
-                    // Array.from crea array denso (sin huecos) — evita undefined en findIndex
-                    const rn = Array.from({ length: r.length }, (_, k) => String(r[k] == null ? '' : r[k]).trim().toLowerCase().replace(/\s+/g, ' '));
+                try {
+                    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+                        const r = rows[i];
+                        if (!r || r.length === 0) continue;
+                        // Array.from crea array denso (sin huecos) — evita undefined en findIndex
+                        const rn = Array.from({ length: r.length }, (_, k) => {
+                            const v = r[k];
+                            return (v == null ? '' : String(v)).trim().toLowerCase().replace(/\s+/g, ' ');
+                        });
 
-                    const iTitulo = rn.findIndex(c => c.includes('titulo') || c.includes('título'));
-                    const iPrecio = rn.findIndex(c => c === 'precio' || c.startsWith('precio ') || c.startsWith('precio\n'));
-                    const iCant   = rn.findIndex(c => c === 'cant' || c === 'cantidad' || c.startsWith('cant ') || c.startsWith('cantidad '));
-                    const iSub    = rn.findIndex(c => c.includes('subtotal'));
-                    const iTot    = rn.findIndex(c => c.includes('total') && !c.includes('titulo') && !c.includes('subtotal'));
+                        const iTitulo = rn.findIndex(c => typeof c === 'string' && (c.includes('titulo') || c.includes('título')));
+                        const iPrecio = rn.findIndex(c => typeof c === 'string' && (c === 'precio' || c.startsWith('precio ')));
+                        const iCant   = rn.findIndex(c => typeof c === 'string' && (c === 'cant' || c === 'cantidad' || c.startsWith('cant ') || c.startsWith('cantidad ')));
+                        const iSub    = rn.findIndex(c => typeof c === 'string' && c.includes('subtotal'));
+                        const iTot    = rn.findIndex(c => typeof c === 'string' && c.includes('total') && !c.includes('titulo') && !c.includes('subtotal'));
 
-                    if (iTitulo !== -1 && iPrecio !== -1 && iCant !== -1) {
-                        colTitulo = iTitulo;
-                        colPrecio = iPrecio;
-                        colCant   = iCant;
-                        colTotal  = iSub !== -1 ? iSub : (iTot !== -1 ? iTot : iCant + 1);
-                        break;
+                        if (iTitulo !== -1 && iPrecio !== -1 && iCant !== -1) {
+                            colTitulo = iTitulo;
+                            colPrecio = iPrecio;
+                            colCant   = iCant;
+                            colTotal  = iSub !== -1 ? iSub : (iTot !== -1 ? iTot : iCant + 1);
+                            break;
+                        }
                     }
+                } catch (_headerErr) {
+                    // Si falla la detección, usar defaults [Título, Precio, Cantidad, Total]
+                    console.warn('Header detection failed, using default columns:', _headerErr);
                 }
 
                 // Encontrar la primera fila de datos reales y totales
