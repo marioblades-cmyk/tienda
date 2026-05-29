@@ -31,6 +31,9 @@ export default function MayoristaUpload() {
     const [showAddTienda, setShowAddTienda] = useState(false);
     const [newTiendaNombre, setNewTiendaNombre] = useState('');
     const [savingTienda, setSavingTienda] = useState(false);
+    const [adjudicarModal, setAdjudicarModal] = useState(null); // { item, pedido }
+    const [adjudicarSemanaId, setAdjudicarSemanaId] = useState('');
+    const [adjudicarLoading, setAdjudicarLoading] = useState(false);
 
     // --- 2. ESTADOS TAB 1: CARGA DE PEDIDO ---
     const [previewData, setPreviewData] = useState(null);
@@ -460,6 +463,60 @@ export default function MayoristaUpload() {
             fetchAccountData();
         } catch (err) {
             alert("Error al actualizar ítem: " + err.message);
+        }
+    };
+
+    // Mover ítem a la semana correcta y marcarlo como CONFIRMADO
+    const handleAdjudicarEnSemana = async () => {
+        if (!adjudicarModal || !adjudicarSemanaId) return;
+        const { item, pedido: currentPedido } = adjudicarModal;
+        setAdjudicarLoading(true);
+        try {
+            // 1. Buscar o crear pedido mayorista para este vendedor en la semana destino
+            const { data: existingPedido } = await supabase
+                .from('pedidos')
+                .select('id')
+                .eq('semana_id', adjudicarSemanaId)
+                .eq('vendedor_id', currentPedido.vendedor_id)
+                .eq('tipo', 'mayorista')
+                .maybeSingle();
+
+            let targetPedidoId;
+            if (existingPedido) {
+                targetPedidoId = existingPedido.id;
+            } else {
+                const { data: newPedido, error: pedErr } = await supabase
+                    .from('pedidos')
+                    .insert({
+                        semana_id: adjudicarSemanaId,
+                        tipo: 'mayorista',
+                        vendedor_id: currentPedido.vendedor_id,
+                        vendedor_nombre: currentPedido.vendedor_nombre,
+                    })
+                    .select('id')
+                    .single();
+                if (pedErr) throw pedErr;
+                targetPedidoId = newPedido.id;
+            }
+
+            // 2. Mover ítem al pedido de la semana destino + marcar CONFIRMADO
+            const semanaNombre = semanas.find(s => s.id === adjudicarSemanaId)?.nombre || '';
+            const { error: updErr } = await supabase
+                .from('pedido_items')
+                .update({
+                    pedido_id: targetPedidoId,
+                    estado: `CONFIRMADO ${semanaNombre}`.trim()
+                })
+                .eq('id', item.id);
+            if (updErr) throw updErr;
+
+            setAdjudicarModal(null);
+            setAdjudicarSemanaId('');
+            fetchAccountData();
+        } catch (err) {
+            alert('Error al adjudicar: ' + err.message);
+        } finally {
+            setAdjudicarLoading(false);
         }
     };
 
@@ -986,22 +1043,13 @@ export default function MayoristaUpload() {
                                                                 <td className="py-3 text-right font-black text-slate-600">
                                                     <div className="flex flex-col items-end gap-1">
                                                         <span>Bs {(pBs * it.cantidad).toLocaleString()}</span>
-                                                        {/* Botón rápido para items PEDIDO / PEDIDO (Siguiente) → EN TIENDA */}
+                                                        {/* Botón para mover item PEDIDO (Siguiente) a semana confirmada */}
                                                         {it.fuente !== 'stock' && (it.estado || '').startsWith('PEDIDO') && (
                                                             <button
-                                                                onClick={() => handleUpdateItemEstado(it.id, 'EN TIENDA')}
-                                                                className="text-[8px] font-black text-emerald-600 hover:text-white hover:bg-emerald-500 border border-emerald-300 hover:border-emerald-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                                onClick={() => { setAdjudicarModal({ item: it, pedido: pedido }); setAdjudicarSemanaId(''); }}
+                                                                className="text-[8px] font-black text-blue-600 hover:text-white hover:bg-blue-500 border border-blue-300 hover:border-blue-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
                                                             >
-                                                                ✓ Llegó → EN TIENDA
-                                                            </button>
-                                                        )}
-                                                        {/* Botón para volver a PEDIDO si estaba en EN TIENDA y fue un error */}
-                                                        {it.fuente !== 'stock' && it.estado === 'EN TIENDA' && (
-                                                            <button
-                                                                onClick={() => handleUpdateItemEstado(it.id, 'PENDIENTE')}
-                                                                className="text-[8px] font-black text-slate-400 hover:text-slate-600 border border-slate-200 px-2 py-0.5 rounded transition-all whitespace-nowrap"
-                                                            >
-                                                                ↩ Revertir
+                                                                📋 Adjudicar semana
                                                             </button>
                                                         )}
                                                     </div>
@@ -1124,6 +1172,62 @@ export default function MayoristaUpload() {
                             </div>
                             <button onClick={handleSavePago} disabled={processing} className="w-full py-6 bg-navy text-white rounded-3xl font-black text-xs uppercase tracking-widest hover:bg-navy/90 hover:scale-105 active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4">
                                 {processing ? <Loader2 className="animate-spin" /> : <Save size={20} />} REGISTRAR Y VINCULAR CAJA
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal: Adjudicar ítem en semana ── */}
+            {adjudicarModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 flex flex-col gap-5">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-black text-navy">Adjudicar en Semana</h3>
+                            <button onClick={() => setAdjudicarModal(null)} className="text-slate-400 hover:text-navy transition-colors">✕</button>
+                        </div>
+
+                        <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
+                            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-0.5">Ítem a adjudicar</p>
+                            <p className="font-black text-navy text-sm">{adjudicarModal.item.titulo}</p>
+                            <p className="text-[10px] text-slate-500">{adjudicarModal.item.cantidad} unid. · Estado actual: <span className="font-bold text-orange-500">{adjudicarModal.item.estado}</span></p>
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                                Semana de entrega confirmada
+                            </label>
+                            <select
+                                value={adjudicarSemanaId}
+                                onChange={e => setAdjudicarSemanaId(e.target.value)}
+                                className="w-full px-4 py-3 border-2 border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-blue-400 transition-colors"
+                            >
+                                <option value="">-- Seleccionar semana --</option>
+                                {semanas.map(s => (
+                                    <option key={s.id} value={s.id}>{s.nombre}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {adjudicarSemanaId && (
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-2.5 text-[10px] text-emerald-700 font-bold">
+                                ✓ El ítem se moverá al pedido de <strong>{semanas.find(s => s.id === adjudicarSemanaId)?.nombre}</strong> con estado <strong>CONFIRMADO</strong>
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 pt-1">
+                            <button
+                                onClick={() => setAdjudicarModal(null)}
+                                className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 font-black text-sm hover:bg-slate-50 transition-all"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleAdjudicarEnSemana}
+                                disabled={!adjudicarSemanaId || adjudicarLoading}
+                                className="flex-1 px-4 py-3 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 disabled:opacity-40 transition-all"
+                            >
+                                {adjudicarLoading ? '...' : '✓ Confirmar Adjudicación'}
                             </button>
                         </div>
                     </div>
