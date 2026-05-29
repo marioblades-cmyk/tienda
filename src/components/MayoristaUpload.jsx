@@ -34,6 +34,9 @@ export default function MayoristaUpload() {
     const [adjudicarModal, setAdjudicarModal] = useState(null); // { item, pedido }
     const [adjudicarSemanaId, setAdjudicarSemanaId] = useState('');
     const [adjudicarLoading, setAdjudicarLoading] = useState(false);
+    const [reprogramarModal, setReprogramarModal] = useState(null); // { item, pedido }
+    const [reprogramarSemanaId, setReprogramarSemanaId] = useState('');
+    const [reprogramarLoading, setReprogramarLoading] = useState(false);
 
     // --- 2. ESTADOS TAB 1: CARGA DE PEDIDO ---
     const [previewData, setPreviewData] = useState(null);
@@ -517,6 +520,66 @@ export default function MayoristaUpload() {
             alert('Error al adjudicar: ' + err.message);
         } finally {
             setAdjudicarLoading(false);
+        }
+    };
+
+    // Re-programar ítem RECORTADO a otra semana (crea nuevo pedido_item + marca original RECORTADO_REPEDIDO)
+    const handleReprogramarRecortado = async () => {
+        if (!reprogramarModal || !reprogramarSemanaId) return;
+        const { item, pedido: currentPedido } = reprogramarModal;
+        setReprogramarLoading(true);
+        try {
+            const { data: existingPedido } = await supabase
+                .from('pedidos')
+                .select('id')
+                .eq('semana_id', reprogramarSemanaId)
+                .eq('vendedor_id', currentPedido.vendedor_id)
+                .eq('tipo', 'mayorista')
+                .maybeSingle();
+
+            let targetPedidoId;
+            if (existingPedido) {
+                targetPedidoId = existingPedido.id;
+            } else {
+                const { data: np, error: pedErr } = await supabase
+                    .from('pedidos')
+                    .insert({
+                        semana_id: reprogramarSemanaId,
+                        tipo: 'mayorista',
+                        vendedor_id: currentPedido.vendedor_id,
+                        vendedor_nombre: currentPedido.vendedor_nombre,
+                    })
+                    .select('id')
+                    .single();
+                if (pedErr) throw pedErr;
+                targetPedidoId = np.id;
+            }
+
+            // Crear nuevo ítem en la semana destino
+            const { error: insErr } = await supabase.from('pedido_items').insert({
+                pedido_id: targetPedidoId,
+                titulo: item.titulo,
+                cantidad: item.cantidad,
+                precio: item.precio || 0,
+                estado: null,
+            });
+            if (insErr) throw insErr;
+
+            // Marcar original como RECORTADO_REPEDIDO
+            const semanaNombre = semanas.find(s => s.id === reprogramarSemanaId)?.nombre || '';
+            const { error: updErr } = await supabase
+                .from('pedido_items')
+                .update({ estado: `RECORTADO_REPEDIDO → ${semanaNombre}`.trim() })
+                .eq('id', item.id);
+            if (updErr) throw updErr;
+
+            setReprogramarModal(null);
+            setReprogramarSemanaId('');
+            fetchAccountData();
+        } catch (err) {
+            alert('Error al reprogramar: ' + err.message);
+        } finally {
+            setReprogramarLoading(false);
         }
     };
 
@@ -1008,8 +1071,12 @@ export default function MayoristaUpload() {
                                                                         let badgeClass = 'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'; 
                                                                         if (it.fuente === 'stock') {
                                                                             badgeClass = 'bg-orange-500/10 border border-orange-500/30 text-orange-500 shadow-sm shadow-orange-500/10';
+                                                                        } else if (est === 'CANCELADO') {
+                                                                            badgeClass = 'bg-slate-200/80 border-slate-300 text-slate-400 line-through';
                                                                         } else if (est === 'RECORTADO') {
                                                                             badgeClass = 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse';
+                                                                        } else if (est.startsWith('RECORTADO_REPEDIDO')) {
+                                                                            badgeClass = 'bg-amber-100 border-amber-300 text-amber-600';
                                                                         } else if (est === 'EN TIENDA') {
                                                                             badgeClass = 'bg-success/10 border-success/30 text-success shadow-sm shadow-success/20';
                                                                         } else if (est === 'DESPACHADO' || est === 'ENTREGADO') {
@@ -1051,6 +1118,23 @@ export default function MayoristaUpload() {
                                                             >
                                                                 📋 Adjudicar semana
                                                             </button>
+                                                        )}
+                                                        {/* Botones para items RECORTADOS: cancelar definitivo o reprogramar */}
+                                                        {it.fuente !== 'stock' && it.estado === 'RECORTADO' && (
+                                                            <div className="flex gap-1 flex-wrap">
+                                                                <button
+                                                                    onClick={() => { setReprogramarModal({ item: it, pedido: pedido }); setReprogramarSemanaId(''); }}
+                                                                    className="text-[8px] font-black text-blue-600 hover:text-white hover:bg-blue-500 border border-blue-300 hover:border-blue-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                                >
+                                                                    ↻ Re-programar
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleUpdateItemEstado(it.id, 'CANCELADO')}
+                                                                    className="text-[8px] font-black text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                                >
+                                                                    ✗ Cancelar
+                                                                </button>
+                                                            </div>
                                                         )}
                                                     </div>
                                                 </td>
@@ -1228,6 +1312,62 @@ export default function MayoristaUpload() {
                                 className="flex-1 px-4 py-3 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 disabled:opacity-40 transition-all"
                             >
                                 {adjudicarLoading ? '...' : '✓ Confirmar Adjudicación'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Re-programar Recortado */}
+            {reprogramarModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 flex flex-col gap-5">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-black text-navy">Re-programar Recortado</h3>
+                            <button onClick={() => setReprogramarModal(null)} className="text-slate-400 hover:text-navy transition-colors">✕</button>
+                        </div>
+
+                        <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
+                            <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-0.5">Ítem recortado</p>
+                            <p className="font-black text-navy text-sm">{reprogramarModal.item.titulo}</p>
+                            <p className="text-[10px] text-slate-500">{reprogramarModal.item.cantidad} unid. · La editorial no pudo entregar esta unidad.</p>
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                                Re-programar para semana
+                            </label>
+                            <select
+                                value={reprogramarSemanaId}
+                                onChange={e => setReprogramarSemanaId(e.target.value)}
+                                className="w-full px-4 py-3 border-2 border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-blue-400 transition-colors"
+                            >
+                                <option value="">-- Seleccionar semana --</option>
+                                {semanas.map(s => (
+                                    <option key={s.id} value={s.id}>{s.nombre}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {reprogramarSemanaId && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 text-[10px] text-amber-700 font-bold">
+                                ↻ Se creará un nuevo pedido en <strong>{semanas.find(s => s.id === reprogramarSemanaId)?.nombre}</strong> y este ítem quedará como <strong>RECORTADO_REPEDIDO</strong>
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 pt-1">
+                            <button
+                                onClick={() => setReprogramarModal(null)}
+                                className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 font-black text-sm hover:bg-slate-50 transition-all"
+                            >
+                                Cerrar
+                            </button>
+                            <button
+                                onClick={handleReprogramarRecortado}
+                                disabled={!reprogramarSemanaId || reprogramarLoading}
+                                className="flex-1 px-4 py-3 rounded-2xl bg-amber-500 text-white font-black text-sm hover:bg-amber-600 disabled:opacity-40 transition-all"
+                            >
+                                {reprogramarLoading ? '...' : '↻ Re-programar'}
                             </button>
                         </div>
                     </div>
