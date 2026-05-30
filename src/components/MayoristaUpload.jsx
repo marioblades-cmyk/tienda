@@ -716,8 +716,7 @@ export default function MayoristaUpload() {
             let orderTotal = 0;
             let totalRecortes = 0;
 
-            // Filtrar CANCELADO: no aparece en el reporte
-            const itemsParaPDF = pedido.items.filter(it => it.estado !== 'CANCELADO');
+            const itemsParaPDF = pedido.items;
 
             const tableRows = itemsParaPDF.map(it => {
                 const prod = catalog[normalizeTitle(it.titulo)];
@@ -734,8 +733,10 @@ export default function MayoristaUpload() {
                 let displayStatus;
                 if (isRecortado) {
                     displayStatus = 'RECORTADO';
+                } else if (it.estado === 'CANCELADO') {
+                    displayStatus = 'CANCELADO';
                 } else {
-                    displayStatus = etaStr; // todos ven la misma fecha estimada del pedido
+                    displayStatus = etaStr;
                 }
 
                 return [
@@ -761,6 +762,8 @@ export default function MayoristaUpload() {
                         if (txt === 'RECORTADO') {
                             data.cell.styles.textColor = [200, 0, 0];
                             data.cell.styles.fontStyle = 'bold';
+                        } else if (txt === 'CANCELADO') {
+                            data.cell.styles.textColor = [170, 170, 170];
                         } else {
                             data.cell.styles.textColor = [30, 80, 160];
                         }
