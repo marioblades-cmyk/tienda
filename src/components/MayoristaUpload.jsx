@@ -734,10 +734,8 @@ export default function MayoristaUpload() {
                 let displayStatus;
                 if (isRecortado) {
                     displayStatus = 'RECORTADO';
-                } else if (isDespachado) {
-                    displayStatus = 'ENTREGADO';
                 } else {
-                    displayStatus = etaStr; // fecha estimada de entrega del pedido completo
+                    displayStatus = etaStr; // todos ven la misma fecha estimada del pedido
                 }
 
                 return [
@@ -763,11 +761,7 @@ export default function MayoristaUpload() {
                         if (txt === 'RECORTADO') {
                             data.cell.styles.textColor = [200, 0, 0];
                             data.cell.styles.fontStyle = 'bold';
-                        } else if (txt === 'ENTREGADO') {
-                            data.cell.styles.textColor = [0, 150, 0];
-                            data.cell.styles.fontStyle = 'bold';
                         } else {
-                            // Fecha estimada → azul navy suave
                             data.cell.styles.textColor = [30, 80, 160];
                         }
                     }
