@@ -696,16 +696,21 @@ export default function MayoristaUpload() {
                 ? new Date(semana.fecha_estimada_llegada)
                 : new Date(new Date(pedido.created_at).getTime() + (22*24*60*60*1000));
 
+            // Quitar prefijo "ENTELEQUIA " del nombre de la semana
+            const semanaNombreCorto = (semana?.nombre || 'Pedido s/n').replace(/^ENTELEQUIA\s+/i, '');
+            // Fecha ETA formateada en español
+            const etaStr = eta.toLocaleDateString('es-BO', { day: 'numeric', month: 'long', year: 'numeric' });
+
             doc.setFillColor(navy[0], navy[1], navy[2]);
             doc.rect(14, currentY, 182, 8, 'F');
             doc.setTextColor(255);
             doc.setFontSize(10);
-            doc.text(`${semana?.nombre || 'Pedido s/n'} - ${new Date(pedido.created_at).toLocaleDateString()}`, 18, currentY + 5.5);
-            
+            doc.text(`${semanaNombreCorto} - ${new Date(pedido.created_at).toLocaleDateString()}`, 18, currentY + 5.5);
+
             currentY += 12;
             doc.setTextColor(100);
             doc.setFontSize(8);
-            doc.text(`Estado: ${pedido.estado} | ETA: ${eta.toLocaleDateString()}`, 14, currentY);
+            doc.text(`Estado: ${pedido.estado} | Entrega estimada: ${etaStr}`, 14, currentY);
             currentY += 5;
 
             let orderTotal = 0;
@@ -719,17 +724,21 @@ export default function MayoristaUpload() {
                 const pBs = prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0;
                 const subtotal = pBs * it.cantidad;
                 const isRecortado = it.estado?.includes('RECORTADO');
+                const isDespachado = it.estado === 'DESPACHADO' || it.estado === 'ENTREGADO' || it.estado === 'EN TIENDA';
 
                 if (isRecortado) totalRecortes += subtotal;
                 else orderTotal += subtotal;
 
-                // Estado legible sin emojis (jsPDF no soporta emojis)
-                let displayStatus = 'PENDIENTE';
-                if (isRecortado) displayStatus = 'RECORTADO';
-                else if (it.estado === 'CANCELADO') displayStatus = 'CANCELADO';
-                else if (it.estado === 'DESPACHADO' || it.estado === 'ENTREGADO') displayStatus = 'DESPACHADO';
-                else if (it.estado === 'EN TIENDA') displayStatus = 'EN TIENDA';
-                else if ((it.estado || '').startsWith('CONFIRMADO')) displayStatus = it.estado;
+                // En la columna "Est. Llegada": todos muestran la fecha ETA del pedido
+                // excepto RECORTADO (no llega) y DESPACHADO/EN TIENDA (ya llegó)
+                let displayStatus;
+                if (isRecortado) {
+                    displayStatus = 'RECORTADO';
+                } else if (isDespachado) {
+                    displayStatus = 'ENTREGADO';
+                } else {
+                    displayStatus = etaStr; // fecha estimada de entrega del pedido completo
+                }
 
                 return [
                     it.titulo,
@@ -742,11 +751,11 @@ export default function MayoristaUpload() {
 
             autoTable(doc, {
                 startY: currentY,
-                head: [['Título', 'Cant', 'Precio Bs', 'Subtotal', 'Estado']],
+                head: [['Título', 'Cant', 'Precio Bs', 'Subtotal', 'Est. Llegada']],
                 body: tableRows,
                 headStyles: { fillColor: navy },
                 columnStyles: {
-                    4: { cellWidth: 38 } // Estado column más ancho para texto CONFIRMADO largo
+                    4: { cellWidth: 42 } // columna de fecha más ancha
                 },
                 didParseCell: (data) => {
                     if (data.section === 'body' && data.column.index === 4) {
@@ -754,9 +763,12 @@ export default function MayoristaUpload() {
                         if (txt === 'RECORTADO') {
                             data.cell.styles.textColor = [200, 0, 0];
                             data.cell.styles.fontStyle = 'bold';
-                        } else if ((txt || '').startsWith('CONFIRMADO')) {
-                            data.cell.styles.textColor = [30, 100, 200];
+                        } else if (txt === 'ENTREGADO') {
+                            data.cell.styles.textColor = [0, 150, 0];
                             data.cell.styles.fontStyle = 'bold';
+                        } else {
+                            // Fecha estimada → azul navy suave
+                            data.cell.styles.textColor = [30, 80, 160];
                         }
                     }
                 },
