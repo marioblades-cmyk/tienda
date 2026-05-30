@@ -711,7 +711,10 @@ export default function MayoristaUpload() {
             let orderTotal = 0;
             let totalRecortes = 0;
 
-            const tableRows = pedido.items.map(it => {
+            // Filtrar CANCELADO: no aparece en el reporte
+            const itemsParaPDF = pedido.items.filter(it => it.estado !== 'CANCELADO');
+
+            const tableRows = itemsParaPDF.map(it => {
                 const prod = catalog[normalizeTitle(it.titulo)];
                 const pBs = prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0;
                 const subtotal = pBs * it.cantidad;
@@ -720,9 +723,13 @@ export default function MayoristaUpload() {
                 if (isRecortado) totalRecortes += subtotal;
                 else orderTotal += subtotal;
 
+                // Estado legible sin emojis (jsPDF no soporta emojis)
                 let displayStatus = 'PENDIENTE';
-                if (isRecortado) displayStatus = '❌ RECORTADO';
-                else if (it.estado === 'DESPACHADO') displayStatus = '✅ DESPACHADO';
+                if (isRecortado) displayStatus = 'RECORTADO';
+                else if (it.estado === 'CANCELADO') displayStatus = 'CANCELADO';
+                else if (it.estado === 'DESPACHADO' || it.estado === 'ENTREGADO') displayStatus = 'DESPACHADO';
+                else if (it.estado === 'EN TIENDA') displayStatus = 'EN TIENDA';
+                else if ((it.estado || '').startsWith('CONFIRMADO')) displayStatus = it.estado;
 
                 return [
                     it.titulo,
@@ -738,6 +745,21 @@ export default function MayoristaUpload() {
                 head: [['Título', 'Cant', 'Precio Bs', 'Subtotal', 'Estado']],
                 body: tableRows,
                 headStyles: { fillColor: navy },
+                columnStyles: {
+                    4: { cellWidth: 38 } // Estado column más ancho para texto CONFIRMADO largo
+                },
+                didParseCell: (data) => {
+                    if (data.section === 'body' && data.column.index === 4) {
+                        const txt = data.cell.raw;
+                        if (txt === 'RECORTADO') {
+                            data.cell.styles.textColor = [200, 0, 0];
+                            data.cell.styles.fontStyle = 'bold';
+                        } else if ((txt || '').startsWith('CONFIRMADO')) {
+                            data.cell.styles.textColor = [30, 100, 200];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                    }
+                },
                 styles: { fontSize: 7 },
                 margin: { left: 14, right: 14 },
                 theme: 'striped'
@@ -746,13 +768,13 @@ export default function MayoristaUpload() {
             currentY = doc.lastAutoTable.finalY + 5;
             doc.setFontSize(9);
             doc.setTextColor(navy[0], navy[1], navy[2]);
-            doc.text(`Total Pedido: Bs ${orderTotal.toLocaleString()}`, 196, currentY, { align: "right" });
-            
+            doc.text(`Total a cobrar: Bs ${orderTotal.toLocaleString()}`, 196, currentY, { align: "right" });
+
             if (totalRecortes > 0) {
                 currentY += 4;
                 doc.setFontSize(7);
-                doc.setTextColor(200, 0, 0);
-                doc.text(`(-Bs ${totalRecortes.toLocaleString()} en recortes)`, 196, currentY, { align: "right" });
+                doc.setTextColor(150, 0, 0);
+                doc.text(`(+ Bs ${totalRecortes.toLocaleString()} recortados por Entelequia — no se cobran)`, 196, currentY, { align: "right" });
             }
             currentY += 15;
         });
