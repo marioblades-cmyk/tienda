@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useDropzone } from 'react-dropzone';
 import * as xlsx from 'xlsx';
-import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2, Edit2, Check, RefreshCw } from 'lucide-react';
+import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2, Edit2, Check, RefreshCw, TrendingUp, DollarSign } from 'lucide-react';
 
 export default function AdminMasterView() {
     const [semanas, setSemanas] = useState([]);
@@ -19,6 +19,12 @@ export default function AdminMasterView() {
     // Preview Data
     const [previewData, setPreviewData] = useState(null);
     const [existingMaster, setExistingMaster] = useState(null);
+
+    // Repricing
+    const [showRepricing, setShowRepricing] = useState(false);
+    const [repricingPreview, setRepricingPreview] = useState(null); // [{titulo, precio_viejo, precio_nuevo, diff, items_afectados}]
+    const [repricingProcessing, setRepricingProcessing] = useState(false);
+    const [repricingSuccess, setRepricingSuccess] = useState('');
 
     useEffect(() => {
         fetchSemanas();
@@ -548,6 +554,171 @@ export default function AdminMasterView() {
         }
     };
 
+    // ── REPRICING: leer nuevo Excel y comparar precios ────────────────────────
+    const processRepricingExcel = useCallback((file) => {
+        setRepricingProcessing(true);
+        setRepricingPreview(null);
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const wb = xlsx.read(e.target.result, { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+                // Detectar columnas (misma lógica que processExcel)
+                let colTitulo = 0, colPrecio = 1;
+                for (let i = 0; i < Math.min(rows.length, 15); i++) {
+                    const r = rows[i];
+                    if (!r || r.length === 0) continue;
+                    const rn = Array.from({ length: r.length }, (_, k) => {
+                        const v = r[k];
+                        return (v == null ? '' : String(v)).trim().toLowerCase().replace(/\s+/g, ' ');
+                    });
+                    const iTitulo = rn.findIndex(c => c.includes('titulo') || c.includes('título'));
+                    const iPrecio = rn.findIndex(c => c === 'precio' || c.startsWith('precio '));
+                    if (iTitulo !== -1 && iPrecio !== -1) { colTitulo = iTitulo; colPrecio = iPrecio; break; }
+                }
+
+                // Extraer títulos + nuevos precios del Excel
+                const nuevosPrecios = {};
+                for (const r of rows) {
+                    if (!r || !r[colTitulo]) continue;
+                    const titulo = String(r[colTitulo]).trim();
+                    const precio = parseFloat(r[colPrecio]);
+                    if (titulo && !isNaN(precio) && precio > 0 && precio < 10_000_000) {
+                        // Normalizar título para matching
+                        const key = titulo.toUpperCase().trim();
+                        nuevosPrecios[key] = precio;
+                    }
+                }
+
+                if (Object.keys(nuevosPrecios).length === 0) {
+                    setError('No se encontraron precios válidos en el Excel.');
+                    setRepricingProcessing(false);
+                    return;
+                }
+
+                // Buscar todos los pedido_items de la semana seleccionada
+                const { data: pedidosData } = await supabase
+                    .from('pedidos')
+                    .select('id')
+                    .eq('semana_id', selectedSemana)
+                    .eq('tipo', 'mayorista');
+
+                const pedidoIds = (pedidosData || []).map(p => p.id);
+
+                const { data: mayoristaItems } = pedidoIds.length > 0
+                    ? await supabase.from('pedido_items')
+                        .select('id, titulo, precio, estado')
+                        .in('pedido_id', pedidoIds)
+                        .not('estado', 'in', '("CANCELADO","EN TIENDA","ENTREGADO","DESPACHADO")')
+                    : { data: [] };
+
+                const { data: clienteItems } = await supabase
+                    .from('cliente_items')
+                    .select('id, titulo, precio_venta, estado')
+                    .eq('semana_id', selectedSemana)
+                    .not('estado', 'in', '("CANCELADO","EN TIENDA","ENTREGADO","ADJUDICADO")');
+
+                // Cruzar con nuevos precios
+                const cambios = {};
+                const normalizar = (t) => (t || '').toUpperCase().trim().replace(/\s+/g, ' ');
+
+                for (const it of [...(mayoristaItems || []), ...(clienteItems || [])]) {
+                    const key = normalizar(it.titulo);
+                    const precioViejo = it.precio || it.precio_venta || 0;
+                    const precioNuevo = nuevosPrecios[key];
+                    if (!precioNuevo) continue;
+
+                    // Solo incluir si el precio cambió
+                    if (Math.abs(precioNuevo - precioViejo) > 0.01) {
+                        if (!cambios[key]) {
+                            cambios[key] = {
+                                titulo: it.titulo,
+                                precio_viejo: precioViejo,
+                                precio_nuevo: precioNuevo,
+                                diff: precioNuevo - precioViejo,
+                                items_mayorista: [],
+                                items_cliente: [],
+                            };
+                        }
+                        if (it.precio !== undefined) cambios[key].items_mayorista.push(it.id);
+                        else cambios[key].items_cliente.push(it.id);
+                    }
+                }
+
+                // Títulos sin cambio de precio
+                const sinCambio = [...(mayoristaItems || []), ...(clienteItems || [])]
+                    .filter(it => {
+                        const key = normalizar(it.titulo);
+                        return nuevosPrecios[key] && !cambios[key];
+                    }).length;
+
+                setRepricingPreview({ cambios: Object.values(cambios), sinCambio, totalNuevosPrecios: Object.keys(nuevosPrecios).length });
+            } catch (err) {
+                setError('Error al procesar Excel de repricing: ' + err.message);
+            } finally {
+                setRepricingProcessing(false);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }, [selectedSemana]);
+
+    const { getRootProps: getRepricingProps, getInputProps: getRepricingInput, isDragActive: isRepricingDrag } = useDropzone({
+        onDrop: (files) => files[0] && processRepricingExcel(files[0]),
+        accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] },
+        multiple: false,
+    });
+
+    // ── REPRICING: aplicar cambios de precios en BD ───────────────────────────
+    const handleConfirmRepricing = async () => {
+        if (!repricingPreview || repricingPreview.cambios.length === 0) return;
+        if (!confirm(`¿Confirmar repricing? Se actualizarán precios en ${repricingPreview.cambios.length} título(s) y todos quedarán en estado RECOTIZAR.`)) return;
+        setRepricingProcessing(true);
+        setRepricingSuccess('');
+        try {
+            let totalActualizados = 0;
+
+            for (const cambio of repricingPreview.cambios) {
+                // Actualizar pedido_items (mayoristas)
+                if (cambio.items_mayorista.length > 0) {
+                    await supabase.from('pedido_items')
+                        .update({
+                            precio_original: cambio.precio_viejo,
+                            precio: cambio.precio_nuevo,
+                            estado: 'RECOTIZAR',
+                        })
+                        .in('id', cambio.items_mayorista);
+                    totalActualizados += cambio.items_mayorista.length;
+                }
+                // Actualizar cliente_items (retail)
+                if (cambio.items_cliente.length > 0) {
+                    await supabase.from('cliente_items')
+                        .update({
+                            precio_original: cambio.precio_viejo,
+                            precio_venta: cambio.precio_nuevo,
+                            estado: 'RECOTIZAR',
+                        })
+                        .in('id', cambio.items_cliente);
+                    totalActualizados += cambio.items_cliente.length;
+                }
+            }
+
+            // Marcar la semana como en repricing
+            await supabase.from('semanas')
+                .update({ en_reprecio: true })
+                .eq('id', selectedSemana);
+
+            setRepricingSuccess(`✓ Repricing aplicado: ${repricingPreview.cambios.length} títulos, ${totalActualizados} ítems actualizados a RECOTIZAR.`);
+            setRepricingPreview(null);
+            fetchSemanas();
+        } catch (err) {
+            setError('Error al aplicar repricing: ' + err.message);
+        } finally {
+            setRepricingProcessing(false);
+        }
+    };
+
     if (loading) return <div className="p-8 text-center animate-pulse"><Loader2 size={24} className="mx-auto animate-spin mb-4" /> Cargando...</div>;
 
     return (
@@ -692,6 +863,144 @@ export default function AdminMasterView() {
                             </tbody>
                         </table>
                     </div>
+                </div>
+            )}
+
+            {/* ── SECCIÓN REPRICING ─────────────────────────────────────── */}
+            {selectedSemana && (
+                <div className="border-2 border-dashed border-orange-300 rounded-3xl overflow-hidden">
+                    <button
+                        onClick={() => { setShowRepricing(v => !v); setRepricingPreview(null); setRepricingSuccess(''); }}
+                        className="w-full flex items-center justify-between px-8 py-5 bg-orange-50 hover:bg-orange-100 transition-colors"
+                    >
+                        <div className="flex items-center gap-3">
+                            <TrendingUp size={20} className="text-orange-500" />
+                            <div className="text-left">
+                                <p className="font-black text-orange-700 text-sm uppercase tracking-wide">Actualización de Precios (Repricing)</p>
+                                <p className="text-[10px] text-orange-500 mt-0.5">La editorial canceló el pedido y cambió precios — subí el nuevo Excel</p>
+                            </div>
+                        </div>
+                        <span className="text-orange-400 font-black text-lg">{showRepricing ? '▲' : '▼'}</span>
+                    </button>
+
+                    {showRepricing && (
+                        <div className="p-8 space-y-6 bg-white">
+                            {/* Alerta informativa */}
+                            <div className="bg-orange-50 border border-orange-200 rounded-2xl px-5 py-4 text-sm text-orange-700">
+                                <p className="font-black mb-1">¿Qué hace esto?</p>
+                                <ul className="text-[11px] space-y-1 list-disc list-inside text-orange-600">
+                                    <li>Compara los nuevos precios del Excel contra los precios actuales de esa semana</li>
+                                    <li>Solo modifica ítems de <strong>la semana seleccionada</strong> — el resto no se toca</li>
+                                    <li>Cambia estado a <strong>RECOTIZAR</strong> para que veas quién debe decidir</li>
+                                    <li>Guarda el precio original para referencia</li>
+                                </ul>
+                            </div>
+
+                            {repricingSuccess && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-3 text-emerald-700 font-bold text-sm">
+                                    {repricingSuccess}
+                                </div>
+                            )}
+
+                            {/* Dropzone repricing */}
+                            {!repricingPreview && (
+                                <div
+                                    {...getRepricingProps()}
+                                    className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${isRepricingDrag ? 'border-orange-400 bg-orange-50' : 'border-orange-200 hover:border-orange-400 hover:bg-orange-50/50'}`}
+                                >
+                                    <input {...getRepricingInput()} />
+                                    {repricingProcessing ? (
+                                        <div className="flex flex-col items-center gap-3">
+                                            <Loader2 size={32} className="text-orange-400 animate-spin" />
+                                            <p className="text-orange-500 font-bold text-sm">Comparando precios...</p>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center gap-3">
+                                            <DollarSign size={32} className="text-orange-300" />
+                                            <p className="font-black text-orange-500 text-sm">Arrastrá el nuevo Excel de precios aquí</p>
+                                            <p className="text-[10px] text-slate-400">Mismo formato Entelequia — solo se leen Título y Precio</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Preview de cambios */}
+                            {repricingPreview && (
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="font-black text-navy text-sm">
+                                                {repricingPreview.cambios.length} título(s) con cambio de precio
+                                            </p>
+                                            <p className="text-[10px] text-slate-400 mt-0.5">
+                                                {repricingPreview.sinCambio} sin cambio · {repricingPreview.totalNuevosPrecios} encontrados en el Excel
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => setRepricingPreview(null)}
+                                            className="text-slate-400 hover:text-navy transition-colors"
+                                        ><X size={18} /></button>
+                                    </div>
+
+                                    {repricingPreview.cambios.length === 0 ? (
+                                        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4 text-emerald-700 font-bold text-sm text-center">
+                                            ✓ No hay cambios de precio — todos los títulos tienen el mismo precio
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="rounded-2xl border border-orange-200 overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                    <thead className="bg-orange-50">
+                                                        <tr className="text-[9px] font-black text-orange-500 uppercase tracking-widest">
+                                                            <th className="px-4 py-3 text-left">Título</th>
+                                                            <th className="px-4 py-3 text-right">Precio viejo</th>
+                                                            <th className="px-4 py-3 text-right">Precio nuevo</th>
+                                                            <th className="px-4 py-3 text-right">Diferencia</th>
+                                                            <th className="px-4 py-3 text-center">Ítems afectados</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-orange-100">
+                                                        {repricingPreview.cambios.map((c, i) => (
+                                                            <tr key={i} className="hover:bg-orange-50/50">
+                                                                <td className="px-4 py-3 font-bold text-navy">{c.titulo}</td>
+                                                                <td className="px-4 py-3 text-right text-slate-400 line-through">Bs {c.precio_viejo.toFixed(2)}</td>
+                                                                <td className="px-4 py-3 text-right font-black text-navy">Bs {c.precio_nuevo.toFixed(2)}</td>
+                                                                <td className={`px-4 py-3 text-right font-black ${c.diff > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                                                                    {c.diff > 0 ? '+' : ''}Bs {c.diff.toFixed(2)}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center text-slate-500">
+                                                                    {c.items_mayorista.length + c.items_cliente.length} ítem(s)
+                                                                    {c.items_mayorista.length > 0 && <span className="ml-1 text-[8px] text-blue-400">({c.items_mayorista.length} may.)</span>}
+                                                                    {c.items_cliente.length > 0 && <span className="ml-1 text-[8px] text-purple-400">({c.items_cliente.length} cli.)</span>}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <div className="flex gap-3">
+                                                <button
+                                                    onClick={() => setRepricingPreview(null)}
+                                                    className="flex-1 px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 font-black text-sm hover:bg-slate-50 transition-all"
+                                                >Cancelar</button>
+                                                <button
+                                                    onClick={handleConfirmRepricing}
+                                                    disabled={repricingProcessing}
+                                                    className="flex-1 px-4 py-3 rounded-2xl bg-orange-500 text-white font-black text-sm hover:bg-orange-600 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+                                                >
+                                                    {repricingProcessing
+                                                        ? <><Loader2 size={16} className="animate-spin" /> Aplicando...</>
+                                                        : <><TrendingUp size={16} /> Confirmar Repricing</>
+                                                    }
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
