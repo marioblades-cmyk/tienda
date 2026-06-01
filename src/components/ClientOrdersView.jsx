@@ -541,7 +541,7 @@ export default function ClientOrdersView() {
                         onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
                         className={`px-2 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-bold tracking-wide cursor-pointer border transition-colors whitespace-nowrap ${
                             it.estado === 'POR CONFIRMAR' ? 'bg-orange-500/20 border-orange-500 text-orange-400 animate-pulse font-black' :
-
+                            it.estado === 'RECOTIZAR' ? 'bg-amber-100 border-amber-400 text-amber-700 animate-pulse font-black' :
                             it.estado === 'DAÑADO' ? 'bg-orange-500/10 border-orange-500/30 text-orange-500' :
                             it.estado === 'RECORTADO' ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse' :
                             it.estado === 'ENTREGADO' ? 'bg-background/50 border-border text-muted' :
@@ -581,7 +581,37 @@ export default function ClientOrdersView() {
                         RE-PROGRAMAR
                     </button>
                 )}
-                {!compact && dateStr && it.estado !== 'RECORTADO' && <span className="text-[9px] text-muted font-bold italic tracking-tight whitespace-nowrap opacity-80">Est. ~{dateStr}</span>}
+                {!compact && it.estado === 'RECOTIZAR' && (
+                    <div className="mt-1 flex flex-col items-center gap-1">
+                        {it.precio_original > 0 && (
+                            <span className="text-[8px] text-center">
+                                <span className="text-slate-400 line-through">Bs {Number(it.precio_original).toFixed(2)}</span>
+                                <span className="text-amber-600 font-black ml-1">→ Bs {Number(it.precio_venta).toFixed(2)}</span>
+                                <span className="text-red-500 font-black ml-1">(+Bs {(Number(it.precio_venta) - Number(it.precio_original)).toFixed(2)})</span>
+                            </span>
+                        )}
+                        <div className="flex gap-1">
+                            <button
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await supabase.from('cliente_items').update({ estado: 'PEDIDO (Siguiente)' }).eq('id', it.id);
+                                    window.location.reload();
+                                }}
+                                className="text-[8px] font-black text-emerald-600 hover:text-white hover:bg-emerald-500 border border-emerald-300 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                            >✓ Acepta → Próx. Pedido</button>
+                            <button
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm(`¿Cancelar "${it.titulo}"?`)) return;
+                                    await supabase.from('cliente_items').update({ estado: 'CANCELADO' }).eq('id', it.id);
+                                    window.location.reload();
+                                }}
+                                className="text-[8px] font-black text-red-500 hover:text-white hover:bg-red-500 border border-red-200 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                            >✗ Cancela</button>
+                        </div>
+                    </div>
+                )}
+                {!compact && dateStr && it.estado !== 'RECORTADO' && it.estado !== 'RECOTIZAR' && <span className="text-[9px] text-muted font-bold italic tracking-tight whitespace-nowrap opacity-80">Est. ~{dateStr}</span>}
             </div>
         );
     };

@@ -160,7 +160,7 @@ export default function MayoristaUpload() {
                 .select(`
                     *,
                     semana:semanas(nombre),
-                    items:pedido_items(id, titulo, cantidad, precio, fuente, catalog_id, estado)
+                    items:pedido_items(id, titulo, cantidad, precio, precio_original, fuente, catalog_id, estado)
                 `)
                 .eq('vendedor_id', selectedVendedor)
                 .eq('tipo', 'mayorista')
@@ -645,6 +645,51 @@ export default function MayoristaUpload() {
         }
     };
 
+    // ── RECOTIZAR: cliente acepta nuevo precio → pasa a Próximo Pedido ────────
+    const handleAceptarRecotizar = async (itemId) => {
+        try {
+            await supabase.from('pedido_items')
+                .update({ estado: 'PEDIDO (Siguiente)' })
+                .eq('id', itemId);
+            fetchAccountData();
+        } catch (err) {
+            alert('Error: ' + err.message);
+        }
+    };
+
+    // ── RECOTIZAR: cliente cancela → CANCELADO + devolucion si corresponde ───
+    const handleCancelarRecotizar = async (item, pedido) => {
+        if (!confirm(`¿Confirmar cancelación de "${item.titulo}"?`)) return;
+        try {
+            await supabase.from('pedido_items')
+                .update({ estado: 'CANCELADO' })
+                .eq('id', item.id);
+
+            // Calcular si hay saldo a favor después de cancelar
+            const precioCancelado = item.precio || 0;
+            const nuevaDeuda = balance.totalDeuda - precioCancelado * item.cantidad;
+            const saldoAFavor = balance.totalPagado - nuevaDeuda;
+
+            if (saldoAFavor > 0.5) {
+                // Registrar devolución pendiente
+                await supabase.from('devoluciones').insert({
+                    tipo: 'mayorista',
+                    vendedor_id: pedido.vendedor_id,
+                    semana_id: pedido.semana_id,
+                    monto: Math.round(saldoAFavor * 100) / 100,
+                    motivo: 'repricing',
+                    estado: 'PENDIENTE',
+                    notas: `Cancelación por repricing — ${item.titulo} (${item.cantidad} ud${item.cantidad > 1 ? 's' : ''})`,
+                });
+                alert(`Ítem cancelado. Se registró una devolución pendiente de Bs ${saldoAFavor.toFixed(2)}.`);
+            }
+
+            fetchAccountData();
+        } catch (err) {
+            alert('Error: ' + err.message);
+        }
+    };
+
     const generatePDF = () => {
         const storeName = vendedores.find(v => v.id === selectedVendedor)?.nombre || 'Socio Mayorista';
         const doc = new jsPDF();
@@ -1096,6 +1141,33 @@ export default function MayoristaUpload() {
                     {/* TAB 3: HISTORIAL */}
                     {activeTab === 'historial' && (
                         <div className="space-y-4">
+                            {/* Banner de alerta si hay ítems RECOTIZAR */}
+                            {(() => {
+                                const recotizarItems = pedidosWholesale.flatMap(p =>
+                                    p.items.filter(it => it.estado === 'RECOTIZAR').map(it => ({ ...it, pedidoNombre: p.semana?.nombre }))
+                                );
+                                if (recotizarItems.length === 0) return null;
+                                return (
+                                    <div className="bg-amber-50 border-2 border-amber-400 rounded-2xl px-6 py-4 flex items-start gap-4">
+                                        <span className="text-2xl mt-0.5">⚠️</span>
+                                        <div className="flex-1">
+                                            <p className="font-black text-amber-700 text-sm uppercase tracking-wide">
+                                                {recotizarItems.length} ítem{recotizarItems.length > 1 ? 's' : ''} esperando decisión por cambio de precio
+                                            </p>
+                                            <p className="text-[11px] text-amber-600 mt-1">
+                                                La editorial canceló el pedido. Expandí el pedido para ver los precios nuevos y registrar la decisión del cliente.
+                                            </p>
+                                            <div className="mt-2 flex flex-wrap gap-1">
+                                                {recotizarItems.map(it => (
+                                                    <span key={it.id} className="text-[9px] bg-amber-100 border border-amber-300 text-amber-700 font-bold px-2 py-0.5 rounded-full">
+                                                        {it.titulo}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                             <div className="flex justify-end mb-4">
                                 <button 
                                     onClick={generatePDF}
@@ -1166,6 +1238,8 @@ export default function MayoristaUpload() {
                                                                             badgeClass = 'bg-orange-500/10 border border-orange-500/30 text-orange-500 shadow-sm shadow-orange-500/10';
                                                                         } else if (est === 'CANCELADO') {
                                                                             badgeClass = 'bg-slate-200/80 border-slate-300 text-slate-400 line-through';
+                                                                        } else if (est === 'RECOTIZAR') {
+                                                                            badgeClass = 'bg-amber-100 border-amber-400 text-amber-700 animate-pulse font-black';
                                                                         } else if (est === 'RECORTADO') {
                                                                             badgeClass = 'bg-red-500/10 border-red-500/30 text-red-500 animate-pulse';
                                                                         } else if (est.startsWith('RECORTADO_REPEDIDO')) {
@@ -1211,6 +1285,28 @@ export default function MayoristaUpload() {
                                                             >
                                                                 📋 Adjudicar semana
                                                             </button>
+                                                        )}
+                                                        {/* Botones para ítems RECOTIZAR: acepta nuevo precio o cancela */}
+                                                        {it.fuente !== 'stock' && it.estado === 'RECOTIZAR' && (
+                                                            <div className="flex flex-col gap-1 items-end">
+                                                                {it.precio_original && (
+                                                                    <div className="text-[8px] text-right leading-tight">
+                                                                        <span className="text-slate-400 line-through">Bs {it.precio_original.toFixed(2)}</span>
+                                                                        <span className="text-amber-600 font-black ml-1">→ Bs {(it.precio || 0).toFixed(2)}</span>
+                                                                        <span className="text-red-500 font-black ml-1">(+Bs {((it.precio || 0) - it.precio_original).toFixed(2)})</span>
+                                                                    </div>
+                                                                )}
+                                                                <div className="flex gap-1">
+                                                                    <button
+                                                                        onClick={() => handleAceptarRecotizar(it.id)}
+                                                                        className="text-[8px] font-black text-emerald-600 hover:text-white hover:bg-emerald-500 border border-emerald-300 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                                    >✓ Acepta → Próx. Pedido</button>
+                                                                    <button
+                                                                        onClick={() => handleCancelarRecotizar(it, pedido)}
+                                                                        className="text-[8px] font-black text-red-500 hover:text-white hover:bg-red-500 border border-red-200 px-2 py-0.5 rounded transition-all whitespace-nowrap"
+                                                                    >✗ Cancela</button>
+                                                                </div>
+                                                            </div>
                                                         )}
                                                         {/* Botón para cancelar parcialmente ítems CONFIRMADO */}
                                                         {it.fuente !== 'stock' && (it.estado || '').startsWith('CONFIRMADO') && it.cantidad > 0 && (
