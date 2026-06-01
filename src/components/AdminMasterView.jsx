@@ -554,121 +554,100 @@ export default function AdminMasterView() {
         }
     };
 
-    // ── REPRICING: leer nuevo Excel y comparar precios ────────────────────────
-    const processRepricingExcel = useCallback((file) => {
+    // ── REPRICING: leer precios actualizados del catálogo y comparar ─────────
+    const loadRepricingFromCatalog = async () => {
+        if (!selectedSemana) return;
         setRepricingProcessing(true);
         setRepricingPreview(null);
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                const wb = xlsx.read(e.target.result, { type: 'array' });
-                const ws = wb.Sheets[wb.SheetNames[0]];
-                const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: null });
+        setError('');
+        try {
+            // 1. Pedido_items mayoristas de esta semana (no terminales)
+            const { data: pedidosData } = await supabase
+                .from('pedidos').select('id, vendedor_id')
+                .eq('semana_id', selectedSemana).eq('tipo', 'mayorista');
+            const pedidoIds = (pedidosData || []).map(p => p.id);
 
-                // Detectar columnas (misma lógica que processExcel)
-                let colTitulo = 0, colPrecio = 1;
-                for (let i = 0; i < Math.min(rows.length, 15); i++) {
-                    const r = rows[i];
-                    if (!r || r.length === 0) continue;
-                    const rn = Array.from({ length: r.length }, (_, k) => {
-                        const v = r[k];
-                        return (v == null ? '' : String(v)).trim().toLowerCase().replace(/\s+/g, ' ');
-                    });
-                    const iTitulo = rn.findIndex(c => c.includes('titulo') || c.includes('título'));
-                    const iPrecio = rn.findIndex(c => c === 'precio' || c.startsWith('precio '));
-                    if (iTitulo !== -1 && iPrecio !== -1) { colTitulo = iTitulo; colPrecio = iPrecio; break; }
-                }
+            const { data: mayoristaItems } = pedidoIds.length > 0
+                ? await supabase.from('pedido_items')
+                    .select('id, titulo, precio, catalog_id, estado')
+                    .in('pedido_id', pedidoIds)
+                    .not('estado', 'in', '("CANCELADO","EN TIENDA","ENTREGADO","DESPACHADO")')
+                : { data: [] };
 
-                // Extraer títulos + nuevos precios del Excel
-                const nuevosPrecios = {};
-                for (const r of rows) {
-                    if (!r || !r[colTitulo]) continue;
-                    const titulo = String(r[colTitulo]).trim();
-                    const precio = parseFloat(r[colPrecio]);
-                    if (titulo && !isNaN(precio) && precio > 0 && precio < 10_000_000) {
-                        // Normalizar título para matching
-                        const key = titulo.toUpperCase().trim();
-                        nuevosPrecios[key] = precio;
-                    }
-                }
+            // 2. Cliente_items de esta semana (no terminales)
+            const { data: clienteItems } = await supabase
+                .from('cliente_items')
+                .select('id, titulo, precio_venta, catalog_id, estado')
+                .eq('semana_id', selectedSemana)
+                .not('estado', 'in', '("CANCELADO","EN TIENDA","ENTREGADO","ADJUDICADO")');
 
-                if (Object.keys(nuevosPrecios).length === 0) {
-                    setError('No se encontraron precios válidos en el Excel.');
-                    setRepricingProcessing(false);
-                    return;
-                }
+            const todosLosItems = [
+                ...(mayoristaItems || []).map(it => ({ ...it, _tipo: 'mayorista', _precioActual: it.precio })),
+                ...(clienteItems || []).map(it => ({ ...it, _tipo: 'cliente', _precioActual: it.precio_venta })),
+            ];
 
-                // Buscar todos los pedido_items de la semana seleccionada
-                const { data: pedidosData } = await supabase
-                    .from('pedidos')
-                    .select('id')
-                    .eq('semana_id', selectedSemana)
-                    .eq('tipo', 'mayorista');
-
-                const pedidoIds = (pedidosData || []).map(p => p.id);
-
-                const { data: mayoristaItems } = pedidoIds.length > 0
-                    ? await supabase.from('pedido_items')
-                        .select('id, titulo, precio, estado')
-                        .in('pedido_id', pedidoIds)
-                        .not('estado', 'in', '("CANCELADO","EN TIENDA","ENTREGADO","DESPACHADO")')
-                    : { data: [] };
-
-                const { data: clienteItems } = await supabase
-                    .from('cliente_items')
-                    .select('id, titulo, precio_venta, estado')
-                    .eq('semana_id', selectedSemana)
-                    .not('estado', 'in', '("CANCELADO","EN TIENDA","ENTREGADO","ADJUDICADO")');
-
-                // Cruzar con nuevos precios
-                const cambios = {};
-                const normalizar = (t) => (t || '').toUpperCase().trim().replace(/\s+/g, ' ');
-
-                for (const it of [...(mayoristaItems || []), ...(clienteItems || [])]) {
-                    const key = normalizar(it.titulo);
-                    const precioViejo = it.precio || it.precio_venta || 0;
-                    const precioNuevo = nuevosPrecios[key];
-                    if (!precioNuevo) continue;
-
-                    // Solo incluir si el precio cambió
-                    if (Math.abs(precioNuevo - precioViejo) > 0.01) {
-                        if (!cambios[key]) {
-                            cambios[key] = {
-                                titulo: it.titulo,
-                                precio_viejo: precioViejo,
-                                precio_nuevo: precioNuevo,
-                                diff: precioNuevo - precioViejo,
-                                items_mayorista: [],
-                                items_cliente: [],
-                            };
-                        }
-                        if (it.precio !== undefined) cambios[key].items_mayorista.push(it.id);
-                        else cambios[key].items_cliente.push(it.id);
-                    }
-                }
-
-                // Títulos sin cambio de precio
-                const sinCambio = [...(mayoristaItems || []), ...(clienteItems || [])]
-                    .filter(it => {
-                        const key = normalizar(it.titulo);
-                        return nuevosPrecios[key] && !cambios[key];
-                    }).length;
-
-                setRepricingPreview({ cambios: Object.values(cambios), sinCambio, totalNuevosPrecios: Object.keys(nuevosPrecios).length });
-            } catch (err) {
-                setError('Error al procesar Excel de repricing: ' + err.message);
-            } finally {
+            if (todosLosItems.length === 0) {
+                setError('No hay ítems activos en esta semana para recotizar.');
                 setRepricingProcessing(false);
+                return;
             }
-        };
-        reader.readAsArrayBuffer(file);
-    }, [selectedSemana]);
 
-    const { getRootProps: getRepricingProps, getInputProps: getRepricingInput, isDragActive: isRepricingDrag } = useDropzone({
-        onDrop: (files) => files[0] && processRepricingExcel(files[0]),
-        accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] },
-        multiple: false,
-    });
+            // 3. Cargar precios actuales del catálogo para esos catalog_ids
+            const catalogIds = [...new Set(todosLosItems.map(it => it.catalog_id).filter(Boolean))];
+            const { data: catalogData } = catalogIds.length > 0
+                ? await supabase.from('catalogo_productos')
+                    .select('id, titulo, precio_venta_bs, precio_mayoreo_bs')
+                    .in('id', catalogIds)
+                : { data: [] };
+
+            const catalogMap = {};
+            (catalogData || []).forEach(c => { catalogMap[c.id] = c; });
+
+            // 4. Comparar precio actual del ítem vs precio actualizado del catálogo
+            const cambios = {};
+            const normalizar = (t) => (t || '').toUpperCase().trim().replace(/\s+/g, ' ');
+
+            let sinCambio = 0, sinCatalogo = 0;
+
+            for (const it of todosLosItems) {
+                const cat = catalogMap[it.catalog_id];
+                if (!cat) { sinCatalogo++; continue; }
+
+                const precioViejo = parseFloat(it._precioActual) || 0;
+                // Mayorista usa precio_mayoreo_bs, cliente usa precio_venta_bs
+                const precioNuevo = it._tipo === 'mayorista'
+                    ? parseFloat(cat.precio_mayoreo_bs) || 0
+                    : parseFloat(cat.precio_venta_bs) || 0;
+
+                if (Math.abs(precioNuevo - precioViejo) <= 0.01) { sinCambio++; continue; }
+
+                const key = normalizar(it.titulo);
+                if (!cambios[key]) {
+                    cambios[key] = {
+                        titulo: it.titulo,
+                        precio_viejo: precioViejo,
+                        precio_nuevo: precioNuevo,
+                        diff: precioNuevo - precioViejo,
+                        items_mayorista: [],
+                        items_cliente: [],
+                    };
+                }
+                if (it._tipo === 'mayorista') cambios[key].items_mayorista.push(it.id);
+                else cambios[key].items_cliente.push(it.id);
+            }
+
+            setRepricingPreview({
+                cambios: Object.values(cambios),
+                sinCambio,
+                sinCatalogo,
+                totalItems: todosLosItems.length,
+            });
+        } catch (err) {
+            setError('Error al leer catálogo: ' + err.message);
+        } finally {
+            setRepricingProcessing(false);
+        }
+    };
 
     // ── REPRICING: aplicar cambios de precios en BD ───────────────────────────
     const handleConfirmRepricing = async () => {
@@ -902,25 +881,25 @@ export default function AdminMasterView() {
                                 </div>
                             )}
 
-                            {/* Dropzone repricing */}
+                            {/* Botón para leer precios del catálogo */}
                             {!repricingPreview && (
-                                <div
-                                    {...getRepricingProps()}
-                                    className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${isRepricingDrag ? 'border-orange-400 bg-orange-50' : 'border-orange-200 hover:border-orange-400 hover:bg-orange-50/50'}`}
-                                >
-                                    <input {...getRepricingInput()} />
-                                    {repricingProcessing ? (
-                                        <div className="flex flex-col items-center gap-3">
-                                            <Loader2 size={32} className="text-orange-400 animate-spin" />
-                                            <p className="text-orange-500 font-bold text-sm">Comparando precios...</p>
-                                        </div>
-                                    ) : (
-                                        <div className="flex flex-col items-center gap-3">
-                                            <DollarSign size={32} className="text-orange-300" />
-                                            <p className="font-black text-orange-500 text-sm">Arrastrá el nuevo Excel de precios aquí</p>
-                                            <p className="text-[10px] text-slate-400">Mismo formato Entelequia — solo se leen Título y Precio</p>
-                                        </div>
-                                    )}
+                                <div className="flex flex-col items-center gap-4 py-6">
+                                    <div className="bg-orange-50 border border-orange-100 rounded-2xl px-5 py-3 text-[11px] text-orange-600 text-center max-w-md">
+                                        <p className="font-black mb-1">Antes de continuar:</p>
+                                        <p>1. Subí el nuevo Excel en <strong>Gestión de Semanas</strong></p>
+                                        <p>2. Actualizá los precios en <strong>Análisis de Precios</strong></p>
+                                        <p>3. Volvé acá y presioná el botón</p>
+                                    </div>
+                                    <button
+                                        onClick={loadRepricingFromCatalog}
+                                        disabled={repricingProcessing}
+                                        className="flex items-center gap-3 bg-orange-500 hover:bg-orange-600 text-white font-black px-8 py-4 rounded-2xl text-sm transition-all shadow-lg shadow-orange-500/20 disabled:opacity-40"
+                                    >
+                                        {repricingProcessing
+                                            ? <><Loader2 size={18} className="animate-spin" /> Leyendo catálogo...</>
+                                            : <><DollarSign size={18} /> Leer precios del catálogo actualizado</>
+                                        }
+                                    </button>
                                 </div>
                             )}
 
@@ -933,7 +912,8 @@ export default function AdminMasterView() {
                                                 {repricingPreview.cambios.length} título(s) con cambio de precio
                                             </p>
                                             <p className="text-[10px] text-slate-400 mt-0.5">
-                                                {repricingPreview.sinCambio} sin cambio · {repricingPreview.totalNuevosPrecios} encontrados en el Excel
+                                                {repricingPreview.sinCambio} sin cambio de precio · {repricingPreview.totalItems} ítems analizados
+                                                {repricingPreview.sinCatalogo > 0 && ` · ${repricingPreview.sinCatalogo} sin catalog_id`}
                                             </p>
                                         </div>
                                         <button
