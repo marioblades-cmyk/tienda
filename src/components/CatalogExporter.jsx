@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, FileText, Download, Check, Image as ImageIcon, LayoutGrid, List, FileSpreadsheet } from 'lucide-react';
+import { X, FileText, Download, Check, Image as ImageIcon, LayoutGrid, List, FileSpreadsheet, TrendingUp } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -20,6 +20,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
     const [format, setFormat] = useState('pdf'); // 'pdf' | 'excel'
     const [pdfLayout, setPdfLayout] = useState('grid'); // 'grid' | 'list'
     const [onlyInStock, setOnlyInStock] = useState(false);
+    const [useProxPrices, setUseProxPrices] = useState(false); // usar precio_mayoreo_bs_prox
     const [discount, setDiscount] = useState(0);
     const [selectedEditoriales, setSelectedEditoriales] = useState(new Set());
     const [isGenerating, setIsGenerating] = useState(false);
@@ -152,7 +153,9 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
             if (selectedFields.has('editorial')) rowData.editorial = item.editorial;
             if (selectedFields.has('categoria')) rowData.categoria = item.categoria;
             if (selectedFields.has('precio')) {
-                const p = item.precio_venta_bs || item.precio_tapa || 0;
+                const p = (useProxPrices
+                    ? (item.precio_mayoreo_bs_prox || item.precio_venta_bs_prox || item.precio_venta_bs)
+                    : item.precio_venta_bs) || item.precio_tapa || 0;
                 rowData.precio_orig = p;
                 if (discount > 0) {
                     rowData.precio_dto = (p * (1 - discount / 100)).toFixed(2);
@@ -306,7 +309,9 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                 }
 
                 if (selectedFields.has('precio')) {
-                    const pOrig = item.precio_venta_bs || item.precio_tapa || 0;
+                    const pOrig = (useProxPrices
+                        ? (item.precio_mayoreo_bs_prox || item.precio_venta_bs_prox || item.precio_venta_bs)
+                        : item.precio_venta_bs) || item.precio_tapa || 0;
                     if (discount > 0) {
                         const pDto = (pOrig * (1 - discount / 100)).toFixed(2);
                         
@@ -544,6 +549,25 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                             </div>
                             <div className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${onlyInStock ? 'bg-[#16a34a] border-[#16a34a]' : 'border-white/10'}`}>
                                 {onlyInStock && <Check size={14} className="text-white" />}
+                            </div>
+                        </button>
+
+                        {/* Toggle precios próximos */}
+                        <button
+                            onClick={() => setUseProxPrices(!useProxPrices)}
+                            className={`flex items-center justify-between w-full p-4 rounded-xl border transition-all ${useProxPrices ? 'bg-amber-500/20 border-amber-400 text-white' : 'bg-white/5 border-transparent text-white/40 hover:bg-white/5'}`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${useProxPrices ? 'bg-amber-500 text-white' : 'bg-white/5'}`}>
+                                    <TrendingUp size={18} />
+                                </div>
+                                <div className="text-left">
+                                    <div className="font-bold text-sm text-white">Usar Precios Próximos</div>
+                                    <div className="text-[10px] opacity-60 text-white/60">Exportar con precios nuevos (vigencia mañana)</div>
+                                </div>
+                            </div>
+                            <div className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${useProxPrices ? 'bg-amber-500 border-amber-400' : 'border-white/10'}`}>
+                                {useProxPrices && <Check size={14} className="text-white" />}
                             </div>
                         </button>
                     </section>

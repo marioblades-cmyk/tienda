@@ -101,6 +101,7 @@ export default function PriceAnalysisTool() {
   const [margPorEd, setMargPorEd] = useState({});
   const [margenMayoreoPorEd, setMargenMayoreoPorEd] = useState({});
   const [saving, setSaving] = useState(false);
+  const [saveAsProximo, setSaveAsProximo] = useState(false); // true = guarda en _prox, no pisa precios activos
   const [toast, setToast] = useState(null); // { msg, type: 'success'|'error' }
 
   // Mostrar toast y auto-ocultar a los 3 segundos
@@ -390,18 +391,29 @@ export default function PriceAnalysisTool() {
             const itemArs = Math.round(Number(item.precio_tapa));
             const calc = resultsMap[itemArs];
             if (calc) {
-              payload.push({
-                id: item.id,
-                product_id: item.product_id,
-                titulo: item.titulo,
-                editorial: item.editorial,
-                precio_tapa: item.precio_tapa,
-                precio_venta_bs: Number(calc.pv.toFixed(2)),
-                precio_n2_bs: Number(calc.n2.toFixed(2)),
-                precio_n3_bs: Number(calc.n3.toFixed(2)),
-                precio_mayoreo_bs: Number(calc.pm.toFixed(2)),
-                updated_at: new Date()
-              });
+              if (saveAsProximo) {
+                // Guardar en campos _prox — no pisa precios activos
+                payload.push({
+                  id: item.id,
+                  precio_venta_bs_prox:   Number(calc.pv.toFixed(2)),
+                  precio_mayoreo_bs_prox: Number(calc.pm.toFixed(2)),
+                  updated_at: new Date()
+                });
+              } else {
+                // Guardar como precios activos (comportamiento normal)
+                payload.push({
+                  id: item.id,
+                  product_id: item.product_id,
+                  titulo: item.titulo,
+                  editorial: item.editorial,
+                  precio_tapa: item.precio_tapa,
+                  precio_venta_bs: Number(calc.pv.toFixed(2)),
+                  precio_n2_bs: Number(calc.n2.toFixed(2)),
+                  precio_n3_bs: Number(calc.n3.toFixed(2)),
+                  precio_mayoreo_bs: Number(calc.pm.toFixed(2)),
+                  updated_at: new Date()
+                });
+              }
             }
           });
 
@@ -421,7 +433,9 @@ export default function PriceAnalysisTool() {
       // Notificar a CatalogUpdatedView y otras vistas para que refresquen
       catalogService.clearCache?.();
       window.dispatchEvent(new CustomEvent('catalog-prices-updated'));
-      showToast(`¡Cambios aplicados! Configuración guardada y productos actualizados.`);
+      showToast(saveAsProximo
+        ? `✓ Precios próximos guardados — entran en vigencia cuando actives el cambio`
+        : `✓ Precios aplicados al catálogo activo`);
     } catch (err) {
       console.error('Error al guardar y aplicar:', err);
       showToast('Error al guardar y aplicar: ' + err.message, 'error');
@@ -677,9 +691,27 @@ export default function PriceAnalysisTool() {
                 onClick={handleSaveAndApply}
                 disabled={saving}
               >
-                {saving ? <RefreshCw size={14} className="spin" /> : '🚀'}
-                {saving ? 'Aplicando...' : 'Guardar y Aplicar al Catálogo'}
+                {saving ? <RefreshCw size={14} className="spin" /> : (saveAsProximo ? '📅' : '🚀')}
+                {saving ? 'Aplicando...' : (saveAsProximo ? 'Guardar como Precio Próximo' : 'Guardar y Aplicar al Catálogo')}
               </button>
+              {/* Toggle precio próximo */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '11px', fontWeight: 700, color: saveAsProximo ? '#f59e0b' : '#94a3b8', userSelect: 'none' }}>
+                <div
+                  onClick={() => setSaveAsProximo(v => !v)}
+                  style={{
+                    width: 36, height: 20, borderRadius: 10,
+                    background: saveAsProximo ? '#f59e0b' : '#cbd5e1',
+                    position: 'relative', transition: 'background 0.2s', cursor: 'pointer', flexShrink: 0
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute', top: 2, left: saveAsProximo ? 18 : 2,
+                    width: 16, height: 16, borderRadius: '50%', background: 'white',
+                    transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                  }} />
+                </div>
+                {saveAsProximo ? 'Precio Próximo (vigencia mañana)' : 'Precio Activo (vigencia hoy)'}
+              </label>
             </div>
           </div>
 

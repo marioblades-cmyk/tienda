@@ -596,7 +596,7 @@ export default function AdminMasterView() {
             const catalogIds = [...new Set(todosLosItems.map(it => it.catalog_id).filter(Boolean))];
             const { data: catalogData } = catalogIds.length > 0
                 ? await supabase.from('catalogo_productos')
-                    .select('id, titulo, precio_venta_bs, precio_mayoreo_bs')
+                    .select('id, titulo, precio_venta_bs, precio_mayoreo_bs, precio_venta_bs_prox, precio_mayoreo_bs_prox')
                     .in('id', catalogIds)
                 : { data: [] };
 
@@ -615,9 +615,10 @@ export default function AdminMasterView() {
 
                 const precioViejo = parseFloat(it._precioActual) || 0;
                 // Mayorista usa precio_mayoreo_bs, cliente usa precio_venta_bs
+                // Usar precio próximo si existe, sino precio activo
                 const precioNuevo = it._tipo === 'mayorista'
-                    ? parseFloat(cat.precio_mayoreo_bs) || 0
-                    : parseFloat(cat.precio_venta_bs) || 0;
+                    ? parseFloat(cat.precio_mayoreo_bs_prox || cat.precio_mayoreo_bs) || 0
+                    : parseFloat(cat.precio_venta_bs_prox || cat.precio_venta_bs) || 0;
 
                 if (Math.abs(precioNuevo - precioViejo) <= 0.01) { sinCambio++; continue; }
 
@@ -698,6 +699,59 @@ export default function AdminMasterView() {
         }
     };
 
+    // ── Activar precios próximos: copia _prox → activo en todo el catálogo ───
+    const handleActivarPreciosProximos = async () => {
+        if (!confirm('¿Activar los precios próximos? Esto reemplazará los precios activos del catálogo con los precios próximos y no se puede deshacer.')) return;
+        setProcessing(true);
+        setError('');
+        try {
+            // Leer todos los productos que tienen precio próximo definido
+            let allProx = [], from = 0;
+            while (true) {
+                const { data, error } = await supabase
+                    .from('catalogo_productos')
+                    .select('id, precio_venta_bs_prox, precio_mayoreo_bs_prox')
+                    .not('precio_mayoreo_bs_prox', 'is', null)
+                    .range(from, from + 999);
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                allProx = [...allProx, ...data];
+                if (data.length < 1000) break;
+                from += 1000;
+            }
+
+            if (allProx.length === 0) {
+                setError('No hay precios próximos guardados en el catálogo.');
+                setProcessing(false);
+                return;
+            }
+
+            // Actualizar en chunks: precio activo = precio próximo, limpiar _prox
+            const chunkSize = 500;
+            for (let i = 0; i < allProx.length; i += chunkSize) {
+                const chunk = allProx.slice(i, i + chunkSize).map(p => ({
+                    id: p.id,
+                    precio_venta_bs:        p.precio_venta_bs_prox,
+                    precio_mayoreo_bs:      p.precio_mayoreo_bs_prox,
+                    precio_venta_bs_prox:   null,
+                    precio_mayoreo_bs_prox: null,
+                    updated_at: new Date(),
+                }));
+                const { error: updErr } = await supabase
+                    .from('catalogo_productos')
+                    .upsert(chunk, { onConflict: 'id' });
+                if (updErr) throw updErr;
+            }
+
+            window.dispatchEvent(new CustomEvent('catalog-prices-updated'));
+            setSuccess(`✓ Precios activados: ${allProx.length} productos actualizados.`);
+        } catch (err) {
+            setError('Error al activar precios: ' + err.message);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     if (loading) return <div className="p-8 text-center animate-pulse"><Loader2 size={24} className="mx-auto animate-spin mb-4" /> Cargando...</div>;
 
     return (
@@ -710,6 +764,17 @@ export default function AdminMasterView() {
                     </h3>
                     <p className="text-sm text-sky mt-1 font-medium">Sincroniza tus preventas con la realidad del stock.</p>
                 </div>
+
+                {/* Botón Activar Precios Próximos */}
+                <button
+                    onClick={handleActivarPreciosProximos}
+                    disabled={processing}
+                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white font-black text-xs px-5 py-3 rounded-xl transition-all shadow-lg shadow-amber-500/20 whitespace-nowrap"
+                    title="Copia los precios próximos al catálogo activo"
+                >
+                    {processing ? <Loader2 size={14} className="animate-spin" /> : <TrendingUp size={14} />}
+                    Activar Precios Próximos
+                </button>
 
                 <div className="w-full md:w-64">
                     <label className="text-[10px] uppercase font-bold text-sky tracking-widest block mb-1">Semana Destino</label>
