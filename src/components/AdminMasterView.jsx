@@ -22,7 +22,8 @@ export default function AdminMasterView() {
 
     // Repricing
     const [showRepricing, setShowRepricing] = useState(false);
-    const [repricingPreview, setRepricingPreview] = useState(null); // [{titulo, precio_viejo, precio_nuevo, diff, items_afectados}]
+    const [repricingPreview, setRepricingPreview] = useState(null);
+    const [repricingSeleccion, setRepricingSeleccion] = useState(new Set()); // títulos seleccionados para recotizar
     const [repricingProcessing, setRepricingProcessing] = useState(false);
     const [repricingSuccess, setRepricingSuccess] = useState('');
 
@@ -637,12 +638,15 @@ export default function AdminMasterView() {
                 else cambios[key].items_cliente.push(it.id);
             }
 
+            const cambiosArray = Object.values(cambios);
             setRepricingPreview({
-                cambios: Object.values(cambios),
+                cambios: cambiosArray,
                 sinCambio,
                 sinCatalogo,
                 totalItems: todosLosItems.length,
             });
+            // Pre-seleccionar todos por defecto
+            setRepricingSeleccion(new Set(cambiosArray.map(c => c.titulo)));
         } catch (err) {
             setError('Error al leer catálogo: ' + err.message);
         } finally {
@@ -652,14 +656,15 @@ export default function AdminMasterView() {
 
     // ── REPRICING: aplicar cambios de precios en BD ───────────────────────────
     const handleConfirmRepricing = async () => {
-        if (!repricingPreview || repricingPreview.cambios.length === 0) return;
-        if (!confirm(`¿Confirmar repricing? Se actualizarán precios en ${repricingPreview.cambios.length} título(s) y todos quedarán en estado RECOTIZAR.`)) return;
+        const cambiosAplicar = repricingPreview.cambios.filter(c => repricingSeleccion.has(c.titulo));
+        if (!repricingPreview || cambiosAplicar.length === 0) return;
+        if (!confirm(`¿Confirmar repricing en ${cambiosAplicar.length} título(s) seleccionados?`)) return;
         setRepricingProcessing(true);
         setRepricingSuccess('');
         try {
             let totalActualizados = 0;
 
-            for (const cambio of repricingPreview.cambios) {
+            for (const cambio of cambiosAplicar) {
                 // Actualizar pedido_items (mayoristas)
                 if (cambio.items_mayorista.length > 0) {
                     await supabase.from('pedido_items')
@@ -689,7 +694,7 @@ export default function AdminMasterView() {
                 .update({ en_reprecio: true })
                 .eq('id', selectedSemana);
 
-            setRepricingSuccess(`✓ Repricing aplicado: ${repricingPreview.cambios.length} títulos, ${totalActualizados} ítems actualizados a RECOTIZAR.`);
+            setRepricingSuccess(`✓ Repricing aplicado: ${cambiosAplicar.length} títulos, ${totalActualizados} ítems actualizados a RECOTIZAR.`);
             setRepricingPreview(null);
             fetchSemanas();
         } catch (err) {
@@ -971,20 +976,35 @@ export default function AdminMasterView() {
                             {/* Preview de cambios */}
                             {repricingPreview && (
                                 <div className="space-y-4">
+                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-[11px] text-amber-700">
+                                        ⚠️ <strong>Revisá la lista</strong> — si un ítem muestra aumento pero no fue la editorial (ej: tenía descuento comercial), <strong>desmarcalo</strong> para excluirlo del repricing.
+                                    </div>
+
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <p className="font-black text-navy text-sm">
-                                                {repricingPreview.cambios.length} título(s) con cambio de precio
+                                                {repricingPreview.cambios.length} título(s) detectados · <span className="text-orange-500">{repricingSeleccion.size} seleccionados</span>
                                             </p>
                                             <p className="text-[10px] text-slate-400 mt-0.5">
-                                                {repricingPreview.sinCambio} sin cambio de precio · {repricingPreview.totalItems} ítems analizados
+                                                {repricingPreview.sinCambio} sin cambio · {repricingPreview.totalItems} ítems analizados
                                                 {repricingPreview.sinCatalogo > 0 && ` · ${repricingPreview.sinCatalogo} sin catalog_id`}
                                             </p>
                                         </div>
-                                        <button
-                                            onClick={() => setRepricingPreview(null)}
-                                            className="text-slate-400 hover:text-navy transition-colors"
-                                        ><X size={18} /></button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    if (repricingSeleccion.size === repricingPreview.cambios.length) {
+                                                        setRepricingSeleccion(new Set());
+                                                    } else {
+                                                        setRepricingSeleccion(new Set(repricingPreview.cambios.map(c => c.titulo)));
+                                                    }
+                                                }}
+                                                className="text-[10px] font-black text-orange-500 hover:text-orange-700 border border-orange-200 px-2 py-1 rounded-lg transition-colors"
+                                            >
+                                                {repricingSeleccion.size === repricingPreview.cambios.length ? 'Desmarcar todo' : 'Marcar todo'}
+                                            </button>
+                                            <button onClick={() => setRepricingPreview(null)} className="text-slate-400 hover:text-navy transition-colors"><X size={18} /></button>
+                                        </div>
                                     </div>
 
                                     {repricingPreview.cambios.length === 0 ? (
@@ -997,6 +1017,7 @@ export default function AdminMasterView() {
                                                 <table className="w-full text-xs">
                                                     <thead className="bg-orange-50">
                                                         <tr className="text-[9px] font-black text-orange-500 uppercase tracking-widest">
+                                                            <th className="px-3 py-3 text-center w-8">✓</th>
                                                             <th className="px-4 py-3 text-left">Título</th>
                                                             <th className="px-4 py-3 text-right">Precio viejo</th>
                                                             <th className="px-4 py-3 text-right">Precio nuevo</th>
@@ -1005,8 +1026,23 @@ export default function AdminMasterView() {
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-orange-100">
-                                                        {repricingPreview.cambios.map((c, i) => (
-                                                            <tr key={i} className="hover:bg-orange-50/50">
+                                                        {repricingPreview.cambios.map((c, i) => {
+                                                            const seleccionado = repricingSeleccion.has(c.titulo);
+                                                            return (
+                                                            <tr key={i}
+                                                                onClick={() => {
+                                                                    const next = new Set(repricingSeleccion);
+                                                                    if (next.has(c.titulo)) next.delete(c.titulo);
+                                                                    else next.add(c.titulo);
+                                                                    setRepricingSeleccion(next);
+                                                                }}
+                                                                className={`cursor-pointer transition-colors ${seleccionado ? 'hover:bg-orange-50/50' : 'opacity-40 bg-slate-50 hover:opacity-60'}`}
+                                                            >
+                                                                <td className="px-3 py-3 text-center">
+                                                                    <div className={`w-4 h-4 rounded border-2 mx-auto flex items-center justify-center transition-all ${seleccionado ? 'bg-orange-500 border-orange-500' : 'border-slate-300'}`}>
+                                                                        {seleccionado && <Check size={10} className="text-white" />}
+                                                                    </div>
+                                                                </td>
                                                                 <td className="px-4 py-3 font-bold text-navy">{c.titulo}</td>
                                                                 <td className="px-4 py-3 text-right text-slate-400 line-through">Bs {c.precio_viejo.toFixed(2)}</td>
                                                                 <td className="px-4 py-3 text-right font-black text-navy">Bs {c.precio_nuevo.toFixed(2)}</td>
@@ -1019,7 +1055,8 @@ export default function AdminMasterView() {
                                                                     {c.items_cliente.length > 0 && <span className="ml-1 text-[8px] text-purple-400">({c.items_cliente.length} cli.)</span>}
                                                                 </td>
                                                             </tr>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </tbody>
                                                 </table>
                                             </div>
@@ -1036,7 +1073,7 @@ export default function AdminMasterView() {
                                                 >
                                                     {repricingProcessing
                                                         ? <><Loader2 size={16} className="animate-spin" /> Aplicando...</>
-                                                        : <><TrendingUp size={16} /> Confirmar Repricing</>
+                                                        : <><TrendingUp size={16} /> Confirmar Repricing ({repricingSeleccion.size} títulos)</>
                                                     }
                                                 </button>
                                             </div>
