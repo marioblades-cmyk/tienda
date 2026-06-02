@@ -463,10 +463,11 @@ export default function PriceAnalysisTool() {
       const F    = E * 0.65;
       const G_PV = Math.round(F / 5) * 5;
 
-      // Ivrea usa fórmula propia: costoReal × (1 + margenVenta) redondeado ARRIBA al múltiplo de 5
+      // Ivrea usa fórmula propia: costoReal × (1 + margenVenta) redondeado al ENTERO superior
       // El margen se controla desde la casilla "Margen Venta" del panel (actualmente 70% → 1.70)
+      // Ej: 54.62 × 1.70 = 92.82 → 93
       const costoParaPV = ars * (1 - desc) * params.tca + params.flet;
-      const G_PV_IVREA  = Math.ceil((costoParaPV * (1 + marg)) / 5) * 5;
+      const G_PV_IVREA  = Math.ceil(costoParaPV * (1 + marg));
       const pvBase      = curEd === 'Ivrea' ? G_PV_IVREA : G_PV;
 
       const pvManual = PVC[curEd]?.[ars] || 0;

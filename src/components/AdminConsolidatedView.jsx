@@ -1038,11 +1038,11 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         const costoReal = (ars * (1 - dto) * tca) + flete;
                         const pMayor = costoReal * (1 + mmayo);
 
-                        // PV: Ivrea usa costoReal × (1+margen) redondeado ARRIBA
-                        // Resto usa fórmula D → E × 0.65 → redondeo
+                        // PV: Ivrea usa costoReal × (1+margen) redondeado al ENTERO superior
+                        // Resto usa fórmula D → E × 0.65 → redondeo a múltiplo de 5
                         let pRetail;
                         if (isIvrea) {
-                            pRetail = Math.ceil((costoReal * (1 + margenVenta)) / 5) * 5;
+                            pRetail = Math.ceil(costoReal * (1 + margenVenta));
                         } else {
                             const D = (ars * (1 - dto) * (global.tcf || 0.014) + flete) * (1 + margenVenta);
                             const E = Math.round(D / 5) * 5;
