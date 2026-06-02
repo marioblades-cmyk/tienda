@@ -283,25 +283,18 @@ const CatalogUpdatedView = () => {
                             .filter(it => normalizeTitle(it.titulo) === prodTitle)
                             .reduce((s, i) => s + (i.cantidad || 0), 0);
 
-                        // 2. Unidades pedidas por vendedores (personal) — no son stock de tienda
-                        const sellerRequestedQty = week.allOrdersData
-                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'personal')
-                            .reduce((s, p) => s + (p.cantidad || 0), 0);
-
-                        // 3. Unidades reservadas para mayoristas (pedido tipo 'mayorista')
+                        // 2. Unidades reservadas para mayoristas
                         const mayoristaQty = week.allOrdersData
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'mayorista')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // 4. Ya recibido de esta semana
+                        // 3. Ya recibido de esta semana (ya pasó a stock físico)
                         const received = week.receptionData
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
-                        // 5. Clientes retail comprometidos (cada cliente_item = 1 unidad):
-                        // ADJUDICADO = adjudicado por auto-reparto
-                        // EN TIENDA = físicamente en tienda
-                        // CONFIRMADO <semana> = asignado manualmente desde stock flotante
+                        // 4. Clientes adjudicados (cada cliente_item = 1 unidad)
+                        // ADJUDICADO = auto-reparto | EN TIENDA | CONFIRMADO <semana> = manual
                         const clientReserved = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle &&
                                 (it.estado === 'ADJUDICADO' ||
@@ -309,8 +302,8 @@ const CatalogUpdatedView = () => {
                                  (it.estado || '').startsWith('CONFIRMADO')))
                             .length;
 
-                        // Stock disponible = confirmado − personal − mayoristas − recibido − retail adjudicado
-                        qty = Math.max(0, totalConfirmedForTitle - sellerRequestedQty - mayoristaQty - received - clientReserved);
+                        // Stock flotante = confirmado − recibido − mayoristas − clientes adjudicados
+                        qty = Math.max(0, totalConfirmedForTitle - received - mayoristaQty - clientReserved);
                     } else {
                         // Sin confirmar: disponible = pedido tienda − clientes en lista de espera
                         const storeTotal = week.allOrdersData
