@@ -545,11 +545,13 @@ export default function ConfirmationInfoView() {
                                 {semanaDetails.filter(w => w.confirmed > 0).map(w => {
                                     const totalMayoristas = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
                                     const totalClientes   = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
-                                    // Pedidos tipo personal/vendedor: pedido - mayoristas
-                                    const totalVendedores = Math.max(0, (w.ordered || 0) - totalMayoristas);
+                                    // Usar titleDetails.pedido que ya excluye estados terminales (CANCELADO, ENTREGADO, etc.)
+                                    const totalActivoPedido = w.titleDetails.reduce((s, t) => s + (t.pedido || 0), 0);
+                                    const totalVendedores = Math.max(0, totalActivoPedido - totalMayoristas);
                                     const totalComprometido = totalMayoristas + totalVendedores + totalClientes;
-                                    const disponibleReal = Math.max(0, w.confirmed - w.received - totalComprometido);
-                                    const sobrevendido = (w.confirmed - w.received - totalComprometido) < 0;
+                                    const netDisponible = w.confirmed - w.received - totalComprometido;
+                                    const disponibleReal = Math.max(0, netDisponible);
+                                    const sobrevendido = netDisponible < 0;
 
                                     return (
                                         <tr key={w.id} className="hover:bg-navy/5 transition-colors">
