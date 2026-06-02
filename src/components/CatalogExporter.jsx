@@ -20,7 +20,8 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
     const [format, setFormat] = useState('pdf'); // 'pdf' | 'excel'
     const [pdfLayout, setPdfLayout] = useState('grid'); // 'grid' | 'list'
     const [onlyInStock, setOnlyInStock] = useState(false);
-    const [useProxPrices, setUseProxPrices] = useState(false); // usar precio_mayoreo_bs_prox
+    const [useProxPrices, setUseProxPrices] = useState(false);
+    const [tipoPrice, setTipoPrice] = useState('mayoreo'); // 'mayoreo' | 'retail'
     const [discount, setDiscount] = useState(0);
     const [selectedEditoriales, setSelectedEditoriales] = useState(new Set());
     const [isGenerating, setIsGenerating] = useState(false);
@@ -128,7 +129,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
         if (selectedFields.has('editorial')) columns.push({ header: 'EDITORIAL', key: 'editorial', width: 20 });
         if (selectedFields.has('categoria')) columns.push({ header: 'CATEGORÍA', key: 'categoria', width: 20 });
         if (selectedFields.has('precio')) {
-            columns.push({ header: 'PRECIO ORIGINAL', key: 'precio_orig', width: 18 });
+            columns.push({ header: tipoPrice === 'mayoreo' ? 'PRECIO MAYORISTA (Bs)' : 'PRECIO PVP (Bs)', key: 'precio_orig', width: 18 });
             if (discount > 0) {
                 columns.push({ header: `PRECIO DTO (${discount}%)`, key: 'precio_dto', width: 18 });
             }
@@ -153,9 +154,14 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
             if (selectedFields.has('editorial')) rowData.editorial = item.editorial;
             if (selectedFields.has('categoria')) rowData.categoria = item.categoria;
             if (selectedFields.has('precio')) {
+                const base = tipoPrice === 'mayoreo'
+                    ? (item.precio_mayoreo_bs || item.precio_venta_bs)
+                    : item.precio_venta_bs;
                 const p = (useProxPrices
-                    ? (item.precio_mayoreo_bs_prox || item.precio_venta_bs_prox || item.precio_venta_bs)
-                    : item.precio_venta_bs) || item.precio_tapa || 0;
+                    ? (tipoPrice === 'mayoreo'
+                        ? (item.precio_mayoreo_bs_prox || item.precio_mayoreo_bs)
+                        : (item.precio_venta_bs_prox || item.precio_venta_bs))
+                    : base) || item.precio_tapa || 0;
                 rowData.precio_orig = p;
                 if (discount > 0) {
                     rowData.precio_dto = (p * (1 - discount / 100)).toFixed(2);
@@ -309,9 +315,14 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                 }
 
                 if (selectedFields.has('precio')) {
+                    const baseP = tipoPrice === 'mayoreo'
+                        ? (item.precio_mayoreo_bs || item.precio_venta_bs)
+                        : item.precio_venta_bs;
                     const pOrig = (useProxPrices
-                        ? (item.precio_mayoreo_bs_prox || item.precio_venta_bs_prox || item.precio_venta_bs)
-                        : item.precio_venta_bs) || item.precio_tapa || 0;
+                        ? (tipoPrice === 'mayoreo'
+                            ? (item.precio_mayoreo_bs_prox || item.precio_mayoreo_bs)
+                            : (item.precio_venta_bs_prox || item.precio_venta_bs))
+                        : baseP) || item.precio_tapa || 0;
                     if (discount > 0) {
                         const pDto = (pOrig * (1 - discount / 100)).toFixed(2);
                         
@@ -534,6 +545,26 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                         <label className="text-[11px] font-bold text-[#f07d2a] uppercase tracking-[0.2em] mb-4 block">
                             5. Opciones de Filtro
                         </label>
+                        {/* Tipo de precio */}
+                        <div style={{ padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '0.5rem' }}>
+                            <p style={{ fontSize: '0.65rem', fontWeight: 800, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Tipo de Precio</p>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                {[{ id: 'mayoreo', label: 'Precio Mayorista' }, { id: 'retail', label: 'Precio PVP Retail' }].map(opt => (
+                                    <button
+                                        key={opt.id}
+                                        onClick={() => setTipoPrice(opt.id)}
+                                        style={{
+                                            flex: 1, padding: '0.5rem', borderRadius: 8, fontSize: '0.65rem', fontWeight: 800,
+                                            border: tipoPrice === opt.id ? '1.5px solid #f59e0b' : '1.5px solid rgba(255,255,255,0.1)',
+                                            background: tipoPrice === opt.id ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.04)',
+                                            color: tipoPrice === opt.id ? '#fbbf24' : 'rgba(255,255,255,0.4)',
+                                            cursor: 'pointer', transition: 'all 0.15s'
+                                        }}
+                                    >{opt.label}</button>
+                                ))}
+                            </div>
+                        </div>
+
                         <button
                             onClick={() => setOnlyInStock(!onlyInStock)}
                             className={`flex items-center justify-between w-full p-4 rounded-xl border transition-all ${onlyInStock ? 'bg-[#16a34a]/10 border-[#16a34a] text-white' : 'bg-white/5 border-transparent text-white/40 hover:bg-white/5'}`}
