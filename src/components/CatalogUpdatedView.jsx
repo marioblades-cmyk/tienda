@@ -220,13 +220,20 @@ const CatalogUpdatedView = () => {
                 // pedido_items: una query por semana (requiere filtrar por join)
                 ...weekIds.map(id =>
                     supabase.from('pedido_items')
-                        .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)')
+                        .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo, vendedor_id)')
                         .eq('pedido.semana_id', id)
                         .limit(2000)
                 )
             ]);
 
             const [mastersRes, receptionsRes, floatingSummaryRes, settingsRes, clientItemsRes, ...allOrdersResultsArr] = weekQueryResults;
+
+            // Vendedores que NO registran ventas en el sistema (sus personal siempre están vendidos)
+            const { data: vendedoresSinSistema } = await supabase
+                .from('vendedores')
+                .select('id')
+                .eq('registra_ventas', false);
+            const idsSinSistema = new Set((vendedoresSinSistema || []).map(v => v.id));
 
             // Actualizar niveles de descuento para los encabezados del catálogo
             if (settingsRes.data?.dto_niveles?.length >= 2) {
@@ -279,13 +286,20 @@ const CatalogUpdatedView = () => {
 
                     // Misma lógica que StockFlotanteView — usar datos ya calculados
                     if (week.isConfirmed) {
-                        // CONFIRMADO: flotante = confirmado − recibido − (mayoristas + adjudicados)
+                        // CONFIRMADO: flotante = confirmado − recibido − mayoristas − personal_sin_sistema − adjudicados
                         const totalConfirmedForTitle = week.masterData
                             .filter(it => normalizeTitle(it.titulo) === prodTitle)
                             .reduce((s, i) => s + (i.cantidad || 0), 0);
 
                         const mayoristaQty = week.allOrdersData
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'mayorista')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+
+                        // Vendedores sin sistema: sus personal siempre están vendidos → restar
+                        const sinSistemaQty = week.allOrdersData
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle &&
+                                p.pedido.tipo === 'personal' &&
+                                idsSinSistema.has(p.pedido.vendedor_id))
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
                         const received = week.receptionData
@@ -301,7 +315,7 @@ const CatalogUpdatedView = () => {
                             .length;
 
                         // Con recorte: max(0) = 0 libres automáticamente
-                        qty = Math.max(0, totalConfirmedForTitle - received - mayoristaQty - clientReserved);
+                        qty = Math.max(0, totalConfirmedForTitle - received - mayoristaQty - sinSistemaQty - clientReserved);
 
                     } else {
                         // NO CONFIRMADO: flotante tentativo = pedido_tienda − clientes pendientes
