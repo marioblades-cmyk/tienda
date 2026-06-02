@@ -211,9 +211,10 @@ const CatalogUpdatedView = () => {
                     .select('dto_niveles')
                     .eq('editorial', 'GLOBAL_SETTINGS')
                     .maybeSingle(),
-                // cliente_items: una sola query para todas las semanas (incluye cantidad para mayoristas)
+                // cliente_items: una sola query para todas las semanas
+                // Nota: cada cliente_item representa 1 unidad (no tiene columna cantidad)
                 supabase.from('cliente_items')
-                    .select('semana_id, titulo, estado, cantidad')
+                    .select('semana_id, titulo, estado')
                     .in('semana_id', weekIds)
                     .limit(5000),
                 // pedido_items: una query por semana (requiere filtrar por join)
@@ -297,16 +298,16 @@ const CatalogUpdatedView = () => {
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
-                        // 5. Clientes retail comprometidos:
-                        // ADJUDICADO, EN TIENDA = adjudicados por auto-reparto
-                        // CONFIRMADO <semana> = asignados manualmente desde stock flotante confirmado
-                        // ENTREGADO = ya se entregó (no ocupa flotante, ya se recibió)
+                        // 5. Clientes retail comprometidos (cada cliente_item = 1 unidad):
+                        // ADJUDICADO = adjudicado por auto-reparto
+                        // EN TIENDA = físicamente en tienda
+                        // CONFIRMADO <semana> = asignado manualmente desde stock flotante
                         const clientReserved = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle &&
                                 (it.estado === 'ADJUDICADO' ||
                                  it.estado === 'EN TIENDA' ||
                                  (it.estado || '').startsWith('CONFIRMADO')))
-                            .reduce((s, it) => s + (Number(it.cantidad) || 1), 0);
+                            .length;
 
                         // Stock disponible = confirmado − personal − mayoristas − recibido − retail adjudicado
                         qty = Math.max(0, totalConfirmedForTitle - sellerRequestedQty - mayoristaQty - received - clientReserved);
