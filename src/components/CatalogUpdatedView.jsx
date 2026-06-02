@@ -297,11 +297,15 @@ const CatalogUpdatedView = () => {
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
-                        // 5. Clientes retail ya adjudicados (ADJUDICADO o EN TIENDA)
-                        // CONFIRMADO es el estado "pendiente" del retail (antes de adjudicar), no cuenta
+                        // 5. Clientes retail comprometidos:
+                        // ADJUDICADO, EN TIENDA = adjudicados por auto-reparto
+                        // CONFIRMADO <semana> = asignados manualmente desde stock flotante confirmado
+                        // ENTREGADO = ya se entregó (no ocupa flotante, ya se recibió)
                         const clientReserved = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle &&
-                                (it.estado === 'ADJUDICADO' || it.estado === 'EN TIENDA'))
+                                (it.estado === 'ADJUDICADO' ||
+                                 it.estado === 'EN TIENDA' ||
+                                 (it.estado || '').startsWith('CONFIRMADO')))
                             .reduce((s, it) => s + (Number(it.cantidad) || 1), 0);
 
                         // Stock disponible = confirmado − personal − mayoristas − recibido − retail adjudicado

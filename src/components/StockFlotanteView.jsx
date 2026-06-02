@@ -152,8 +152,10 @@ export default function ConfirmationInfoView() {
                         ci.semana_id === w.id && normalizeTitle(ci.titulo) === itTitle
                     );
                     const qtyClientAllocated = titleCItems.filter(ci =>
-                        ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA'
-                    ).length;
+                        ci.estado === 'ADJUDICADO' ||
+                        ci.estado === 'EN TIENDA' ||
+                        (ci.estado || '').startsWith('CONFIRMADO')
+                    ).reduce((s, ci) => s + (Number(ci.cantidad) || 1), 0);
 
                     // Reparto total = retail adjudicado + todo lo que le toca al mayorista
                     const qtyTotalAllocated = qtyClientAllocated + qtyMayorista;
@@ -246,7 +248,7 @@ export default function ConfirmationInfoView() {
                 for (const ci of cItems) {
                     if (toAutoAdjudicate.includes(ci.id)) ci.estado = 'ADJUDICADO';
                 }
-                
+
                 // Recalcular el reparto en details para que la interfaz se actualice inmediatamente
                 for (const week of details) {
                     for (const t of week.titleDetails) {
@@ -255,8 +257,10 @@ export default function ConfirmationInfoView() {
                             ci.semana_id === week.id && normalizeTitle(ci.titulo) === key
                         );
                         t.allocated = titleCItems.filter(ci =>
-                            ci.estado === 'ADJUDICADO' || ci.estado === 'EN TIENDA'
-                        ).length;
+                            ci.estado === 'ADJUDICADO' ||
+                            ci.estado === 'EN TIENDA' ||
+                            (ci.estado || '').startsWith('CONFIRMADO')
+                        ).reduce((s, ci) => s + (Number(ci.cantidad) || 1), 0);
                         t.qtyTotalAllocated = t.allocated + t.qtyMayorista;
                         t.needsAllocation = t.qtyAvailableForRetail > t.allocated && titleCItems.length > t.allocated;
                     }
@@ -514,6 +518,73 @@ export default function ConfirmationInfoView() {
                     <p className="text-xs text-muted-2 mt-2">Pedidos realizados aún no confirmados</p>
                 </div>
             </div>
+
+            {/* Panel de Reconciliación por Semana */}
+            {semanaDetails.filter(w => w.confirmed > 0).length > 0 && (
+                <div className="glass rounded-3xl border border-border/40 overflow-hidden">
+                    <div className="px-6 py-4 bg-navy/5 border-b border-border/20 flex items-center gap-2">
+                        <Activity size={16} className="text-primary" />
+                        <h4 className="text-xs font-bold text-navy uppercase tracking-[0.2em]">Reconciliación de Stock — Confirmaciones vs Comprometido</h4>
+                        <span className="ml-auto text-[9px] text-muted font-mono uppercase tracking-widest">Estos números deberían cuadrar con el Catálogo Actualizado</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                            <thead className="bg-navy/5 text-[9px] font-black text-muted uppercase tracking-widest">
+                                <tr>
+                                    <th className="px-4 py-3 text-left">Semana</th>
+                                    <th className="px-3 py-3 text-center text-blue-500">Confirmado</th>
+                                    <th className="px-3 py-3 text-center text-slate-400">Recibido</th>
+                                    <th className="px-3 py-3 text-center text-purple-500">Mayoristas</th>
+                                    <th className="px-3 py-3 text-center text-orange-500">Vendedores</th>
+                                    <th className="px-3 py-3 text-center text-green-600">Clientes</th>
+                                    <th className="px-3 py-3 text-center text-navy">Comprometido</th>
+                                    <th className="px-3 py-3 text-center text-emerald-600">Disponible Real</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/10">
+                                {semanaDetails.filter(w => w.confirmed > 0).map(w => {
+                                    const totalMayoristas = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
+                                    const totalClientes   = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
+                                    // Pedidos tipo personal/vendedor: pedido - mayoristas
+                                    const totalVendedores = Math.max(0, (w.ordered || 0) - totalMayoristas);
+                                    const totalComprometido = totalMayoristas + totalVendedores + totalClientes;
+                                    const disponibleReal = Math.max(0, w.confirmed - w.received - totalComprometido);
+                                    const sobrevendido = (w.confirmed - w.received - totalComprometido) < 0;
+
+                                    return (
+                                        <tr key={w.id} className="hover:bg-navy/5 transition-colors">
+                                            <td className="px-4 py-3 font-bold text-navy text-[10px]">{w.nombre}</td>
+                                            <td className="px-3 py-3 text-center font-black text-blue-600">{w.confirmed}</td>
+                                            <td className="px-3 py-3 text-center text-slate-400">{w.received}</td>
+                                            <td className="px-3 py-3 text-center text-purple-600 font-bold">{totalMayoristas}</td>
+                                            <td className="px-3 py-3 text-center text-orange-500 font-bold">{totalVendedores}</td>
+                                            <td className="px-3 py-3 text-center text-green-600 font-bold">{totalClientes}</td>
+                                            <td className="px-3 py-3 text-center font-black text-navy">{totalComprometido}</td>
+                                            <td className="px-3 py-3 text-center">
+                                                <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${sobrevendido ? 'bg-red-100 text-red-600' : disponibleReal === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                    {sobrevendido ? `−${Math.abs(w.confirmed - w.received - totalComprometido)} SOBREVENDIDO` : `${disponibleReal} libres`}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                            <tfoot className="bg-navy/5">
+                                <tr className="font-black text-[10px]">
+                                    <td className="px-4 py-3 text-navy uppercase">TOTAL</td>
+                                    <td className="px-3 py-3 text-center text-blue-600">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.confirmed,0)}</td>
+                                    <td className="px-3 py-3 text-center text-slate-400">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.received,0)}</td>
+                                    <td className="px-3 py-3 text-center text-purple-600">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.qtyMayorista||0),0),0)}</td>
+                                    <td className="px-3 py-3 text-center text-orange-500">—</td>
+                                    <td className="px-3 py-3 text-center text-green-600">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.allocated||0),0),0)}</td>
+                                    <td className="px-3 py-3 text-center text-navy">—</td>
+                                    <td className="px-3 py-3 text-center text-xs text-muted">↑ debe = Catálogo</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* Timeline / Active Orders */}
             <div className="space-y-4">
