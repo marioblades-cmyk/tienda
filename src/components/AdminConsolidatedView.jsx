@@ -1034,12 +1034,23 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     const ars = parseFloat(cellPrice.value);
 
                     if (!isNaN(ars) && ars > 0) {
+                        const margenVenta = edConf.margen_venta ?? 0.40;
                         const costoReal = (ars * (1 - dto) * tca) + flete;
                         const pMayor = costoReal * (1 + mmayo);
-                        const D = (ars * (1 - dto) * (global.tcf || 0.014) + flete) * (1 + (edConf.margen_venta || 0.40));
-                        const E = Math.round(D / 5) * 5;
-                        const pRetail = Math.round((E * 0.65) / 5) * 5;
-                        const pSugerido = pRetail * 0.90;
+
+                        // PV: Ivrea usa costoReal × (1+margen) redondeado ARRIBA
+                        // Resto usa fórmula D → E × 0.65 → redondeo
+                        let pRetail;
+                        if (isIvrea) {
+                            pRetail = Math.ceil((costoReal * (1 + margenVenta)) / 5) * 5;
+                        } else {
+                            const D = (ars * (1 - dto) * (global.tcf || 0.014) + flete) * (1 + margenVenta);
+                            const E = Math.round(D / 5) * 5;
+                            pRetail = Math.round((E * 0.65) / 5) * 5;
+                        }
+
+                        // PRECIO SUGERIDO = PVP con 10% de descuento
+                        const pSugerido = Math.round((pRetail * 0.90) / 0.5) * 0.5;
 
                         cellPrice.value = Number(pMayor.toFixed(2));
                         cellPrice.numFmt = '#,##0.00';
