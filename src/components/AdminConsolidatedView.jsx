@@ -1049,8 +1049,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             pRetail = Math.round((E * 0.65) / 5) * 5;
                         }
 
-                        // PRECIO SUGERIDO = PVP con 10% de descuento
-                        const pSugerido = Math.round((pRetail * 0.90) / 0.5) * 0.5;
+                        // PRECIO SUGERIDO = PVP con 10% de descuento (sin redondear)
+                        const pSugerido = pRetail * 0.90;
 
                         cellPrice.value = Number(pMayor.toFixed(2));
                         cellPrice.numFmt = '#,##0.00';
