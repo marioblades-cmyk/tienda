@@ -519,81 +519,105 @@ export default function ConfirmationInfoView() {
                 </div>
             </div>
 
-            {/* Panel de Reconciliación por Semana */}
-            {semanaDetails.filter(w => w.confirmed > 0).length > 0 && (
-                <div className="glass rounded-3xl border border-border/40 overflow-hidden">
-                    <div className="px-6 py-4 bg-navy/5 border-b border-border/20 flex items-center gap-2">
-                        <Activity size={16} className="text-primary" />
-                        <h4 className="text-xs font-bold text-navy uppercase tracking-[0.2em]">Reconciliación de Stock — Confirmaciones vs Comprometido</h4>
-                        <span className="ml-auto text-[9px] text-muted font-mono uppercase tracking-widest">Estos números deberían cuadrar con el Catálogo Actualizado</span>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                            <thead className="bg-navy/5 text-[9px] font-black text-muted uppercase tracking-widest">
-                                <tr>
-                                    <th className="px-4 py-3 text-left">Semana</th>
-                                    <th className="px-3 py-3 text-center text-blue-500">Confirmado</th>
-                                    <th className="px-3 py-3 text-center text-slate-400">Recibido</th>
-                                    <th className="px-3 py-3 text-center text-slate-300">En tránsito</th>
-                                    <th className="px-3 py-3 text-center text-purple-500">Mayoristas</th>
-                                    <th className="px-3 py-3 text-center text-green-600">Clientes</th>
-                                    <th className="px-3 py-3 text-center text-emerald-600">Disponible</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/10">
-                                {semanaDetails.filter(w => w.confirmed > 0).map(w => {
-                                    const totalMayoristas = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
-                                    const totalClientes   = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
-                                    const enTransito      = Math.max(0, w.confirmed - w.received);
-                                    const netDisponible   = enTransito - totalMayoristas - totalClientes;
-                                    const sobrevendido    = netDisponible < 0;
+            {/* Panel de Reconciliación — solo semanas activas (con stock en tránsito) */}
+            {(() => {
+                // Solo semanas donde aún hay stock esperado (confirmado > recibido)
+                const activasSemanas = semanaDetails.filter(w => w.confirmed > w.received);
+                if (activasSemanas.length === 0) return null;
 
-                                    return (
-                                        <tr key={w.id} className="hover:bg-navy/5 transition-colors">
-                                            <td className="px-4 py-3 font-bold text-navy text-[10px]">{w.nombre}</td>
-                                            <td className="px-3 py-3 text-center font-black text-blue-600">{w.confirmed}</td>
-                                            <td className="px-3 py-3 text-center text-slate-400">{w.received}</td>
-                                            <td className="px-3 py-3 text-center text-slate-500 font-bold">{enTransito}</td>
-                                            <td className="px-3 py-3 text-center text-purple-600 font-bold">{totalMayoristas}</td>
-                                            <td className="px-3 py-3 text-center text-green-600 font-bold">{totalClientes}</td>
-                                            <td className="px-3 py-3 text-center">
-                                                <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${sobrevendido ? 'bg-red-100 text-red-600' : netDisponible === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                    {sobrevendido ? `−${Math.abs(netDisponible)} sobrevendido` : `${netDisponible} libres`}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                            <tfoot className="bg-navy/5">
-                                {(() => {
-                                    const ws = semanaDetails.filter(w => w.confirmed > 0);
-                                    const totConf = ws.reduce((s,w)=>s+w.confirmed,0);
-                                    const totRec  = ws.reduce((s,w)=>s+w.received,0);
-                                    const totMay  = ws.reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.qtyMayorista||0),0),0);
-                                    const totCli  = ws.reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.allocated||0),0),0);
-                                    const totDisp = Math.max(0, totConf - totRec) - totMay - totCli;
-                                    return (
-                                        <tr className="font-black text-[10px]">
-                                            <td className="px-4 py-3 text-navy uppercase">TOTAL</td>
-                                            <td className="px-3 py-3 text-center text-blue-600">{totConf}</td>
-                                            <td className="px-3 py-3 text-center text-slate-400">{totRec}</td>
-                                            <td className="px-3 py-3 text-center text-slate-500">{Math.max(0,totConf-totRec)}</td>
-                                            <td className="px-3 py-3 text-center text-purple-600">{totMay}</td>
-                                            <td className="px-3 py-3 text-center text-green-600">{totCli}</td>
-                                            <td className="px-3 py-3 text-center">
-                                                <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${totDisp < 0 ? 'bg-red-100 text-red-600' : totDisp === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                    {totDisp < 0 ? `−${Math.abs(totDisp)} sobrevendido` : `${totDisp} libres`}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    );
-                                })()}
-                            </tfoot>
-                        </table>
+                const calcRow = (w) => {
+                    const totalMayoristas = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
+                    const totalClientes   = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
+                    // Fórmula: confirmado − recibido − mayoristas − clientes adjudicados
+                    const disponible = w.confirmed - w.received - totalMayoristas - totalClientes;
+                    return { totalMayoristas, totalClientes, disponible };
+                };
+
+                const totals = activasSemanas.reduce((acc, w) => {
+                    const r = calcRow(w);
+                    return {
+                        conf: acc.conf + w.confirmed,
+                        rec:  acc.rec  + w.received,
+                        may:  acc.may  + r.totalMayoristas,
+                        cli:  acc.cli  + r.totalClientes,
+                        disp: acc.disp + r.disponible,
+                    };
+                }, { conf: 0, rec: 0, may: 0, cli: 0, disp: 0 });
+
+                return (
+                    <div className="glass rounded-3xl border border-border/40 overflow-hidden">
+                        <div className="px-6 py-4 bg-navy/5 border-b border-border/20 flex items-center gap-3 flex-wrap">
+                            <Activity size={16} className="text-primary" />
+                            <h4 className="text-xs font-bold text-navy uppercase tracking-[0.2em]">Reconciliación de Stock — Semanas Activas</h4>
+                            <div className="ml-auto flex items-center gap-3">
+                                <span className="text-[9px] text-muted font-mono uppercase tracking-widest">
+                                    Flotante total disponible:
+                                </span>
+                                <span className={`font-black text-sm px-3 py-1 rounded-full ${totals.disp > 0 ? 'bg-emerald-100 text-emerald-700' : totals.disp === 0 ? 'bg-slate-100 text-slate-500' : 'bg-red-100 text-red-600'}`}>
+                                    {totals.disp > 0 ? `${totals.disp} uds libres` : totals.disp === 0 ? '0 libres' : `${totals.disp} sobrevendido`}
+                                </span>
+                                <span className="text-[9px] text-muted">↑ debe coincidir con Catálogo Actualizado</span>
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead className="bg-navy/5 text-[9px] font-black text-muted uppercase tracking-widest">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left">Semana</th>
+                                        <th className="px-3 py-3 text-center text-blue-500">Confirmado</th>
+                                        <th className="px-3 py-3 text-center text-slate-400">Recibido</th>
+                                        <th className="px-3 py-3 text-center text-slate-500">En tránsito</th>
+                                        <th className="px-3 py-3 text-center text-purple-500">Mayoristas</th>
+                                        <th className="px-3 py-3 text-center text-green-600">Clientes adj.</th>
+                                        <th className="px-3 py-3 text-center text-emerald-600">Disponible</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/10">
+                                    {activasSemanas.map(w => {
+                                        const { totalMayoristas, totalClientes, disponible } = calcRow(w);
+                                        const enTransito = w.confirmed - w.received;
+                                        return (
+                                            <tr key={w.id} className="hover:bg-navy/5 transition-colors">
+                                                <td className="px-4 py-3 font-bold text-navy text-[10px]">{w.nombre}</td>
+                                                <td className="px-3 py-3 text-center font-black text-blue-600">{w.confirmed}</td>
+                                                <td className="px-3 py-3 text-center text-slate-400">{w.received}</td>
+                                                <td className="px-3 py-3 text-center text-slate-600 font-bold">{enTransito}</td>
+                                                <td className="px-3 py-3 text-center text-purple-600 font-bold">{totalMayoristas}</td>
+                                                <td className="px-3 py-3 text-center text-green-600 font-bold">{totalClientes}</td>
+                                                <td className="px-3 py-3 text-center">
+                                                    <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${disponible < 0 ? 'bg-red-100 text-red-600' : disponible === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                        {disponible < 0 ? `${disponible} sobrevendido` : `${disponible} libres`}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot className="bg-navy/10 font-black text-[10px]">
+                                    <tr>
+                                        <td className="px-4 py-3 text-navy uppercase">Total activo</td>
+                                        <td className="px-3 py-3 text-center text-blue-600">{totals.conf}</td>
+                                        <td className="px-3 py-3 text-center text-slate-400">{totals.rec}</td>
+                                        <td className="px-3 py-3 text-center text-slate-600">{totals.conf - totals.rec}</td>
+                                        <td className="px-3 py-3 text-center text-purple-600">{totals.may}</td>
+                                        <td className="px-3 py-3 text-center text-green-600">{totals.cli}</td>
+                                        <td className="px-3 py-3 text-center">
+                                            <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${totals.disp < 0 ? 'bg-red-100 text-red-600' : totals.disp === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                {totals.disp < 0 ? `${totals.disp} sobrevendido` : `${totals.disp} libres`}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <div className="px-6 py-3 bg-slate-50 border-t border-border/10 text-[10px] text-muted flex gap-6 flex-wrap">
+                            <span>📋 <strong>Cómo verificar:</strong> Abrí Catálogo Actualizado → sumá todos los números de flotante de cada semana → debe dar <strong>{Math.max(0, totals.disp)}</strong></span>
+                            <span>✅ Clientes adj. = ADJUDICADO + EN TIENDA + CONFIRMADO (semana)</span>
+                            <span>⏳ Clientes en PEDIDO no cuentan (esperando asignación)</span>
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Timeline / Active Orders */}
             <div className="space-y-4">
