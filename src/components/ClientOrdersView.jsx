@@ -656,49 +656,64 @@ export default function ClientOrdersView() {
         try {
             const { data: masters } = await supabase.from('master_confirmaciones').select('semana_id, datos_json');
             const { data: recs } = await supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').eq('titulo', title);
-            const { data: allOrders } = await supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)').eq('titulo', title);
+            const { data: allOrders } = await supabase.from('pedido_items')
+                .select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo, vendedor_id)')
+                .eq('titulo', title);
             const { data: catProd } = await supabase.from('catalogo_productos').select('stock_fisico').eq('titulo', title).maybeSingle();
+            const { data: clienteItemsTitulo } = await supabase.from('cliente_items')
+                .select('semana_id, titulo, estado')
+                .ilike('titulo', title);
+
+            // Vendedores sin sistema: sus personal siempre vendidos
+            const { data: vendsSinSist } = await supabase.from('vendedores').select('id').eq('registra_ventas', false);
+            const idsSinSistema = new Set((vendsSinSist || []).map(v => v.id));
 
             const flotantes = [];
             const pTitle = title.toLowerCase().trim();
-            
+
             semanas.forEach(w => {
                 const master = masters?.find(m => m.semana_id === w.id);
                 const isConfirmed = !!master;
                 let qtyFlot = 0;
 
                 if (isConfirmed) {
+                    // MISMA FÓRMULA QUE CATÁLOGO ACTUALIZADO:
+                    // confirmado − recibido − mayoristas − personal_sin_sistema − adjudicados
                     const totalConf = (master.datos_json || [])
                         .filter(i => (i.titulo||'').toLowerCase().trim() === pTitle)
                         .reduce((s,i) => s + (i.cantidad||0), 0);
-                    const sellerRequested = (allOrders || [])
-                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id)
+
+                    const mayoristaQty = (allOrders || [])
+                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'mayorista' && p.pedido.semana_id === w.id)
                         .reduce((s,p) => s + (p.cantidad||0), 0);
+
+                    const sinSistemaQty = (allOrders || [])
+                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id && idsSinSistema.has(p.pedido.vendedor_id))
+                        .reduce((s,p) => s + (p.cantidad||0), 0);
+
                     const totalRec = (recs || [])
                         .filter(r => r.semana_id === w.id)
                         .reduce((s,r) => s + (r.cantidad_recibida||0), 0);
-                    const clientReserved = items.filter(it => 
-                        (it.titulo || '').toLowerCase().trim() === pTitle && 
-                        it.semana_id === w.id && 
-                        it.estado.includes('CONFIRMADO')
+
+                    // Adjudicados: ADJUDICADO + EN TIENDA + CONFIRMADO <semana>
+                    const clientReserved = (clienteItemsTitulo || []).filter(it =>
+                        it.semana_id === w.id &&
+                        (it.estado === 'ADJUDICADO' || it.estado === 'EN TIENDA' || (it.estado||'').startsWith('CONFIRMADO'))
                     ).length;
-                        
-                    qtyFlot = Math.max(0, (totalConf - sellerRequested) - totalRec - clientReserved);
+
+                    qtyFlot = Math.max(0, totalConf - totalRec - mayoristaQty - sinSistemaQty - clientReserved);
                 } else {
-                    const storeTotal = (allOrders || [])
+                    // NO CONFIRMADO: pedido tienda − clientes pendientes
+                    const tiendaBase = (allOrders || [])
                         .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id)
                         .reduce((s,p) => s + (p.cantidad||0), 0);
-                    const personalTotal = (allOrders || [])
-                        .filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id)
-                        .reduce((s,p) => s + (p.cantidad||0), 0);
-                    const clientWaitlist = items.filter(it =>
-                        (it.titulo||'').toLowerCase().trim() === pTitle &&
+
+                    const clientesPendientes = (clienteItemsTitulo || []).filter(it =>
                         it.semana_id === w.id &&
-                        it.estado.includes('PEDIDO')
+                        ((it.estado||'').startsWith('PEDIDO') || it.estado === 'POR CONFIRMAR')
                     ).length;
-                    // Clientes de pedidos personales no consumen del stock de tienda
-                    const storeClientWaitlist = Math.max(0, clientWaitlist - personalTotal);
-                    qtyFlot = Math.max(0, storeTotal - storeClientWaitlist);
+
+                    qtyFlot = Math.max(0, tiendaBase - clientesPendientes);
                 }
                 
                 if (qtyFlot > 0) {
@@ -790,16 +805,18 @@ export default function ClientOrdersView() {
 
                 // 1 sola ronda de queries para todos los títulos
                 const titulos = toAdd.map(it => it.titulo);
-                const [mastersRes2, recsRes, allOrdersRes, catProdsRes] = await Promise.all([
+                const [mastersRes2, recsRes, allOrdersRes, catProdsRes, vendsSinSistRes] = await Promise.all([
                     supabase.from('master_confirmaciones').select('semana_id, datos_json'),
                     supabase.from('pedido_items_recepcion').select('semana_id, titulo, cantidad_recibida').in('titulo', titulos),
-                    supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo)').in('titulo', titulos),
+                    supabase.from('pedido_items').select('cantidad, titulo, pedido:pedidos!inner(semana_id, tipo, vendedor_id)').in('titulo', titulos),
                     supabase.from('catalogo_productos').select('titulo, stock_fisico').in('titulo', titulos),
+                    supabase.from('vendedores').select('id').eq('registra_ventas', false),
                 ]);
                 const masters2 = mastersRes2.data || [];
                 const recs2 = recsRes.data || [];
                 const allOrders2 = allOrdersRes.data || [];
                 const catProds2 = catProdsRes.data || [];
+                const idsSinSistema2 = new Set((vendsSinSistRes.data || []).map(v => v.id));
 
                 const analyzeInMemory = (title) => {
                     const pTitle = title.toLowerCase().trim();
@@ -812,17 +829,18 @@ export default function ClientOrdersView() {
                         const isConfirmed = !!master;
                         let qtyFlot = 0;
                         if (isConfirmed) {
+                            // MISMA FÓRMULA: confirmado − recibido − mayoristas − personal_sin_sistema − adjudicados
                             const totalConf = (master.datos_json || []).filter(i => (i.titulo||'').toLowerCase().trim() === pTitle).reduce((s,i) => s + (i.cantidad||0), 0);
-                            const sellerRequested = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
+                            const mayoristaQty = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'mayorista' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
+                            const sinSistemaQty = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id && idsSinSistema2.has(p.pedido.vendedor_id)).reduce((s,p) => s + (p.cantidad||0), 0);
                             const totalRec = recs2.filter(r => r.semana_id === w.id && (r.titulo||'').toLowerCase().trim() === pTitle).reduce((s,r) => s + (r.cantidad_recibida||0), 0);
-                            const clientReserved = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && it.estado.includes('CONFIRMADO')).length;
-                            qtyFlot = Math.max(0, (totalConf - sellerRequested) - totalRec - clientReserved);
+                            const clientReserved = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && (it.estado === 'ADJUDICADO' || it.estado === 'EN TIENDA' || (it.estado||'').startsWith('CONFIRMADO'))).length;
+                            qtyFlot = Math.max(0, totalConf - totalRec - mayoristaQty - sinSistemaQty - clientReserved);
                         } else {
-                            const storeTotal = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
-                            const personalTotal = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'personal' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
-                            const clientWaitlist = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && it.estado.includes('PEDIDO')).length;
-                            const storeClientWaitlist = Math.max(0, clientWaitlist - personalTotal);
-                            qtyFlot = Math.max(0, storeTotal - storeClientWaitlist);
+                            // NO CONFIRMADO: pedido tienda − clientes pendientes
+                            const tiendaBase = allOrders2.filter(p => (p.titulo||'').toLowerCase().trim() === pTitle && p.pedido.tipo === 'tienda' && p.pedido.semana_id === w.id).reduce((s,p) => s + (p.cantidad||0), 0);
+                            const clientesPendientes = items.filter(it => (it.titulo||'').toLowerCase().trim() === pTitle && it.semana_id === w.id && ((it.estado||'').startsWith('PEDIDO') || it.estado === 'POR CONFIRMAR')).length;
+                            qtyFlot = Math.max(0, tiendaBase - clientesPendientes);
                         }
                         if (qtyFlot > 0) {
                             const d = w.fecha_estimada_llegada ? new Date(w.fecha_estimada_llegada) : new Date(new Date(w.created_at).getTime() + (22*24*60*60*1000));
