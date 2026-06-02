@@ -809,6 +809,47 @@ export default function PriceAnalysisTool() {
                     </tr>
                   ))}
                 </tbody>
+                {/* Fila de promedios */}
+                {rows.length > 0 && (() => {
+                  const avg = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+                  const avgGDtos = params.dtoNiveles.map((_, i) =>
+                    avg(rows.map(r => r.gDtos[i] * 100))
+                  );
+                  const avgGPV    = avg(rows.map(r => r.gPV * 100));
+                  const avgGMayor = avg(rows.map(r => r.gMayor * 100));
+                  return (
+                    <tfoot>
+                      <tr style={{ background: 'var(--mcb-navy)', color: 'white', fontWeight: 800 }}>
+                        <td colSpan="2" style={{ padding: '0.5rem 0.75rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          PROMEDIO ({rows.length} precios)
+                        </td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center', fontSize: '0.75rem' }}>—</td>
+                        {params.dtoNiveles.map((_, i) => (
+                          <td key={`avd${i}`} style={{ padding: '0.5rem 0.75rem', textAlign: 'center', fontSize: '0.75rem' }}>—</td>
+                        ))}
+                        {avgGDtos.map((g, i) => (
+                          <td key={`avg${i}`} style={{ padding: '0.5rem 0.5rem', textAlign: 'center' }}>
+                            <span className={`mcb-badge ${getBadgeClass(g / 100)}`} style={{ fontWeight: 900 }}>
+                              {g.toFixed(1)}%
+                            </span>
+                          </td>
+                        ))}
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center', fontSize: '0.75rem' }}>—</td>
+                        <td style={{ padding: '0.5rem 0.5rem', textAlign: 'center' }}>
+                          <span className={`mcb-badge ${getBadgeClass(avgGPV / 100)}`} style={{ fontWeight: 900 }}>
+                            {avgGPV.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center', fontSize: '0.75rem' }}>—</td>
+                        <td style={{ padding: '0.5rem 0.5rem', textAlign: 'center' }}>
+                          <span className={`mcb-badge ${getBadgeClass(avgGMayor / 100)}`} style={{ fontWeight: 900 }}>
+                            {avgGMayor.toFixed(1)}%
+                          </span>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           )}
