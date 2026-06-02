@@ -129,7 +129,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
         if (selectedFields.has('editorial')) columns.push({ header: 'EDITORIAL', key: 'editorial', width: 20 });
         if (selectedFields.has('categoria')) columns.push({ header: 'CATEGORÍA', key: 'categoria', width: 20 });
         if (selectedFields.has('precio')) {
-            columns.push({ header: tipoPrice === 'mayoreo' ? 'PRECIO MAYORISTA (Bs)' : 'PRECIO PVP (Bs)', key: 'precio_orig', width: 18 });
+            columns.push({ header: tipoPrice === 'mayoreo' ? 'PRECIO MAYORISTA (Bs)' : 'PRECIO RETAIL -10% (Bs)', key: 'precio_orig', width: 18 });
             if (discount > 0) {
                 columns.push({ header: `PRECIO DTO (${discount}%)`, key: 'precio_dto', width: 18 });
             }
@@ -156,16 +156,13 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
             if (selectedFields.has('precio')) {
                 const base = tipoPrice === 'mayoreo'
                     ? (item.precio_mayoreo_bs || item.precio_venta_bs)
-                    : item.precio_venta_bs;
+                    : (item.precio_n2_bs || item.precio_venta_bs * 0.90); // retail ya con 10%
                 const p = (useProxPrices
                     ? (tipoPrice === 'mayoreo'
                         ? (item.precio_mayoreo_bs_prox || item.precio_mayoreo_bs)
-                        : (item.precio_venta_bs_prox || item.precio_venta_bs))
+                        : (item.precio_venta_bs_prox || item.precio_venta_bs) * 0.90)
                     : base) || item.precio_tapa || 0;
                 rowData.precio_orig = p;
-                if (discount > 0) {
-                    rowData.precio_dto = (p * (1 - discount / 100)).toFixed(2);
-                }
             }
             
             if (selectedFields.has('stock')) {
@@ -317,11 +314,11 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                 if (selectedFields.has('precio')) {
                     const baseP = tipoPrice === 'mayoreo'
                         ? (item.precio_mayoreo_bs || item.precio_venta_bs)
-                        : item.precio_venta_bs;
+                        : (item.precio_n2_bs || item.precio_venta_bs * 0.90); // retail con 10%
                     const pOrig = (useProxPrices
                         ? (tipoPrice === 'mayoreo'
                             ? (item.precio_mayoreo_bs_prox || item.precio_mayoreo_bs)
-                            : (item.precio_venta_bs_prox || item.precio_venta_bs))
+                            : (item.precio_venta_bs_prox || item.precio_venta_bs) * 0.90)
                         : baseP) || item.precio_tapa || 0;
                     if (discount > 0) {
                         const pDto = (pOrig * (1 - discount / 100)).toFixed(2);
@@ -552,7 +549,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                                 {[{ id: 'mayoreo', label: 'Precio Mayorista' }, { id: 'retail', label: 'Precio PVP Retail' }].map(opt => (
                                     <button
                                         key={opt.id}
-                                        onClick={() => setTipoPrice(opt.id)}
+                                        onClick={() => { setTipoPrice(opt.id); if (opt.id === 'retail') setDiscount(10); else setDiscount(0); }}
                                         style={{
                                             flex: 1, padding: '0.5rem', borderRadius: 8, fontSize: '0.65rem', fontWeight: 800,
                                             border: tipoPrice === opt.id ? '1.5px solid #f59e0b' : '1.5px solid rgba(255,255,255,0.1)',
