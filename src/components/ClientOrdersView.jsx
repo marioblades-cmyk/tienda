@@ -1759,14 +1759,33 @@ export default function ClientOrdersView() {
 
     const activeKPIVId = filterVendedor === 'mine' ? user?.id : filterVendedor === 'todos' ? null : filterVendedor;
 
-    const ventasTotales = items.filter(i => !activeKPIVId || i.vendedor_id === activeKPIVId)
-        .reduce((acc, i) => acc + (Number(i.precio_venta)||0), 0);
-    const pagadoItems = items.filter(i => !activeKPIVId || i.vendedor_id === activeKPIVId)
-        .reduce((acc, i) => acc + (Number(i.monto_pagado)||0), 0);
-    const pagadoGral = pagos.filter(p => !activeKPIVId || p.vendedor_id === activeKPIVId)
-        .reduce((acc, p) => acc + (Number(p.monto)||0), 0);
-    const totalCobrado = pagadoItems + pagadoGral;
-    const saldoPendiente = ventasTotales - totalCobrado;
+    // KPIs reales: agrupar por cliente y medir solo pedidos NO entregados.
+    // Responde: "si entrego todo lo pendiente, ¿cuánto me falta cobrar?"
+    const kpis = (() => {
+        const myItems = items.filter(i => !activeKPIVId || i.vendedor_id === activeKPIVId);
+        const porCliente = {};
+        myItems.forEach(i => {
+            const cid = i.cliente_id;
+            if (!porCliente[cid]) porCliente[cid] = { ventasAct: 0, pagItemsAct: 0, pagItemsAll: 0 };
+            // Solo los NO entregados cuentan como pedido pendiente
+            if (i.estado !== 'ENTREGADO') {
+                porCliente[cid].ventasAct += Number(i.precio_venta || 0);
+                porCliente[cid].pagItemsAct += Number(i.monto_pagado || 0);
+            }
+            // monto_pagado de TODOS (para descontar lo ya aplicado al calcular saldo a favor)
+            porCliente[cid].pagItemsAll += Number(i.monto_pagado || 0);
+        });
+        let valorTotal = 0, cobrado = 0, porCobrar = 0;
+        Object.entries(porCliente).forEach(([cid, d]) => {
+            const abonos = getPagosRaiz(pagos, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
+            const saldoAFavor = Math.max(0, abonos - d.pagItemsAll); // abonos no aplicados a ningún ítem
+            const pagadoActivo = d.pagItemsAct + saldoAFavor;        // lo abonado aplicable a lo pendiente
+            valorTotal += d.ventasAct;
+            cobrado    += Math.min(d.ventasAct, pagadoActivo);       // adelantos sobre lo pendiente
+            porCobrar  += Math.max(0, d.ventasAct - pagadoActivo);   // lo que falta cobrar = deuda real
+        });
+        return { valorTotal, cobrado, porCobrar };
+    })();
 
     const [editingState, setEditingState] = useState(null);
 
@@ -2077,16 +2096,16 @@ export default function ClientOrdersView() {
                     <span className="text-2xl font-bold font-mono text-text">{totalPedidos}</span>
                 </div>
                 <div className="bg-surface border border-border rounded-xl p-4 shadow-sm flex flex-col justify-center">
-                    <span className="text-muted text-xs font-bold uppercase tracking-wider">Proyección de Ventas</span>
-                    <span className="text-2xl font-bold font-mono text-primary">BS {formatS(ventasTotales)}</span>
+                    <span className="text-muted text-xs font-bold uppercase tracking-wider">Valor de Pedidos Pendientes</span>
+                    <span className="text-2xl font-bold font-mono text-primary">BS {formatS(kpis.valorTotal)}</span>
                 </div>
                 <div className="bg-surface border border-border rounded-xl p-4 shadow-sm flex flex-col justify-center">
-                    <span className="text-muted text-xs font-bold uppercase tracking-wider">Cobrado / Asegurado</span>
-                    <span className="text-2xl font-bold font-mono text-success">BS {formatS(totalCobrado)}</span>
+                    <span className="text-muted text-xs font-bold uppercase tracking-wider">Ya Cobrado (adelantos)</span>
+                    <span className="text-2xl font-bold font-mono text-success">BS {formatS(kpis.cobrado)}</span>
                 </div>
                 <div className="bg-surface border border-border rounded-xl p-4 shadow-sm flex flex-col justify-center">
-                    <span className="text-muted text-xs font-bold uppercase tracking-wider">Riesgo / Saldo Péndiente</span>
-                    <span className="text-2xl font-bold font-mono text-error">BS {formatS(saldoPendiente)}</span>
+                    <span className="text-muted text-xs font-bold uppercase tracking-wider">Te Deben (al entregar)</span>
+                    <span className="text-2xl font-bold font-mono text-error">BS {formatS(kpis.porCobrar)}</span>
                 </div>
             </div>
 
