@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart } from 'lucide-react';
+import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart, TrendingUp, Loader2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { ffecha, fhora, ffechaLarga, fstamp } from '../utils/dateUtils';
 
@@ -74,6 +74,9 @@ export default function ClientOrdersView() {
     const [showAllPayMethods, setShowAllPayMethods] = useState(false);
     const [showHistorial, setShowHistorial] = useState(false);
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
+    const [recotizarItem, setRecotizarItem] = useState(null); // { item, precioNuevo } para modal de recotización
+    const [recotizarPrecio, setRecotizarPrecio] = useState('');
+    const [recotizarLoading, setRecotizarLoading] = useState(false);
     const [batchDiscount, setBatchDiscount] = useState('');
     const [batchAbono, setBatchAbono] = useState('');
     const [orderMethod, setOrderMethod] = useState('Yasta (QR)'); // método del abono inicial al crear pedido
@@ -592,10 +595,10 @@ export default function ClientOrdersView() {
                         )}
                         <div className="flex gap-1">
                             <button
-                                onClick={async (e) => {
+                                onClick={(e) => {
                                     e.stopPropagation();
-                                    await supabase.from('cliente_items').update({ estado: 'PEDIDO (Siguiente)' }).eq('id', it.id);
-                                    window.location.reload();
+                                    setRecotizarItem(it);
+                                    setRecotizarPrecio(String(Number(it.precio_venta) || ''));
                                 }}
                                 className="text-[8px] font-black text-emerald-600 hover:text-white hover:bg-emerald-500 border border-emerald-300 px-2 py-0.5 rounded transition-all whitespace-nowrap"
                             >✓ Acepta → Próx. Pedido</button>
@@ -4481,6 +4484,74 @@ export default function ClientOrdersView() {
             )}
 
             {/* REPROGRAM MODAL */}
+            {/* Modal de Recotización: aceptar precio para próximo pedido */}
+            {recotizarItem && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)', zIndex: 10006, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+                    <div className="bg-surface rounded-2xl shadow-2xl p-6 w-full max-w-md border border-amber-300">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg uppercase text-text flex items-center gap-2">
+                                <TrendingUp size={20} className="text-amber-500" /> Aceptar para Próximo Pedido
+                            </h3>
+                            <button onClick={() => setRecotizarItem(null)} className="text-muted hover:text-text"><X size={24} /></button>
+                        </div>
+
+                        <p className="text-xs text-muted mb-1"><strong className="text-text">{recotizarItem.titulo}</strong></p>
+                        <p className="text-[11px] text-muted mb-4">Cliente: {clientes.find(c => c.id === recotizarItem.cliente_id)?.nombre || '—'}</p>
+
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs flex items-center justify-between">
+                            <span className="text-slate-400 line-through">Precio anterior: Bs {Number(recotizarItem.precio_original || 0).toFixed(2)}</span>
+                            <span className="text-amber-700 font-black">Nuevo: Bs {Number(recotizarItem.precio_venta || 0).toFixed(2)}</span>
+                        </div>
+
+                        <div className="mb-5">
+                            <label className="text-[10px] font-black text-muted uppercase block mb-1">Precio a cobrar (editable)</label>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-black text-text">Bs</span>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    value={recotizarPrecio}
+                                    onChange={e => setRecotizarPrecio(e.target.value)}
+                                    onFocus={e => e.target.select()}
+                                    autoFocus
+                                    className="flex-1 bg-background border-2 border-amber-300 p-3 rounded-xl text-lg font-black text-text outline-none focus:border-amber-500"
+                                />
+                            </div>
+                            <p className="text-[10px] text-muted mt-1">Podés ajustar el precio que el cliente aceptó pagar antes de mandarlo al próximo pedido.</p>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setRecotizarItem(null)}
+                                className="flex-1 py-3 rounded-xl text-sm font-bold text-muted bg-background border border-border hover:border-primary/40"
+                            >Cancelar</button>
+                            <button
+                                onClick={async () => {
+                                    const precioFinal = Number(recotizarPrecio);
+                                    if (isNaN(precioFinal) || precioFinal <= 0) { alert('Ingresá un precio válido'); return; }
+                                    setRecotizarLoading(true);
+                                    try {
+                                        await supabase.from('cliente_items').update({
+                                            estado: 'PEDIDO (Siguiente)',
+                                            precio_venta: precioFinal,
+                                        }).eq('id', recotizarItem.id);
+                                        window.location.reload();
+                                    } catch (err) {
+                                        alert('Error: ' + err.message);
+                                        setRecotizarLoading(false);
+                                    }
+                                }}
+                                disabled={recotizarLoading}
+                                className="flex-1 py-3 rounded-xl text-sm font-black text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 flex items-center justify-center gap-2"
+                            >
+                                {recotizarLoading ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                                Aceptar → Próx. Pedido
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {reprogrammingItem && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)', zIndex: 10005, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
                     <div className="bg-surface rounded-2xl shadow-2xl p-6 w-full max-w-md border border-border">
