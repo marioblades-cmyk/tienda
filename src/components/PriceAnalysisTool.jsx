@@ -732,22 +732,17 @@ export default function PriceAnalysisTool() {
                   <tr>
                     <th rowSpan="2" className="bg-ars">PRECIO ARS</th>
                     <th rowSpan="2" className="bg-pv">PV AJUSTE</th>
-                    <th colSpan="4" className="bg-auto">CÁLCULO AUTOMÁTICO</th>
-                    <th colSpan="3" className="bg-dtos">DESCUENTOS SOBRE PV</th>
-                    <th colSpan="3" className="bg-gain">G% POR NIVEL</th>
-                    <th colSpan="4" className="bg-cost">COSTO Y GANANCIA</th>
+                    <th rowSpan="2" className="bg-auto">PV FINAL</th>
+                    <th colSpan={params.dtoNiveles.length} className="bg-dtos">PRECIO CON DESCUENTO (Bs)</th>
+                    <th colSpan={params.dtoNiveles.length} className="bg-gain">GANANCIA POR DESCUENTO</th>
+                    <th colSpan="4" className="bg-cost">COSTO Y GANANCIA BASE</th>
                   </tr>
                   <tr>
-                    <th className="bg-auto">D BASE</th>
-                    <th className="bg-auto">E RDND</th>
-                    <th className="bg-auto">F ×0.65</th>
-                    <th className="bg-auto">G PV</th>
-                    {params.dtoNiveles.map((_, i) => (
-                      <th key={`n${i}`} className="bg-dto" style={{ minWidth: 60 }}>N{i + 1} BS</th>
+                    {params.dtoNiveles.map((lvl, i) => (
+                      <th key={`n${i}`} className="bg-dto" style={{ minWidth: 60 }}>−{lvl}%</th>
                     ))}
-                    <th className="bg-gain">G% N2</th>
-                    {params.dtoNiveles.map((_, i) => (
-                      <th key={`g${i}`} className="bg-gain">G% N{i + 1}</th>
+                    {params.dtoNiveles.map((lvl, i) => (
+                      <th key={`g${i}`} className="bg-gain">G% −{lvl}%</th>
                     ))}
                     <th className="bg-cost">COSTO REAL BS</th>
                     <th className="bg-gain">G% PV</th>
@@ -778,9 +773,6 @@ export default function PriceAnalysisTool() {
                           value={row.pvManual || ''}
                           onChange={e => updatePrice(row.ars, e.target.value)} />
                       </td>
-                      <td className="td-muted">{row.D.toFixed(2)}</td>
-                      <td className="td-mono">{row.E}</td>
-                      <td className="td-muted">{row.F.toFixed(2)}</td>
                       <td className="td-navy" style={{ position: 'relative' }}>
                         {row.pvFinal}
                         {row.pvManual > 0 && (
@@ -795,11 +787,6 @@ export default function PriceAnalysisTool() {
                       {row.dtos.map((val, i) => (
                         <td key={i} className="td-dto">{val.toFixed(2)}</td>
                       ))}
-                      <td>
-                        <span className={`mcb-badge ${getBadgeClass(row.gN2)}`}>
-                          {(row.gN2 * 100).toFixed(1)}%
-                        </span>
-                      </td>
                       {row.gDtos.map((g, i) => (
                         <td key={`g${i}`}>
                           <span className={`mcb-badge ${getBadgeClass(g)}`}>
