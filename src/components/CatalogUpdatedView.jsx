@@ -277,24 +277,28 @@ const CatalogUpdatedView = () => {
                 weekStats.forEach(week => {
                     let qty = 0;
 
-                    if (week.isConfirmed) {
-                        // 1. Total confirmado por el distribuidor
-                        const totalConfirmedForTitle = week.masterData
+                    // Base: confirmado si tiene master, sino lo pedido a tienda
+                    const base = week.isConfirmed
+                        ? week.masterData
                             .filter(it => normalizeTitle(it.titulo) === prodTitle)
-                            .reduce((s, i) => s + (i.cantidad || 0), 0);
+                            .reduce((s, i) => s + (i.cantidad || 0), 0)
+                        : week.allOrdersData
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'tienda')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // 2. Unidades reservadas para mayoristas
+                    if (base > 0) {
+                        // Mayoristas reservados
                         const mayoristaQty = week.allOrdersData
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'mayorista')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // 3. Ya recibido de esta semana (ya pasó a stock físico)
+                        // Ya recibido (pasó a stock físico, ya no es flotante)
                         const received = week.receptionData
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
-                        // 4. Clientes adjudicados (cada cliente_item = 1 unidad)
-                        // ADJUDICADO = auto-reparto | EN TIENDA | CONFIRMADO <semana> = manual
+                        // Clientes adjudicados: ADJUDICADO | EN TIENDA | CONFIRMADO <semana>
+                        // Los que están en PEDIDO aún no tienen unidad asignada → no restan
                         const clientReserved = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle &&
                                 (it.estado === 'ADJUDICADO' ||
@@ -302,21 +306,8 @@ const CatalogUpdatedView = () => {
                                  (it.estado || '').startsWith('CONFIRMADO')))
                             .length;
 
-                        // Stock flotante = confirmado − recibido − mayoristas − clientes adjudicados
-                        qty = Math.max(0, totalConfirmedForTitle - received - mayoristaQty - clientReserved);
-                    } else {
-                        // Sin confirmar: disponible = pedido tienda − clientes en lista de espera
-                        const storeTotal = week.allOrdersData
-                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'tienda')
-                            .reduce((s, p) => s + (p.cantidad || 0), 0);
-                        const personalTotal = week.allOrdersData
-                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'personal')
-                            .reduce((s, p) => s + (p.cantidad || 0), 0);
-                        const clientWaitlist = (week.clientItemsData || [])
-                            .filter(it => normalizeTitle(it.titulo) === prodTitle && (it.estado || '').includes('PEDIDO'))
-                            .reduce((s, it) => s + (Number(it.cantidad) || 1), 0);
-                        const storeClientWaitlist = Math.max(0, clientWaitlist - personalTotal);
-                        qty = Math.max(0, storeTotal - storeClientWaitlist);
+                        // Flotante = base − recibido − mayoristas − clientes adjudicados
+                        qty = Math.max(0, base - received - mayoristaQty - clientReserved);
                     }
                     if (qty > 0) floatingByWeek[week.id] = { qty, isConfirmed: week.isConfirmed };
                 });
