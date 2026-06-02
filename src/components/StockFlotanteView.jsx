@@ -519,8 +519,8 @@ export default function ConfirmationInfoView() {
                 </div>
             </div>
 
-            {/* Panel de Reconciliación — solo semanas activas (con stock en tránsito) */}
-            {(() => {
+            {/* Panel de Reconciliación — ELIMINADO (ya no se usa) */}
+            {false && (() => {
                 // Solo semanas donde aún hay stock esperado (confirmado > recibido)
                 const activasSemanas = semanaDetails.filter(w => w.confirmed > w.received);
                 if (activasSemanas.length === 0) return null;
