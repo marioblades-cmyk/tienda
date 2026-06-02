@@ -534,37 +534,31 @@ export default function ConfirmationInfoView() {
                                     <th className="px-4 py-3 text-left">Semana</th>
                                     <th className="px-3 py-3 text-center text-blue-500">Confirmado</th>
                                     <th className="px-3 py-3 text-center text-slate-400">Recibido</th>
+                                    <th className="px-3 py-3 text-center text-slate-300">En tránsito</th>
                                     <th className="px-3 py-3 text-center text-purple-500">Mayoristas</th>
-                                    <th className="px-3 py-3 text-center text-orange-500">Vendedores</th>
                                     <th className="px-3 py-3 text-center text-green-600">Clientes</th>
-                                    <th className="px-3 py-3 text-center text-navy">Comprometido</th>
-                                    <th className="px-3 py-3 text-center text-emerald-600">Disponible Real</th>
+                                    <th className="px-3 py-3 text-center text-emerald-600">Disponible</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border/10">
                                 {semanaDetails.filter(w => w.confirmed > 0).map(w => {
                                     const totalMayoristas = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
                                     const totalClientes   = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
-                                    // Usar titleDetails.pedido que ya excluye estados terminales (CANCELADO, ENTREGADO, etc.)
-                                    const totalActivoPedido = w.titleDetails.reduce((s, t) => s + (t.pedido || 0), 0);
-                                    const totalVendedores = Math.max(0, totalActivoPedido - totalMayoristas);
-                                    const totalComprometido = totalMayoristas + totalVendedores + totalClientes;
-                                    const netDisponible = w.confirmed - w.received - totalComprometido;
-                                    const disponibleReal = Math.max(0, netDisponible);
-                                    const sobrevendido = netDisponible < 0;
+                                    const enTransito      = Math.max(0, w.confirmed - w.received);
+                                    const netDisponible   = enTransito - totalMayoristas - totalClientes;
+                                    const sobrevendido    = netDisponible < 0;
 
                                     return (
                                         <tr key={w.id} className="hover:bg-navy/5 transition-colors">
                                             <td className="px-4 py-3 font-bold text-navy text-[10px]">{w.nombre}</td>
                                             <td className="px-3 py-3 text-center font-black text-blue-600">{w.confirmed}</td>
                                             <td className="px-3 py-3 text-center text-slate-400">{w.received}</td>
+                                            <td className="px-3 py-3 text-center text-slate-500 font-bold">{enTransito}</td>
                                             <td className="px-3 py-3 text-center text-purple-600 font-bold">{totalMayoristas}</td>
-                                            <td className="px-3 py-3 text-center text-orange-500 font-bold">{totalVendedores}</td>
                                             <td className="px-3 py-3 text-center text-green-600 font-bold">{totalClientes}</td>
-                                            <td className="px-3 py-3 text-center font-black text-navy">{totalComprometido}</td>
                                             <td className="px-3 py-3 text-center">
-                                                <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${sobrevendido ? 'bg-red-100 text-red-600' : disponibleReal === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                    {sobrevendido ? `−${Math.abs(w.confirmed - w.received - totalComprometido)} SOBREVENDIDO` : `${disponibleReal} libres`}
+                                                <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${sobrevendido ? 'bg-red-100 text-red-600' : netDisponible === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                    {sobrevendido ? `−${Math.abs(netDisponible)} sobrevendido` : `${netDisponible} libres`}
                                                 </span>
                                             </td>
                                         </tr>
@@ -572,16 +566,29 @@ export default function ConfirmationInfoView() {
                                 })}
                             </tbody>
                             <tfoot className="bg-navy/5">
-                                <tr className="font-black text-[10px]">
-                                    <td className="px-4 py-3 text-navy uppercase">TOTAL</td>
-                                    <td className="px-3 py-3 text-center text-blue-600">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.confirmed,0)}</td>
-                                    <td className="px-3 py-3 text-center text-slate-400">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.received,0)}</td>
-                                    <td className="px-3 py-3 text-center text-purple-600">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.qtyMayorista||0),0),0)}</td>
-                                    <td className="px-3 py-3 text-center text-orange-500">—</td>
-                                    <td className="px-3 py-3 text-center text-green-600">{semanaDetails.filter(w=>w.confirmed>0).reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.allocated||0),0),0)}</td>
-                                    <td className="px-3 py-3 text-center text-navy">—</td>
-                                    <td className="px-3 py-3 text-center text-xs text-muted">↑ debe = Catálogo</td>
-                                </tr>
+                                {(() => {
+                                    const ws = semanaDetails.filter(w => w.confirmed > 0);
+                                    const totConf = ws.reduce((s,w)=>s+w.confirmed,0);
+                                    const totRec  = ws.reduce((s,w)=>s+w.received,0);
+                                    const totMay  = ws.reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.qtyMayorista||0),0),0);
+                                    const totCli  = ws.reduce((s,w)=>s+w.titleDetails.reduce((x,t)=>x+(t.allocated||0),0),0);
+                                    const totDisp = Math.max(0, totConf - totRec) - totMay - totCli;
+                                    return (
+                                        <tr className="font-black text-[10px]">
+                                            <td className="px-4 py-3 text-navy uppercase">TOTAL</td>
+                                            <td className="px-3 py-3 text-center text-blue-600">{totConf}</td>
+                                            <td className="px-3 py-3 text-center text-slate-400">{totRec}</td>
+                                            <td className="px-3 py-3 text-center text-slate-500">{Math.max(0,totConf-totRec)}</td>
+                                            <td className="px-3 py-3 text-center text-purple-600">{totMay}</td>
+                                            <td className="px-3 py-3 text-center text-green-600">{totCli}</td>
+                                            <td className="px-3 py-3 text-center">
+                                                <span className={`font-black px-2 py-0.5 rounded-full text-[10px] ${totDisp < 0 ? 'bg-red-100 text-red-600' : totDisp === 0 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                    {totDisp < 0 ? `−${Math.abs(totDisp)} sobrevendido` : `${totDisp} libres`}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })()}
                             </tfoot>
                         </table>
                     </div>
