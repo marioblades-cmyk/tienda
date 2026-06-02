@@ -277,28 +277,22 @@ const CatalogUpdatedView = () => {
                 weekStats.forEach(week => {
                     let qty = 0;
 
-                    // Base: confirmado si tiene master, sino lo pedido a tienda
-                    const base = week.isConfirmed
-                        ? week.masterData
+                    // Misma lógica que StockFlotanteView — usar datos ya calculados
+                    if (week.isConfirmed) {
+                        // CONFIRMADO: flotante = confirmado − recibido − (mayoristas + adjudicados)
+                        const totalConfirmedForTitle = week.masterData
                             .filter(it => normalizeTitle(it.titulo) === prodTitle)
-                            .reduce((s, i) => s + (i.cantidad || 0), 0)
-                        : week.allOrdersData
-                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'tienda')
-                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+                            .reduce((s, i) => s + (i.cantidad || 0), 0);
 
-                    if (base > 0) {
-                        // Mayoristas reservados
                         const mayoristaQty = week.allOrdersData
                             .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'mayorista')
                             .reduce((s, p) => s + (p.cantidad || 0), 0);
 
-                        // Ya recibido (pasó a stock físico, ya no es flotante)
                         const received = week.receptionData
                             .filter(r => normalizeTitle(r.titulo) === prodTitle)
                             .reduce((s, r) => s + (r.cantidad_recibida || 0), 0);
 
                         // Clientes adjudicados: ADJUDICADO | EN TIENDA | CONFIRMADO <semana>
-                        // Los que están en PEDIDO aún no tienen unidad asignada → no restan
                         const clientReserved = (week.clientItemsData || [])
                             .filter(it => normalizeTitle(it.titulo) === prodTitle &&
                                 (it.estado === 'ADJUDICADO' ||
@@ -306,8 +300,22 @@ const CatalogUpdatedView = () => {
                                  (it.estado || '').startsWith('CONFIRMADO')))
                             .length;
 
-                        // Flotante = base − recibido − mayoristas − clientes adjudicados
-                        qty = Math.max(0, base - received - mayoristaQty - clientReserved);
+                        // Con recorte: max(0) = 0 libres automáticamente
+                        qty = Math.max(0, totalConfirmedForTitle - received - mayoristaQty - clientReserved);
+
+                    } else {
+                        // NO CONFIRMADO: flotante tentativo = pedido_tienda − clientes pendientes
+                        // Los clientes en PEDIDO ya reclamaron esas unidades (posibles asignados)
+                        const tiendaBase = week.allOrdersData
+                            .filter(p => normalizeTitle(p.titulo) === prodTitle && p.pedido.tipo === 'tienda')
+                            .reduce((s, p) => s + (p.cantidad || 0), 0);
+
+                        const clientesPendientes = (week.clientItemsData || [])
+                            .filter(it => normalizeTitle(it.titulo) === prodTitle &&
+                                ((it.estado || '').startsWith('PEDIDO') || it.estado === 'POR CONFIRMAR'))
+                            .length;
+
+                        qty = Math.max(0, tiendaBase - clientesPendientes);
                     }
                     if (qty > 0) floatingByWeek[week.id] = { qty, isConfirmed: week.isConfirmed };
                 });

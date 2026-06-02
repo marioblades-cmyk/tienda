@@ -526,11 +526,13 @@ export default function ConfirmationInfoView() {
                 if (activasSemanas.length === 0) return null;
 
                 const calcRow = (w) => {
-                    const totalMayoristas = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
-                    const totalClientes   = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
-                    // Fórmula: confirmado − recibido − mayoristas − clientes adjudicados
-                    const disponible = w.confirmed - w.received - totalMayoristas - totalClientes;
-                    return { totalMayoristas, totalClientes, disponible };
+                    const totalMayoristas    = w.titleDetails.reduce((s, t) => s + (t.qtyMayorista || 0), 0);
+                    const totalClientes      = w.titleDetails.reduce((s, t) => s + (t.allocated || 0), 0);
+                    const qtyTotalAllocated  = totalMayoristas + totalClientes; // = el "Reparto" de la UI
+                    // Mismo cálculo que la UI: confirmado − recibido − totalAsignado
+                    // Con recorte: da negativo → se muestra como sobrevendido
+                    const disponible = w.confirmed - w.received - qtyTotalAllocated;
+                    return { totalMayoristas, totalClientes, qtyTotalAllocated, disponible };
                 };
 
                 const totals = activasSemanas.reduce((acc, w) => {
