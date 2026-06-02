@@ -17,6 +17,9 @@ export default function AdminWeeklyView() {
     const [showPendingModal, setShowPendingModal] = useState(false);
     const [editingDateId, setEditingDateId] = useState(null);
     const [tempDate, setTempDate] = useState('');
+    const [editingNameId, setEditingNameId] = useState(null);
+    const [tempName, setTempName] = useState('');
+    const [savingName, setSavingName] = useState(false);
     const [selectedPending, setSelectedPending] = useState(new Set());
 
     useEffect(() => {
@@ -119,6 +122,59 @@ export default function AdminWeeklyView() {
         else {
             setEditingDateId(null);
             fetchSemanas();
+        }
+    };
+
+    const handleNameUpdate = async (semana) => {
+        const nuevoNombre = tempName.trim();
+        if (!nuevoNombre || nuevoNombre === semana.nombre) {
+            setEditingNameId(null);
+            return;
+        }
+        setSavingName(true);
+        try {
+            // 1. Actualizar nombre en semanas
+            const { error } = await supabase
+                .from('semanas')
+                .update({ nombre: nuevoNombre })
+                .eq('id', semana.id);
+            if (error) throw error;
+
+            const oldNombre = semana.nombre;
+
+            // 2. Cascade: actualizar pedido_items que tienen el nombre viejo en su estado
+            // Ej: "CONFIRMADO ENTELEQUIA DISTRIBUCIÓN 24 22-5" → "CONFIRMADO NuevoNombre"
+            const { data: pedidoItems } = await supabase
+                .from('pedido_items')
+                .select('id, estado')
+                .like('estado', `%${oldNombre}%`);
+
+            if (pedidoItems?.length > 0) {
+                for (const it of pedidoItems) {
+                    const nuevoEstado = it.estado.replaceAll(oldNombre, nuevoNombre);
+                    await supabase.from('pedido_items').update({ estado: nuevoEstado }).eq('id', it.id);
+                }
+            }
+
+            // 3. Cascade: actualizar cliente_items
+            const { data: clienteItems } = await supabase
+                .from('cliente_items')
+                .select('id, estado')
+                .like('estado', `%${oldNombre}%`);
+
+            if (clienteItems?.length > 0) {
+                for (const it of clienteItems) {
+                    const nuevoEstado = it.estado.replaceAll(oldNombre, nuevoNombre);
+                    await supabase.from('cliente_items').update({ estado: nuevoEstado }).eq('id', it.id);
+                }
+            }
+
+            setEditingNameId(null);
+            fetchSemanas();
+        } catch (err) {
+            alert('Error al renombrar: ' + err.message);
+        } finally {
+            setSavingName(false);
         }
     };
 
@@ -340,7 +396,33 @@ export default function AdminWeeklyView() {
                         >
                             <div>
                                 <div className="flex items-center gap-3 mb-2">
-                                    <h4 className="font-display text-2xl tracking-wide uppercase text-text">{s.nombre}</h4>
+                                    {editingNameId === s.id ? (
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="text"
+                                                value={tempName}
+                                                onChange={e => setTempName(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter') handleNameUpdate(s); if (e.key === 'Escape') setEditingNameId(null); }}
+                                                className="font-display text-xl tracking-wide uppercase bg-background border-2 border-accent px-3 py-1 rounded-lg outline-none text-text w-72"
+                                                autoFocus
+                                            />
+                                            <button
+                                                onClick={() => handleNameUpdate(s)}
+                                                disabled={savingName}
+                                                className="text-accent font-bold text-sm hover:text-accent/70 disabled:opacity-40"
+                                            >{savingName ? '...' : 'Guardar'}</button>
+                                            <button onClick={() => setEditingNameId(null)} className="text-muted text-sm">Cancelar</button>
+                                        </div>
+                                    ) : (
+                                        <h4
+                                            className="font-display text-2xl tracking-wide uppercase text-text cursor-pointer hover:text-accent transition-colors group/name flex items-center gap-2"
+                                            onClick={() => { setEditingNameId(s.id); setTempName(s.nombre); }}
+                                            title="Click para editar nombre"
+                                        >
+                                            {s.nombre}
+                                            <span className="opacity-0 group-hover/name:opacity-100 text-accent text-sm font-sans font-bold transition-opacity">✎</span>
+                                        </h4>
+                                    )}
                                     <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${s.abierta ? 'bg-success/10 text-success border border-success/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
                                         {s.abierta ? 'ABIERTA' : 'CERRADA'}
                                     </span>
