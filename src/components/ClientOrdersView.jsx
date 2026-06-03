@@ -1079,9 +1079,9 @@ export default function ClientOrdersView() {
             if (typeof catalogService !== 'undefined') catalogService.clearCache();
 
             // 5. Registrar pago inicial (Refactorizado: Binario Items vs Crédito)
-            const totalAbonoCalculado = orderPayMode === 'items' 
+            const totalAbonoCalculado = round2(orderPayMode === 'items'
                 ? cart.reduce((s, c) => s + (Number(c.pagoIndividual) || 0), 0)
-                : (Number(orderPayAmt) || 0);
+                : (Number(orderPayAmt) || 0));
 
             if (totalAbonoCalculado > 0) {
                 const clienteNombre = clientes.find(c => c.id === clienteId)?.nombre || addForm.nombre || clienteId;
@@ -1146,7 +1146,7 @@ export default function ClientOrdersView() {
                         if (amt > 0 && dbItem) {
                             // Actualizar ítem en DB
                             await supabase.from('cliente_items')
-                                .update({ monto_pagado: (Number(dbItem.monto_pagado) || 0) + amt })
+                                .update({ monto_pagado: round2((Number(dbItem.monto_pagado) || 0) + amt) })
                                 .eq('id', dbItem.id);
 
                             // Crear sub-entry vinculada al nuevo root (mismo caja_mov_id)
@@ -1281,7 +1281,7 @@ export default function ClientOrdersView() {
                     const aplicar = Number(itemPayAmounts[eq.id] || 0);
                     
                     if (aplicar > 0) {
-                        const nuevoMonto = Number(eq.monto_pagado || 0) + aplicar;
+                        const nuevoMonto = round2(Number(eq.monto_pagado || 0) + aplicar);
                         await supabase.from('cliente_items').update({
                             monto_pagado: nuevoMonto,
                             estado: eq.estado
@@ -1541,7 +1541,7 @@ export default function ClientOrdersView() {
                 }
 
                 // 3. Actualizar el ítem
-                const nuevoMontoPagado = Number(it.monto_pagado || 0) + appliedActual;
+                const nuevoMontoPagado = round2(Number(it.monto_pagado || 0) + appliedActual);
                 await supabase.from('cliente_items').update({ monto_pagado: nuevoMontoPagado }).eq('id', itemId);
             }
 
