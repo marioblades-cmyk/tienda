@@ -10,6 +10,25 @@ function num(v) {
     if (v === null || v === undefined || v === '') return 0;
     return parseFloat(String(v).replace(/[^0-9.-]/g, '')) || 0;
 }
+
+// Costo logístico real por unidad de una fila de remito.
+// Cruza el nombre de confirmación (texto entre paréntesis del campo "pedido")
+// con el mapa de confirmaciones para obtener envío y unidades.
+// Devuelve null si falta cualquier dato (no debe contar para el promedio).
+function calcCostoUnidad(r, confMap) {
+    if (!confMap) return null;
+    const m = (r.pedido || '').match(/\(([^)]+)\)/); // texto entre paréntesis
+    if (!m) return null;                              // sin nombre de confirmación
+    const conf = confMap[m[1].trim()];
+    if (!conf || !conf.unidades) return null;         // sin confirmación o sin unidades
+    const costoBS = num(r.compre) * num(r.cambio);
+    const fleteBS = num(r.cg) * FG + num(r.cm) * FM + num(r.cp) * FP;
+    const totalBS = costoBS + fleteBS;
+    if (totalBS <= 0) return null;                    // remito aún sin cargar
+    const envioBs = num(conf.envio) * num(r.tc_dist);
+    const costoLog = totalBS + envioBs;
+    return { costoUnidad: costoLog / conf.unidades, costoLog, totalBS, envioBs, unidades: conf.unidades };
+}
 // Formateadores de moneda (ARS y BS)
 function fBS(v) { return v ? 'BS ' + v.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'; }
 function fARS(v) { return v ? 'ARS ' + Number(v).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'; }
@@ -132,6 +151,7 @@ function calcDistFIFO(distState, rowsData) {
 
 export default function RemitosTable({ activeTab = 'remitos', isSocio = false }) {
     const [rows, setRows] = useState([]);
+    const [confMap, setConfMap] = useState({}); // { nombreSemana: { envio, unidades } } para costo/unidad
     const [dist, setDist] = useState({ pagos: [], pedidos: [], saldoInicial: null, ajustes: [] });
 
     // Nuevos estados
@@ -221,6 +241,24 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
 
     // Carga inicial (initApp)
     useEffect(() => {
+        // Cargar confirmaciones (envío + unidades por semana) para el costo/unidad
+        (async () => {
+            try {
+                const [{ data: masters }, { data: semanas }] = await Promise.all([
+                    supabase.from('master_confirmaciones').select('semana_id, costo_envio, datos_json'),
+                    supabase.from('semanas').select('id, nombre')
+                ]);
+                const map = {};
+                (masters || []).forEach(m => {
+                    const sem = (semanas || []).find(s => s.id === m.semana_id);
+                    if (!sem) return;
+                    const unidades = (m.datos_json || []).reduce((s, it) => s + (it.cantidad || 0), 0);
+                    map[(sem.nombre || '').trim()] = { envio: num(m.costo_envio), unidades };
+                });
+                setConfMap(map);
+            } catch (e) { console.error('Error cargando confirmaciones para costo/unidad:', e); }
+        })();
+
         const initApp = async () => {
             try {
                 // Cargar datos de Supabase en paralelo
@@ -870,10 +908,16 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     // Resumen variables
     let count = 0, tARS = 0, tBS = 0, tFlete = 0, tTotal = 0;
     let tCajas = 0, tKg = 0, tLibros = 0, tGrandSummary = 0, tSocioTotal = 0;
+    let sumCostoLog = 0, sumUnidadesLog = 0, nPedidosLog = 0; // para costo logístico promedio/unidad
 
     // Calcular costos totales sumando el cálculo de cada fila
     rows.forEach(r => {
         count++;
+
+        // Costo logístico por unidad (solo filas con datos completos)
+        const cu = calcCostoUnidad(r, confMap);
+        if (cu) { sumCostoLog += cu.costoLog; sumUnidadesLog += cu.unidades; nPedidosLog++; }
+
         let compre = num(r.compre);
         let cambio = num(r.cambio);
         let costoBS = compre * cambio;
@@ -899,6 +943,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
     });
 
     let tMisPedidos = tGrandSummary - tSocioTotal;
+    const costoPromedioUnidad = sumUnidadesLog > 0 ? sumCostoLog / sumUnidadesLog : 0;
 
     // Contar seleccionados
     const selectedCount = rows.filter(r => r.selected).length;
@@ -1912,6 +1957,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                 <span className="summary-label">Factor Peso</span>
                                 <span className="summary-value" id="s-kg">{tKg} kg</span>
                             </div>
+                            <div className="summary-item" style={{ border: '1.5px solid var(--accent)', borderRadius: 8 }}>
+                                <span className="summary-label" style={{ color: 'var(--accent)' }}>Costo / Unidad (BS)</span>
+                                <span className="summary-value" style={{ color: 'var(--accent)', fontWeight: 900 }} title={`Promedio de ${nPedidosLog} pedido(s) válido(s) · ${sumUnidadesLog} unidades`}>
+                                    {costoPromedioUnidad ? fBS(costoPromedioUnidad) : '--'}
+                                </span>
+                            </div>
                         </div >
 
                         {/* MODAL: REGISTRAR FLETE */}
@@ -2028,6 +2079,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         <th colSpan={compactMode ? 2 : 3} style={{ color: "var(--warn)", backgroundColor: "rgba(245, 168, 0, 0.05)" }}>Distribuidor</th>
                                         <th colSpan={compactMode ? 3 : 6} style={{ color: "var(--purple)", backgroundColor: "rgba(156, 39, 176, 0.05)" }}>Socio</th>
                                         {!compactMode && <th colSpan="2" style={{ color: "var(--ok)", backgroundColor: "rgba(39, 174, 96, 0.05)" }}>TOTALES</th>}
+                                        <th colSpan="1" style={{ color: 'var(--accent)', backgroundColor: 'rgba(28,144,242,0.06)' }}>Costo Real</th>
                                     </tr>
                                     <tr className="cols">
                                         <th>Nro Remito</th>
@@ -2058,12 +2110,14 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                         {!compactMode && <th>Pedido BS</th>}
                                         {!compactMode && <th style={{ backgroundColor: 'rgba(39, 174, 96, 0.05)' }}>Total Socio BS</th>}
                                         {!compactMode && <th style={{ backgroundColor: 'rgba(39, 174, 96, 0.05)' }}>Mis Pedidos BS</th>}
+                                        <th style={{ backgroundColor: 'rgba(28,144,242,0.06)', minWidth: '80px' }} title="Costo logístico real por unidad: (Costo Total BS + Envío convertido) ÷ unidades confirmadas">Bs / Unidad</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tbody">
                                     {rows.map(r => {
                                         // Calculamos directamente ejecutando calcRow con la referencia exacta
                                         const calcs = calcRow(r.id, rows) || { costoBS: 0, fleteBS: 0, totalBS: 0 };
+                                        const cu = calcCostoUnidad(r, confMap); // costo logístico por unidad (o null)
 
                                         const inputStyle = {
                                             width: '100%',
@@ -2387,6 +2441,12 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                                         </td>
                                                     </>
                                                 )}
+                                                <td
+                                                    style={{ backgroundColor: 'rgba(28,144,242,0.06)', textAlign: 'right', fontWeight: 'bold', color: cu ? 'var(--accent)' : '#bbb' }}
+                                                    title={cu ? `(totalBS ${cu.totalBS.toFixed(0)} + envío ${cu.envioBs.toFixed(0)}) ÷ ${cu.unidades} uds` : 'Datos incompletos — no cuenta para el promedio'}
+                                                >
+                                                    {cu ? cu.costoUnidad.toFixed(2) : '—'}
+                                                </td>
                                             </tr>
                                         );
                                     })}
