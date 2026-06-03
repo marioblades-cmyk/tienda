@@ -494,6 +494,8 @@ export default function ClientOrdersView() {
     };
 
     const formatS = (num) => Number(num || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Redondeo a 2 decimales para evitar errores de punto flotante (ej: 79.10 + 79.05 = 158.14999…)
+    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
     const getAuditNote = () => {
         const myName = vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio';
@@ -1198,7 +1200,7 @@ export default function ClientOrdersView() {
     const handleSavePayment = async (clienteId) => {
         try {
             setLoading(true);
-            const amt = Number(payMonto);
+            const amt = round2(payMonto);
             if (amt <= 0) return alert("Monto inválido");
 
             const cli = clientes.find(c => c.id === clienteId);
@@ -4216,7 +4218,7 @@ export default function ClientOrdersView() {
                                                             setSelectedPayItems(ids);
                                                             const newAmounts = {};
                                                             pendientes.forEach(i => { newAmounts[i.id] = Math.max(0, i.precio_venta - i.monto_pagado); });
-                                                            const total = Object.values(newAmounts).reduce((s,v) => s + Number(v||0), 0);
+                                                            const total = round2(Object.values(newAmounts).reduce((s,v) => s + Number(v||0), 0));
                                                             setPayMonto(total > 0 ? total : '');
                                                             setItemPayAmounts(newAmounts);
                                                         }
@@ -4242,7 +4244,7 @@ export default function ClientOrdersView() {
                                                                 if (e.target.checked) { newAmounts[it.id] = deuda; }
                                                                 else { delete newAmounts[it.id]; }
                                                                 setItemPayAmounts(newAmounts);
-                                                                const total = Object.values(newAmounts).reduce((s, val) => s + Number(val || 0), 0);
+                                                                const total = round2(Object.values(newAmounts).reduce((s, val) => s + Number(val || 0), 0));
                                                                 setPayMonto(total > 0 ? total : '');
                                                             }}/>
                                                         </div>
@@ -4264,7 +4266,7 @@ export default function ClientOrdersView() {
                                                                         if (val < 0) val = 0;
                                                                         const updated = { ...itemPayAmounts, [it.id]: e.target.value === '' ? '' : val };
                                                                         setItemPayAmounts(updated);
-                                                                        const newTotal = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
+                                                                        const newTotal = round2(Object.values(updated).reduce((s, v) => s + Number(v || 0), 0));
                                                                         setPayMonto(newTotal > 0 ? newTotal : '');
                                                                     }}
                                                                     className="w-16 bg-background border border-border focus:border-primary rounded-lg px-2 py-1 text-right text-xs font-black font-mono text-primary outline-none transition-colors"
