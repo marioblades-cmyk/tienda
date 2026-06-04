@@ -24,6 +24,7 @@ const ACCION_LABEL = {
     EDITAR_PAGO: '✏️ Editar pago',
     ELIMINAR_PAGO: '🗑️ Eliminar pago',
     ELIMINAR_CLIENTE: '🗑️ Eliminar cliente',
+    ELIMINAR_ITEM: '🗑️ Eliminar ítem',
     ELIMINAR_ITEMS: '🗑️ Eliminar ítems',
     REVERTIR_DISTRIBUCION: '↩️ Revertir distribución',
     CAMBIAR_ESTADO: '🔄 Cambiar estado',

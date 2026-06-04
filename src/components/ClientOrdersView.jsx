@@ -2661,6 +2661,8 @@ export default function ClientOrdersView() {
                                                                     </button>
                                                                     <button onClick={async()=>{
                                                                         if(!confirm('¿Eliminar este ítem del pedido?')) return;
+                                                                        const opIdDel = newOpId();
+                                                                        audit.start(opIdDel, { accion: 'ELIMINAR_ITEM', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: it.cliente_id, detalle: { item_id: it.id, titulo: it.titulo, estado: it.estado, precio: it.precio_venta, pagado: it.monto_pagado } });
                                                                         setLoading(true);
                                                                         try {
                                                                             let shouldRestore = false;
@@ -2714,8 +2716,9 @@ export default function ClientOrdersView() {
                                                                                 }
                                                                             }
                                                                             await supabase.from('cliente_items').delete().eq('id', it.id);
+                                                                            audit.done(opIdDel, 'ELIMINAR_ITEM', { resultado: 'eliminado', titulo: it.titulo });
                                                                             await fetchData(); await fetchCatalog();
-                                                                        } catch(e){ console.error(e); }
+                                                                        } catch(e){ console.error(e); audit.error(opIdDel, 'ELIMINAR_ITEM', 'EXCEPCION', e); }
                                                                         finally { setLoading(false); }
                                                                     }} className="text-muted hover:text-error p-1 transition-colors">
                                                                         <Trash2 size={isCompact ? 12 : 14}/>
@@ -3281,6 +3284,8 @@ export default function ClientOrdersView() {
                                         </button>
                                         <button onClick={async()=>{
                                             if(confirm('¿Eliminar este ítem del pedido?')) {
+                                                const opIdDel2 = newOpId();
+                                                audit.start(opIdDel2, { accion: 'ELIMINAR_ITEM', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: it.cliente_id, detalle: { item_id: it.id, titulo: it.titulo, estado: it.estado, precio: it.precio_venta, pagado: it.monto_pagado } });
                                                 let shouldRestore = false;
                                                 if (it.estado === 'EN TIENDA' && (it.catalog_id || it.product_id)) {
                                                     shouldRestore = true;
@@ -3312,6 +3317,7 @@ export default function ClientOrdersView() {
                                                     }
                                                 }
                                                 await supabase.from('cliente_items').delete().eq('id', it.id);
+                                                audit.done(opIdDel2, 'ELIMINAR_ITEM', { resultado: 'eliminado', titulo: it.titulo });
                                                 await fetchData();
                                                 await fetchCatalog();
                                             }
