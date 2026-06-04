@@ -136,6 +136,8 @@ export default function ClientOrdersView() {
         if (!selectedItems.size) return;
         if (!confirm(`¿Estás seguro de eliminar ${selectedItems.size} pedidos seleccionados? Esta acción no se puede deshacer.`)) return;
 
+        const opId = newOpId();
+        audit.start(opId, { accion: 'ELIMINAR_ITEMS', vendedor_id: user?.id, vendedor_nombre: vendNombre(), detalle: { cantidad: selectedItems.size, ids: Array.from(selectedItems) } });
         setLoading(true);
         try {
             const list = Array.from(selectedItems);
@@ -209,7 +211,8 @@ export default function ClientOrdersView() {
 
             // Perform bulk delete
             const { error } = await supabase.from('cliente_items').delete().in('id', list);
-            if (error) throw error;
+            if (error) { audit.error(opId, 'ELIMINAR_ITEMS', 'delete', error); throw error; }
+            audit.done(opId, 'ELIMINAR_ITEMS', { resultado: 'eliminado', cantidad: list.length });
 
             setSelectedItems(new Set());
             if (typeof catalogService !== 'undefined') catalogService.clearCache();
@@ -226,6 +229,8 @@ export default function ClientOrdersView() {
 
     const handleResolveDamage = async (method) => {
         if (!damageTarget || !user) return;
+        const opId = newOpId();
+        audit.start(opId, { accion: 'RESOLVER_DANO', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: damageTarget.client?.id, cliente_nombre: damageTarget.client?.nombre, detalle: { item: damageTarget.item?.titulo, metodo: method } });
         setResolvingDamage(true);
         try {
             const { item, client } = damageTarget;
@@ -313,12 +318,14 @@ export default function ClientOrdersView() {
                 if (err2) throw err2;
             }
 
+            audit.done(opId, 'RESOLVER_DANO', { resultado: 'completado', metodo: method });
             alert("Reposición procesada con éxito y saldo transferido.");
             setShowDamageModal(false);
             setDamageTarget(null);
             fetchData();
         } catch (error) {
             console.error(error);
+            audit.error(opId, 'RESOLVER_DANO', 'EXCEPCION', error);
             alert("Error al procesar daño: " + error.message);
         } finally {
             setResolvingDamage(false);
@@ -611,7 +618,10 @@ export default function ClientOrdersView() {
                                 onClick={async (e) => {
                                     e.stopPropagation();
                                     if (!confirm(`¿Cancelar "${it.titulo}"?`)) return;
+                                    const opId = newOpId();
+                                    audit.start(opId, { accion: 'RECOTIZAR_CANCELA', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: it.cliente_id, detalle: { item_id: it.id, titulo: it.titulo } });
                                     await supabase.from('cliente_items').update({ estado: 'CANCELADO' }).eq('id', it.id);
+                                    audit.done(opId, 'RECOTIZAR_CANCELA', { resultado: 'cancelado' });
                                     window.location.reload();
                                 }}
                                 className="text-[8px] font-black text-red-500 hover:text-white hover:bg-red-500 border border-red-200 px-2 py-0.5 rounded transition-all whitespace-nowrap"
@@ -1363,6 +1373,8 @@ export default function ClientOrdersView() {
             (pago.caja_mov_id ? '\n\nSe eliminará de Contabilidad.' : '')
         )) return;
 
+        const opId = newOpId();
+        audit.start(opId, { accion: 'ELIMINAR_PAGO', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: pago.cliente_id, detalle: { pago_id: pago.id, monto: pago.monto, concepto: pago.concepto, caja_mov_id: pago.caja_mov_id || null } });
         try {
             setLoading(true);
 
@@ -1398,15 +1410,18 @@ export default function ClientOrdersView() {
             // 2. Borrar el movimiento de contabilidad
             if (pago.caja_mov_id) {
                 await supabase.from('caja_movimientos').delete().eq('id', pago.caja_mov_id);
+                audit.step(opId, 'ELIMINAR_PAGO', 'delete_caja_movimiento', { caja_mov_id: pago.caja_mov_id });
             }
 
             // 3. Borrar el registro raíz
             await supabase.from('cliente_pagos').delete().eq('id', pago.id);
+            audit.done(opId, 'ELIMINAR_PAGO', { resultado: 'eliminado', monto: pago.monto });
 
             await fetchData();
             window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'ELIMINAR_PAGO', 'EXCEPCION', e);
             alert('Error al eliminar el abono: ' + e.message);
         } finally {
             setLoading(false);
@@ -1416,6 +1431,8 @@ export default function ClientOrdersView() {
     const handleUpdateCliente = async () => {
         if (!editCliente) return;
         if (!editCliente.nombre?.trim()) return alert('El nombre es requerido.');
+        const opId = newOpId();
+        audit.start(opId, { accion: 'EDITAR_CLIENTE', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: editCliente.id, cliente_nombre: editCliente.nombre, detalle: { celular: editCliente.celular, ci: editCliente.ci, ciudad: editCliente.ciudad } });
         try {
             setLoading(true);
             const { error } = await supabase.from('clientes').update({
@@ -1426,7 +1443,8 @@ export default function ClientOrdersView() {
                 sucursal: editCliente.sucursal?.trim() || '',
                 direccion: editCliente.direccion?.trim() || '',
             }).eq('id', editCliente.id);
-            if (error) throw error;
+            if (error) { audit.error(opId, 'EDITAR_CLIENTE', 'update', error); throw error; }
+            audit.done(opId, 'EDITAR_CLIENTE', { resultado: 'completado' });
             setEditCliente(null);
             await fetchData();
         } catch (e) {
@@ -1438,10 +1456,13 @@ export default function ClientOrdersView() {
 
     const handleDeleteCliente = async () => {
         if (!deleteCliente) return;
+        const opId = newOpId();
+        audit.start(opId, { accion: 'ELIMINAR_CLIENTE', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: deleteCliente.id, cliente_nombre: deleteCliente.nombre, detalle: { cliente_id: deleteCliente.id } });
         try {
             setLoading(true);
             const { error } = await supabase.from('clientes').delete().eq('id', deleteCliente.id);
-            if (error) throw error;
+            if (error) { audit.error(opId, 'ELIMINAR_CLIENTE', 'delete', error); throw error; }
+            audit.done(opId, 'ELIMINAR_CLIENTE', { resultado: 'eliminado' });
             setDeleteCliente(null);
             await fetchData();
         } catch (e) {
@@ -1453,8 +1474,10 @@ export default function ClientOrdersView() {
 
     const handleUpdatePago = async () => {
         if (!editPago) return;
-        const amt = Number(editPago.monto);
+        const amt = round2(editPago.monto);
         if (!amt || amt <= 0) return alert('Monto inválido.');
+        const opId = newOpId();
+        audit.start(opId, { accion: 'EDITAR_PAGO', vendedor_id: user?.id, vendedor_nombre: vendNombre(), detalle: { pago_id: editPago.id, monto_nuevo: amt, caja_mov_id: editPago.caja_mov_id || null } });
         try {
             setLoading(true);
             await supabase.from('cliente_pagos').update({
@@ -1462,6 +1485,7 @@ export default function ClientOrdersView() {
                 concepto: editPago.concepto,
                 metodo_pago: editPago.metodo_pago,
             }).eq('id', editPago.id);
+            audit.step(opId, 'EDITAR_PAGO', 'update_cliente_pago', { pago_id: editPago.id, monto: amt });
             // Sincronizar con caja_movimientos si existe el vínculo
             if (editPago.caja_mov_id) {
                 await supabase.from('caja_movimientos').update({
@@ -1469,12 +1493,15 @@ export default function ClientOrdersView() {
                     concepto: editPago.concepto,
                     metodo_pago: editPago.metodo_pago,
                 }).eq('id', editPago.caja_mov_id);
+                audit.step(opId, 'EDITAR_PAGO', 'update_caja_movimiento', { caja_mov_id: editPago.caja_mov_id, monto: amt });
             }
+            audit.done(opId, 'EDITAR_PAGO', { resultado: 'completado' });
             setEditPago(null);
             await fetchData();
             window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'EDITAR_PAGO', 'EXCEPCION', e);
             alert('Error al editar el abono: ' + e.message);
         } finally {
             setLoading(false);
@@ -1483,6 +1510,9 @@ export default function ClientOrdersView() {
 
     const handleUpdateItem = async () => {
         if (!editItem) return;
+        const opId = newOpId();
+        const itOrig0 = items.find(i => i.id === editItem.id);
+        audit.start(opId, { accion: 'EDITAR_ITEM', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: editItem.cliente_id, detalle: { item_id: editItem.id, titulo: editItem.titulo, precio_antes: itOrig0?.precio_venta, precio_nuevo: Number(editItem.precio_venta) || 0, estado_antes: itOrig0?.estado, estado_nuevo: editItem.estado, semana: editItem.semana_id } });
         try {
             setLoading(true);
             const itOriginal = items.find(i => i.id === editItem.id);
@@ -1505,10 +1535,12 @@ export default function ClientOrdersView() {
                 semana_id: editItem.semana_id || null,
                 nota: finalNota,
             }).eq('id', editItem.id);
+            audit.done(opId, 'EDITAR_ITEM', { resultado: 'completado', estado_final: estadoFinal });
             setEditItem(null);
             await fetchData();
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'EDITAR_ITEM', 'EXCEPCION', e);
             alert('Error al editar el ítem: ' + e.message);
         } finally {
             setLoading(false);
@@ -1604,6 +1636,8 @@ export default function ClientOrdersView() {
 
         const clienteId = pago.cliente_id;
 
+        const opId = newOpId();
+        audit.start(opId, { accion: 'REVERTIR_DISTRIBUCION', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: clienteId, detalle: { titulo, monto: pago.monto, pago_id: pago.id } });
         try {
             setLoading(true);
 
@@ -1671,17 +1705,20 @@ export default function ClientOrdersView() {
                     caja_mov_id: null
                 }).eq('id', pago.id);
                 await fetchData();
+                audit.done(opId, 'REVERTIR_DISTRIBUCION', { resultado: 'convertido_a_credito', titulo });
                 alert('✓ Asignación quitada. (El abono raíz no se encontró, el saldo quedó como crédito general.)');
                 return;
             }
 
             // 4. Eliminar la sub-entrada
             await supabase.from('cliente_pagos').delete().eq('id', pago.id);
+            audit.done(opId, 'REVERTIR_DISTRIBUCION', { resultado: 'revertido', titulo, monto: pago.monto });
 
             await fetchData();
             alert('✓ Asignación eliminada. El dinero volvió al saldo del cliente.');
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'REVERTIR_DISTRIBUCION', 'EXCEPCION', e);
             alert('Error al quitar asignación: ' + e.message);
         } finally {
             setLoading(false);
@@ -1693,6 +1730,8 @@ export default function ClientOrdersView() {
         const baseEstado = statusParam || bulkEstadoTarget;
         const estado = baseEstado === 'CONFIRMADO' ? 'ADJUDICADO' : baseEstado;
         const semanaId = semanaIdParam || bulkSemanaTarget;
+        const opId = newOpId();
+        audit.start(opId, { accion: 'CAMBIAR_ESTADO', vendedor_id: user?.id, vendedor_nombre: vendNombre(), detalle: { cantidad: itemIds.size, estado_nuevo: estado, semana: semanaId || null } });
         try {
             setLoading(true);
             
@@ -1724,11 +1763,13 @@ export default function ClientOrdersView() {
                 if (semanaId) updateObj.semana_id = semanaId;
                 await supabase.from('cliente_items').update(updateObj).in('id', [...itemIds]);
             }
-            
+
+            audit.done(opId, 'CAMBIAR_ESTADO', { resultado: 'completado', estado, cantidad: itemIds.size });
             setSelectedItems(new Set());
             await fetchData();
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'CAMBIAR_ESTADO', 'EXCEPCION', e);
         } finally {
             setLoading(false);
         }
@@ -4585,16 +4626,20 @@ export default function ClientOrdersView() {
                             >Cancelar</button>
                             <button
                                 onClick={async () => {
-                                    const precioFinal = Number(recotizarPrecio);
+                                    const precioFinal = round2(recotizarPrecio);
                                     if (isNaN(precioFinal) || precioFinal <= 0) { alert('Ingresá un precio válido'); return; }
                                     setRecotizarLoading(true);
+                                    const opId = newOpId();
+                                    audit.start(opId, { accion: 'RECOTIZAR_ACEPTA', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: recotizarItem.cliente_id, detalle: { item_id: recotizarItem.id, titulo: recotizarItem.titulo, precio_antes: recotizarItem.precio_original, precio_nuevo: precioFinal } });
                                     try {
                                         await supabase.from('cliente_items').update({
                                             estado: 'PEDIDO (Siguiente)',
                                             precio_venta: precioFinal,
                                         }).eq('id', recotizarItem.id);
+                                        audit.done(opId, 'RECOTIZAR_ACEPTA', { resultado: 'aceptado', precio: precioFinal });
                                         window.location.reload();
                                     } catch (err) {
+                                        audit.error(opId, 'RECOTIZAR_ACEPTA', 'EXCEPCION', err);
                                         alert('Error: ' + err.message);
                                         setRecotizarLoading(false);
                                     }

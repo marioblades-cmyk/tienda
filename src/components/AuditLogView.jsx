@@ -21,9 +21,15 @@ const ACCION_LABEL = {
     DISTRIBUIR: '🔀 Distribuir',
     EDITAR_ITEM: '✏️ Editar ítem',
     EDITAR_CLIENTE: '✏️ Editar cliente',
+    EDITAR_PAGO: '✏️ Editar pago',
     ELIMINAR_PAGO: '🗑️ Eliminar pago',
     ELIMINAR_CLIENTE: '🗑️ Eliminar cliente',
     ELIMINAR_ITEMS: '🗑️ Eliminar ítems',
+    REVERTIR_DISTRIBUCION: '↩️ Revertir distribución',
+    CAMBIAR_ESTADO: '🔄 Cambiar estado',
+    RESOLVER_DANO: '🔧 Resolver daño',
+    RECOTIZAR_ACEPTA: '✅ Recotizar (acepta)',
+    RECOTIZAR_CANCELA: '❌ Recotizar (cancela)',
 };
 
 export default function AuditLogView() {
