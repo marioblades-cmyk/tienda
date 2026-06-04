@@ -19,7 +19,7 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History, HandCoins
+    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History, HandCoins, ShieldAlert
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -29,6 +29,7 @@ import FlujoCajaView from './components/FlujoCajaView';
 import ContabilidadView from './components/ContabilidadView';
 import PrestamosView from './components/PrestamosView';
 import StockHistorialView from './components/StockHistorialView';
+import AuditLogView from './components/AuditLogView';
 import PublicSalesView from './components/PublicSalesView';
 import MayoristaUpload from './components/MayoristaUpload';
 
@@ -78,6 +79,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'contabilidad', icon: BookMarked, label: 'Contabilidad' },
         { id: 'prestamos', icon: HandCoins, label: 'Préstamos' },
         { id: 'stock-historial', icon: History, label: 'Historial de Stock' },
+        { id: 'auditoria', icon: ShieldAlert, label: 'Auditoría' },
     ];
 
     const sellerItems = [
@@ -185,6 +187,7 @@ const TAB_TITLES = {
     prestamos: 'Préstamos Otorgados',
     entelequia: 'Herramienta Editorial',
     mayoristas: 'Pedidos Mayoristas',
+    auditoria: 'Auditoría de Acciones',
 };
 
 function Main({ onGoToPublic }) {
@@ -304,6 +307,7 @@ function Main({ onGoToPublic }) {
         activeTab === 'contabilidad' ? <ContabilidadView /> :
         activeTab === 'prestamos' ? <PrestamosView /> :
         activeTab === 'stock-historial' ? <StockHistorialView /> :
+        activeTab === 'auditoria' ? <AuditLogView /> :
         activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback
