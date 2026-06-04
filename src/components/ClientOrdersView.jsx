@@ -4,6 +4,7 @@ import { catalogService } from '../services/catalogService';
 import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart, TrendingUp, Loader2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { ffecha, fhora, ffechaLarga, fstamp } from '../utils/dateUtils';
+import { audit, newOpId } from '../services/auditLog';
 
 export default function ClientOrdersView() {
     const { user, isAdmin } = useAuth();
@@ -496,6 +497,8 @@ export default function ClientOrdersView() {
     const formatS = (num) => Number(num || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     // Redondeo a 2 decimales para evitar errores de punto flotante (ej: 79.10 + 79.05 = 158.14999…)
     const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // Nombre del vendedor que ejecuta la acción (para auditoría)
+    const vendNombre = () => vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'desconocido';
 
     const getAuditNote = () => {
         const myName = vendedores.find(v => v.id === user?.id)?.nombre || user?.email || 'un socio';
@@ -950,6 +953,12 @@ export default function ClientOrdersView() {
         if (!addForm.celular) return alert("El celular es obligatorio");
         if (cart.length === 0) return alert("El carrito está vacío. Añade al menos un ítem.");
 
+        const opId = newOpId();
+        audit.start(opId, {
+            accion: 'NUEVO_PEDIDO', vendedor_id: user?.id, vendedor_nombre: vendNombre(),
+            cliente_nombre: addForm.nombre || addForm.celular,
+            detalle: { celular: addForm.celular, items: cart.length, modoPago: orderPayMode, metodo: orderMethod, historico: modoHistorico }
+        });
         try {
             setLoading(true);
             // 1. Check or Create Client
@@ -1045,6 +1054,8 @@ export default function ClientOrdersView() {
 
             // 3. Insert Items (Modificado para obtener los IDs generados)
             const { data: insertedItems, error: insErr } = await supabase.from('cliente_items').insert(itemsToInsert).select();
+            if (insErr) { audit.error(opId, 'NUEVO_PEDIDO', 'insert_items', insErr); }
+            else audit.step(opId, 'NUEVO_PEDIDO', 'insert_items', { cliente_id: clienteId, cantidad: itemsToInsert.length });
             if (insErr) throw insErr;
 
             // 4. Subtract stock (solo en modo normal, no histórico)
@@ -1118,6 +1129,7 @@ export default function ClientOrdersView() {
                         origen: 'Pedidos'
                     }]).select('id').single();
                     cajaMovId = cajaMov?.id || null;
+                    audit.step(opId, 'NUEVO_PEDIDO', 'insert_caja_movimiento', { caja_mov_id: cajaMovId, monto: totalAbonoCalculado, metodo: orderMethod });
                 }
 
                 // 5.2 Lógica según Modo de Pago
@@ -1185,12 +1197,14 @@ export default function ClientOrdersView() {
                 titulo: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '',
                 coleccion_nombre: '', tomos: '', precio_tomo: '', pago_inicial_total: ''
             });
+            audit.done(opId, 'NUEVO_PEDIDO', { resultado: 'completado', items: cart.length });
             await fetchData();
             window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
             await fetchCatalog();
 
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'NUEVO_PEDIDO', 'EXCEPCION', e);
             alert("Error al guardar pedido: " + e.message);
         } finally {
             setLoading(false);
@@ -1198,12 +1212,18 @@ export default function ClientOrdersView() {
     };
 
     const handleSavePayment = async (clienteId) => {
+        const opId = newOpId();
+        const cli = clientes.find(c => c.id === clienteId);
         try {
             setLoading(true);
             const amt = round2(payMonto);
             if (amt <= 0) return alert("Monto inválido");
 
-            const cli = clientes.find(c => c.id === clienteId);
+            audit.start(opId, {
+                accion: 'ABONAR', vendedor_id: user?.id, vendedor_nombre: vendNombre(),
+                cliente_id: clienteId, cliente_nombre: cli?.nombre,
+                detalle: { monto: amt, metodo: payMethod, modo: payMode, sinContab: sinContabilidad }
+            });
 
             // --- LEDGER: Registrar en caja_movimientos PRIMERO para capturar el ID ---
             // El Abonar siempre es dinero nuevo que entra ahora — se registra el monto completo.
@@ -1238,8 +1258,9 @@ export default function ClientOrdersView() {
                     metodo_pago: payMethod,
                     origen: 'Pedidos'
                 }]).select('id').single();
-                if (moveErr) throw moveErr;
+                if (moveErr) { audit.error(opId, 'ABONAR', 'insert_caja_movimiento', moveErr); throw moveErr; }
                 cajaMov = cajaMovData;
+                audit.step(opId, 'ABONAR', 'insert_caja_movimiento', { caja_mov_id: cajaMov.id, monto: amt, metodo: payMethod });
             }
 
             if (payMode === 'general') {
@@ -1252,7 +1273,8 @@ export default function ClientOrdersView() {
                     referencia: payReference || null,
                     caja_mov_id: cajaMov?.id || null,
                 }]);
-                if (pErr) throw pErr;
+                if (pErr) { audit.error(opId, 'ABONAR', 'insert_cliente_pago', pErr); throw pErr; }
+                audit.step(opId, 'ABONAR', 'insert_cliente_pago', { tipo: 'general', monto: amt, caja_mov_id: cajaMov?.id || null });
             } else {
                 if (selectedPayItems.length === 0) return alert("Seleccione al menos un ítem");
 
@@ -1265,7 +1287,7 @@ export default function ClientOrdersView() {
                 });
 
                 // Crear registro RAÍZ en cliente_pagos por el monto completo pagado ahora
-                await supabase.from('cliente_pagos').insert([{
+                const { error: rootErr } = await supabase.from('cliente_pagos').insert([{
                     cliente_id: clienteId,
                     monto: amt,
                     concepto: todosCompletos
@@ -1276,6 +1298,8 @@ export default function ClientOrdersView() {
                     referencia: payReference || null,
                     caja_mov_id: cajaMov?.id || null,
                 }]);
+                if (rootErr) { audit.error(opId, 'ABONAR', 'insert_cliente_pago_raiz', rootErr); throw rootErr; }
+                audit.step(opId, 'ABONAR', 'insert_cliente_pago_raiz', { tipo: 'items', monto: amt, items: itemsToUpdate.length, caja_mov_id: cajaMov?.id || null });
 
                 for (let eq of itemsToUpdate) {
                     const aplicar = Number(itemPayAmounts[eq.id] || 0);
@@ -1297,10 +1321,12 @@ export default function ClientOrdersView() {
                             referencia: payReference || null,
                             caja_mov_id: cajaMov?.id || null, // Mismo ID de caja para todos
                         }]);
+                        audit.step(opId, 'ABONAR', 'update_item', { item_id: eq.id, titulo: eq.titulo, aplicado: aplicar, nuevo_pagado: nuevoMonto });
                     }
                 }
             }
 
+            audit.done(opId, 'ABONAR', { resultado: 'completado', monto: amt, modo: payMode });
             setShowPayModal(null);
             setPayMonto('');
             setPagoConcepto('');
@@ -1316,6 +1342,7 @@ export default function ClientOrdersView() {
             alert(sinContabilidad ? "✓ Pago registrado (sin movimiento en Contabilidad)." : "✓ Pago registrado y contabilizado correctamente.");
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'ABONAR', 'EXCEPCION', e);
             alert(e.message || "Error al registrar pago");
         } finally {
             setLoading(false);
@@ -1494,6 +1521,13 @@ export default function ClientOrdersView() {
         const clienteId = showPayModal;
         if (!clienteId) return;
 
+        const opId = newOpId();
+        const cliDist = clientes.find(c => c.id === clienteId);
+        audit.start(opId, {
+            accion: 'DISTRIBUIR', vendedor_id: user?.id, vendedor_nombre: vendNombre(),
+            cliente_id: clienteId, cliente_nombre: cliDist?.nombre,
+            detalle: { items: entries.length, total: round2(entries.reduce((s, [, v]) => s + Number(v || 0), 0)) }
+        });
         try {
             setLoading(true);
             
@@ -1543,8 +1577,10 @@ export default function ClientOrdersView() {
                 // 3. Actualizar el ítem
                 const nuevoMontoPagado = round2(Number(it.monto_pagado || 0) + appliedActual);
                 await supabase.from('cliente_items').update({ monto_pagado: nuevoMontoPagado }).eq('id', itemId);
+                audit.step(opId, 'DISTRIBUIR', 'update_item', { item_id: itemId, titulo: it.titulo, aplicado: appliedActual, nuevo_pagado: nuevoMontoPagado });
             }
 
+            audit.done(opId, 'DISTRIBUIR', { resultado: 'completado', items: entries.length });
             setShowPayModal(null);
             setItemPayAmounts({});
             setPayMode('items');
@@ -1553,6 +1589,7 @@ export default function ClientOrdersView() {
             alert("✓ Balance distribuido correctamente.");
         } catch (e) {
             console.error(e);
+            audit.error(opId, 'DISTRIBUIR', 'EXCEPCION', e);
             alert('Error al distribuir balance: ' + e.message);
         } finally {
             setLoading(false);
