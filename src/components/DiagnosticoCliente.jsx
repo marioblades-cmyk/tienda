@@ -107,15 +107,40 @@ export default function DiagnosticoCliente() {
             R += `  ----------------------------------------------------\n`;
             R += `  SALDO A FAVOR REAL: ${f(saldoFavorReal)}\n\n`;
 
+            // ── Verificación de confiabilidad ──────────────────
+            // Lado A: dinero que entró (caja + históricos)
+            // Lado B: dinero contabilizado (pagado a ítems + saldo a favor calculado)
+            // Si NO cuadran → los datos están enredados, el saldo a favor NO es confiable
+            const ladoA = totCaja + totHistoricos;
+            const ladoB = totPagItems + saldoFavorReal;
+            const difVerif = Math.abs(ladoA - ladoB);
+            const confiable = difVerif < 1;
+
+            R += `── VERIFICACIÓN DE CONFIABILIDAD ──\n`;
+            R += `  (A) Dinero que entró     = caja + históricos      = ${f(ladoA)}\n`;
+            R += `  (B) Dinero contabilizado = pagado ítems + a favor = ${f(ladoB)}\n`;
+            R += `  Diferencia |A − B|       = ${f(difVerif)}\n`;
+            if (confiable) {
+                R += `  >>> ✅ CONFIABLE — los números cierran, el saldo a favor es real.\n\n`;
+            } else {
+                R += `  >>> ⚠️ NO CONFIABLE — datos enredados (vínculos pago→ítem rotos).\n`;
+                R += `      El "saldo a favor real" de abajo está SOBREESTIMADO. NO corregir con él.\n`;
+                R += `      El saldo MOSTRADO probablemente es el correcto. Revisar manual.\n\n`;
+            }
+
             R += `── RESUMEN ──\n`;
-            R += `  Total ventas (12 ítems):         ${f(totVentas)}\n`;
+            R += `  Total ventas:                    ${f(totVentas)}\n`;
             R += `  Pagado a ítems:                  ${f(totPagItems)}\n`;
             R += `  Saldo que MUESTRA el sistema:    ${f(saldoMostrado)}\n`;
-            R += `  Saldo a favor REAL (no aplicado):${f(saldoFavorReal)}\n`;
-            R += `  >>> SALDO NETO REAL:             ${f(Math.max(0, saldoMostrado - saldoFavorReal))}  (saldo − saldo a favor)\n`;
+            R += `  Saldo a favor calculado:         ${f(saldoFavorReal)} ${confiable ? '(confiable)' : '(⚠️ NO confiable)'}\n`;
+            if (confiable) {
+                R += `  >>> SALDO NETO REAL:             ${f(Math.max(0, saldoMostrado - saldoFavorReal))}  (saldo − saldo a favor)\n`;
+            } else {
+                R += `  >>> SALDO NETO REAL:             revisar manual (cálculo no confiable)\n`;
+            }
             R += `  Dinero en caja (contabilidad):   ${f(totCaja)}\n`;
             R += `  Pagos históricos (sin caja):     ${f(totHistoricos)}\n`;
-            R += `  Caja + históricos:               ${f(totCaja + totHistoricos)}\n`;
+            R += `  Caja + históricos:               ${f(ladoA)}\n`;
             R += `═══════════════════════════════════════════════════════\n`;
 
             setReporte(R);
