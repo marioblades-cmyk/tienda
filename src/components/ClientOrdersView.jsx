@@ -1537,6 +1537,10 @@ export default function ClientOrdersView() {
             }).eq('id', editItem.id);
             audit.done(opId, 'EDITAR_ITEM', { resultado: 'completado', estado_final: estadoFinal });
             setEditItem(null);
+            // El estado es el tracking del pedido → al cambiarlo, refrescar todo lo que depende de él
+            if (typeof catalogService !== 'undefined') catalogService.clearCache?.();
+            window.dispatchEvent(new CustomEvent('catalog-prices-updated'));
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
             await fetchData();
         } catch (e) {
             console.error(e);
