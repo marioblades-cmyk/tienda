@@ -3438,11 +3438,12 @@ export default function ClientOrdersView() {
                                     <option value="POR CONFIRMAR">POR CONFIRMAR</option>
                                     <option value="PEDIDO">PEDIDO</option>
                                     <option value="CONFIRMADO">CONFIRMADO</option>
+                                    <option value="ADJUDICADO">ADJUDICADO (AD. CONFIRMADO)</option>
                                     <option value="EN TIENDA">EN TIENDA</option>
                                     <option value="ENTREGADO">ENTREGADO</option>
                                 </select>
                             </div>
-                            {(editItem.estado === 'PEDIDO' || editItem.estado === 'CONFIRMADO') && (
+                            {(editItem.estado === 'PEDIDO' || editItem.estado === 'CONFIRMADO' || editItem.estado === 'ADJUDICADO') && (
                                 <div>
                                     <label className="block text-[10px] font-black uppercase text-muted mb-1">Semana</label>
                                     <select value={editItem.semana_id || ''} onChange={e => setEditItem({...editItem, semana_id: e.target.value})}
