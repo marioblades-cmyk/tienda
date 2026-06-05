@@ -19,7 +19,7 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History, HandCoins, ShieldAlert
+    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History, HandCoins, ShieldAlert, Stethoscope
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -30,6 +30,7 @@ import ContabilidadView from './components/ContabilidadView';
 import PrestamosView from './components/PrestamosView';
 import StockHistorialView from './components/StockHistorialView';
 import AuditLogView from './components/AuditLogView';
+import DiagnosticoCliente from './components/DiagnosticoCliente'; // TEMPORAL — quitar al terminar correcciones
 import PublicSalesView from './components/PublicSalesView';
 import MayoristaUpload from './components/MayoristaUpload';
 
@@ -79,6 +80,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'contabilidad', icon: BookMarked, label: 'Contabilidad' },
         { id: 'prestamos', icon: HandCoins, label: 'Préstamos' },
         { id: 'stock-historial', icon: History, label: 'Historial de Stock' },
+        { id: 'diagnostico', icon: Stethoscope, label: 'Diagnóstico Cuenta' }, // TEMPORAL
         { id: 'auditoria', icon: ShieldAlert, label: 'Auditoría' },
     ];
 
@@ -308,6 +310,7 @@ function Main({ onGoToPublic }) {
         activeTab === 'prestamos' ? <PrestamosView /> :
         activeTab === 'stock-historial' ? <StockHistorialView /> :
         activeTab === 'auditoria' ? <AuditLogView /> :
+        activeTab === 'diagnostico' ? <DiagnosticoCliente /> :
         activeTab === 'remitos' ? <RemitosManagement /> :
         activeTab === 'entelequia' ? <ComicAnalysisTool /> :
         <ComicAnalysisTool /> // Fallback
