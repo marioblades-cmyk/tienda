@@ -627,7 +627,13 @@ export default function ReceptionManagement() {
             allPreAllocatedItems.push(...preAllocated);
 
             // PRIORIDAD 2: Tienda. Se queda con lo que sobre después de cubrir a clientes Y vendedores.
-            let calcForStore = Math.max(0, qtyRec - sellerTotal);
+            // FIX recepción fraccionada (en partes): descontar de la demanda de vendedores
+            // lo que YA se cubrió en recepciones previas. Antes, en cada tanda se restaba
+            // la demanda total, por lo que las unidades de STOCK que llegaban en tandas
+            // posteriores quedaban en 0 y nunca se sumaban al inventario.
+            const prevReceived = alreadyReceived[key] || 0;
+            const sellerRestante = Math.max(0, sellerTotal - prevReceived);
+            let calcForStore = Math.max(0, qtyRec - sellerRestante);
 
             if (calcForStore > 0) {
                 const prod = prodMap[key];
