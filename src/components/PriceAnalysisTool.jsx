@@ -386,14 +386,17 @@ export default function PriceAnalysisTool() {
             resultsMap[arsKey] = { pv: r.pvFinal, n2: r.dtos[1], n3: r.dtos[2], pm: r.pMayor };
           });
 
-          const payload = [];
+          // Usamos un Map por id para DEDUPLICAR: si un mismo producto aparece
+          // dos veces en la lista, un upsert con id repetido falla con
+          // "ON CONFLICT DO UPDATE command cannot affect row a second time".
+          const payloadMap = new Map();
           catalogItems.forEach(item => {
             const itemArs = Math.round(Number(item.precio_tapa));
             const calc = resultsMap[itemArs];
             if (calc) {
               if (saveAsProximo) {
                 // Guardar en campos _prox — no pisa precios activos
-                payload.push({
+                payloadMap.set(item.id, {
                   id: item.id,
                   precio_venta_bs_prox:   Number(calc.pv.toFixed(2)),
                   precio_mayoreo_bs_prox: Number(calc.pm.toFixed(2)),
@@ -401,7 +404,7 @@ export default function PriceAnalysisTool() {
                 });
               } else {
                 // Guardar como precios activos (comportamiento normal)
-                payload.push({
+                payloadMap.set(item.id, {
                   id: item.id,
                   product_id: item.product_id,
                   titulo: item.titulo,
@@ -416,6 +419,7 @@ export default function PriceAnalysisTool() {
               }
             }
           });
+          const payload = Array.from(payloadMap.values());
 
           if (payload.length > 0) {
             const chunkSize = 500;

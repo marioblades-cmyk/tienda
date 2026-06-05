@@ -527,7 +527,10 @@ export default function PreSaleGenerator() {
         if (selectedItems.find(i => i.product_id === item.product_id)) return;
         
         const discountMult = (100 - config.discountPercent) / 100;
-        const pvp = parseFloat(item.precio_venta_bs) || 0;
+        // Solo Ivrea usa el "precio próximo" si existe; el resto, su precio actual.
+        const esIvrea = (item.editorial || '').toUpperCase().includes('IVREA');
+        const pvp = parseFloat(esIvrea ? (item.precio_venta_bs_prox || item.precio_venta_bs)
+                                       : item.precio_venta_bs) || 0;
         const preventa = pvp * discountMult;
 
         setSelectedItems(prev => [...prev, {
@@ -725,7 +728,10 @@ export default function PreSaleGenerator() {
         // 4. Preparar items
         const discountMult = (100 - tplDiscount) / 100;
         const newSelectedItems = filteredItems.map(item => {
-            const pvp = parseFloat(item.precio_venta_bs) || 0;
+            // Solo Ivrea usa el "precio próximo" si existe; el resto, su precio actual.
+            const esIvrea = (item.editorial || '').toUpperCase().includes('IVREA');
+            const pvp = parseFloat(esIvrea ? (item.precio_venta_bs_prox || item.precio_venta_bs)
+                                           : item.precio_venta_bs) || 0;
             const preventa = pvp * discountMult;
             return {
                 ...item,

@@ -24,6 +24,7 @@ export const catalogService = {
             editorial: 'ed',
             categoria: 'c',
             precio_venta_bs: 'pvb',
+            precio_venta_bs_prox: 'pvbx',
             precio_n2_bs: 'pn2',
             precio_n3_bs: 'pn3',
             precio_mayoreo_bs: 'pmb',
@@ -71,8 +72,8 @@ export const catalogService = {
 
         // 2. Si no hay caché o expiró, descargar de Supabase (SOLO COLUMNAS NECESARIAS)
         console.log('🚀 Descargando catálogo optimizado desde Supabase...');
-        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,created_at,imagen_url,stock_fisico,stock_minimo,visible_web,para_preventa,es_novedad_semana,es_novedad,agotado_distribuidor';
-        
+        const columns = 'id,product_id,titulo,ean_oficial,ean_interno,precio_tapa,editorial,categoria,precio_venta_bs,precio_venta_bs_prox,precio_n2_bs,precio_n3_bs,precio_mayoreo_bs,es_reimpresion,updated_at,created_at,imagen_url,stock_fisico,stock_minimo,visible_web,para_preventa,es_novedad_semana,es_novedad,agotado_distribuidor';
+
         let allItems = [];
         let from = 0;
         let to = 999;
