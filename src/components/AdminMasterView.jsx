@@ -245,6 +245,39 @@ export default function AdminMasterView() {
         reader.readAsArrayBuffer(file);
     };
 
+    // Marca un pedido como CANCELADO: crea una confirmación VACÍA para esa semana.
+    // Efecto: la semana deja de "buscar confirmación" y todos los títulos quedan
+    // como recortados (confirmado = 0). No agrega nada a Gestión Integral.
+    const handleCancelarPedido = async () => {
+        if (!selectedSemana) return setError("Selecciona una semana primero.");
+        if (existingMaster) return setError("Esta semana ya tiene un Master. Elimínalo primero.");
+        const semObj = semanas.find(s => s.id === selectedSemana);
+        const nombre = semObj?.nombre || 'esta semana';
+        if (!confirm(`¿Marcar "${nombre}" como PEDIDO CANCELADO?\n\nTodos los títulos quedarán como RECORTADOS y la semana dejará de buscar confirmación.`)) return;
+        setProcessing(true);
+        setError('');
+        try {
+            const { error: dbError } = await supabase.from('master_confirmaciones').insert([{
+                semana_id: selectedSemana,
+                titulo_despacho: `PEDIDO CANCELADO (${nombre})`,
+                total_ars: 0,
+                total_productos: 0,
+                costo_envio: 0,
+                envio_texto: '',
+                cajas_qty: 0,
+                datos_json: []
+            }]);
+            if (dbError) throw dbError;
+            setSuccess("Pedido marcado como cancelado: todos los títulos quedan recortados y ya no busca confirmación.");
+            checkExistingMaster(selectedSemana);
+        } catch (err) {
+            console.error(err);
+            setError("Error al cancelar el pedido: " + err.message);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const onDrop = useCallback(acceptedFiles => {
         if (!selectedSemana) return setError("Selecciona una semana primero.");
         if (existingMaster) return setError("Esta semana ya tiene un Master. Elimínalo primero para sobreescribir.");
@@ -804,6 +837,22 @@ export default function AdminMasterView() {
                     <Upload size={48} className="mx-auto mb-4 text-sky" />
                     <h4 className="text-lg font-bold text-navy">Carga el Excel de Confirmación aquí</h4>
                     <p className="text-sm text-muted">Asegúrate de que la primera columna sea el Título.</p>
+                </div>
+            )}
+
+            {/* Opción: marcar el pedido como CANCELADO (todo recortado) */}
+            {selectedSemana && !existingMaster && !previewData && (
+                <div className="flex flex-wrap items-center justify-center gap-3 -mt-3">
+                    <span className="text-xs text-muted font-medium">¿Este pedido se canceló y no vas a recibir nada?</span>
+                    <button
+                        onClick={handleCancelarPedido}
+                        disabled={processing}
+                        className="flex items-center gap-2 bg-red-50 hover:bg-red-100 disabled:opacity-40 text-red-600 font-black text-xs px-4 py-2 rounded-xl border border-red-200 transition-all"
+                        title="Marca todos los títulos como recortados y deja de buscar confirmación"
+                    >
+                        {processing ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                        Marcar Pedido como Cancelado
+                    </button>
                 </div>
             )}
 

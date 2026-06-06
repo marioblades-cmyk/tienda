@@ -183,8 +183,9 @@ export default function ConfirmationInfoView() {
                     };
                 }).filter(Boolean).sort((a, b) => b.pedido - a.pedido);
 
-                const totalUnitsCut = titleDetails.reduce((sum, t) => sum + Math.max(0, t.pedido - t.confirmado), 0);
-                const totalUnitsExtra = titleDetails.reduce((sum, t) => sum + Math.max(0, t.confirmado - t.pedido), 0);
+                // Sin confirmación cargada (pendiente) NO hay recortes ni extras determinados todavía.
+                const totalUnitsCut = master ? titleDetails.reduce((sum, t) => sum + Math.max(0, t.pedido - t.confirmado), 0) : 0;
+                const totalUnitsExtra = master ? titleDetails.reduce((sum, t) => sum + Math.max(0, t.confirmado - t.pedido), 0) : 0;
 
                 const fechaLlegada = w.fecha_estimada_llegada 
                     ? new Date(w.fecha_estimada_llegada) 
@@ -795,7 +796,12 @@ export default function ConfirmationInfoView() {
                                                                                     {t.received >= t.confirmado && t.confirmado > 0 ? (
                                                                                         <span className="bg-emerald-600 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-[0_0_8px_rgba(16,185,129,0.4)] whitespace-nowrap">LLEGÓ COMPLETO</span>
                                                                                     ) : t.isMissing ? (
-                                                                                        <span className="bg-red-500 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-sm animate-pulse whitespace-nowrap">RECORTADO TOTAL</span>
+                                                                                        week.isPending ? (
+                                                                                            // Sin confirmación cargada todavía: NO es un recorte, está pendiente
+                                                                                            <span className="bg-accent text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">⏳ ESPERANDO CONFIRMACIÓN</span>
+                                                                                        ) : (
+                                                                                            <span className="bg-red-500 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded shadow-sm animate-pulse whitespace-nowrap">RECORTADO TOTAL</span>
+                                                                                        )
                                                                                     ) : t.isCut ? (
                                                                                         <span className="bg-orange-500 text-white text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded whitespace-nowrap">RECORTADO</span>
                                                                                     ) : t.isExtra ? (
