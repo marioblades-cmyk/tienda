@@ -18,6 +18,7 @@ export default function ReceptionManagement() {
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [masterItems, setMasterItems] = useState([]);
+    const [pedidoCancelado, setPedidoCancelado] = useState(false); // master existe pero vacío = pedido cancelado
     const [orderBreakdown, setOrderBreakdown] = useState({});
     const [receivedCounts, setReceivedCounts] = useState({});
     const [alreadyReceived, setAlreadyReceived] = useState({});
@@ -262,13 +263,16 @@ export default function ReceptionManagement() {
                 setClientItems(cItems);
             }
 
-            if (master && master.datos_json) {
+            if (master && master.datos_json && master.datos_json.length > 0) {
                 setMasterItems(master.datos_json);
                 setAlreadyReceived(receptionMap);
                 setReceivedCounts({});
+                setPedidoCancelado(false);
             } else {
                 setMasterItems([]);
                 setAlreadyReceived({});
+                // master existe pero con datos vacíos = pedido marcado como cancelado
+                setPedidoCancelado(!!master);
             }
 
             // Build breakdown agrupado y deduplicado (Lógica Math.max)
@@ -1129,11 +1133,19 @@ export default function ReceptionManagement() {
                     loading ? (
                         <div className="py-20 flex justify-center"><Loader2 size={40} className="animate-spin text-secondary" /></div>
                     ) : masterItems.length === 0 ? (
-                        <div className="glass p-12 text-center border-dashed border-2">
-                            <AlertCircle size={48} className="mx-auto text-muted mb-4 opacity-20" />
-                            <p className="text-muted font-bold">Esta semana no tiene una "Base Master" (Excel de confirmación) cargada.</p>
-                            <p className="text-xs text-muted/60 mt-1">Primero sube el Excel en la pestaña 'Base Master'.</p>
-                        </div>
+                        pedidoCancelado ? (
+                            <div className="glass p-12 text-center border-dashed border-2 border-red-300">
+                                <AlertCircle size={48} className="mx-auto text-red-400 mb-4 opacity-40" />
+                                <p className="text-red-500 font-bold">⛔ Pedido cancelado — no hay nada que recibir.</p>
+                                <p className="text-xs text-muted/60 mt-1">Este despacho fue marcado como cancelado en 'Base Master'. Todos los títulos quedaron recortados.</p>
+                            </div>
+                        ) : (
+                            <div className="glass p-12 text-center border-dashed border-2">
+                                <AlertCircle size={48} className="mx-auto text-muted mb-4 opacity-20" />
+                                <p className="text-muted font-bold">Esta semana no tiene una "Base Master" (Excel de confirmación) cargada.</p>
+                                <p className="text-xs text-muted/60 mt-1">Primero sube el Excel en la pestaña 'Base Master'.</p>
+                            </div>
+                        )
                     ) : (
                         <div className="space-y-4">
                             {/* Filters */}
