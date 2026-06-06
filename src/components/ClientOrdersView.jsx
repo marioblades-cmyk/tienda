@@ -1925,20 +1925,6 @@ export default function ClientOrdersView() {
             // Necesario para calcular balanceDisponible correctamente (todo el dinero recibido)
             const allPagItems = allMyItems.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
 
-            // SALDO A FAVOR REAL = por cada pago RAÍZ, lo que NO se distribuyó a sus subs
-            // ("Asignado a:"). Esto arregla el caso de raíces viejas en 0 ("Totalmente
-            // Distribuido"), donde la fórmula vieja (raíz − todos los ítems) daba negativo
-            // y se "comía" los abonos nuevos sin distribuir.
-            const cliPagosAll = (pagos || []).filter(p => p.cliente_id === c.id);
-            const esSubP = (p) => (p.concepto || '').startsWith('Asignado a:');
-            const subsP = cliPagosAll.filter(esSubP);
-            const saldoAFavor = cliPagosAll.filter(p => !esSubP(p)).reduce((acc, r) => {
-                const sumSubs = subsP
-                    .filter(s => (r.caja_mov_id && s.caja_mov_id === r.caja_mov_id) || (s.referencia && s.referencia === r.id))
-                    .reduce((a, s) => a + Number(s.monto || 0), 0);
-                return acc + Math.max(0, Number(r.monto || 0) - sumSubs);
-            }, 0);
-
             // Ordenar ítems de visualización
             const sortedItems = [...myItems].sort((a, b) => {
                 const eA = estadoOrder(a), eB = estadoOrder(b);
@@ -1958,8 +1944,7 @@ export default function ClientOrdersView() {
                 totalVentas: cVentas,
                 totalPagadoItems: cPagItems,
                 allPagadoItems: allPagItems,
-                pagos: getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto), 0),
-                saldoAFavor
+                pagos: getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto), 0)
             };
         });
 
@@ -2351,10 +2336,8 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        // balanceDisponible = saldo a favor REAL (por raíz, lo no distribuido).
-                        // Reemplaza la fórmula vieja (raíz − todos los ítems) que daba 0 cuando
-                        // las raíces viejas estaban en "Totalmente Distribuido" (monto 0).
-                        const balanceDisponible = group.saldoAFavor ?? Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
+                        // balanceDisponible usa allPagadoItems (todos los ítems) para no inflarse artificialmente
+                        const balanceDisponible = Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
                         const totalPagado = cPagItems + balanceDisponible;
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
