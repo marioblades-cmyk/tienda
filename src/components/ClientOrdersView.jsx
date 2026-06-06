@@ -1255,86 +1255,52 @@ export default function ClientOrdersView() {
                 turnoId = activeTurnoArr?.[0]?.id || null;
             }
 
-            let cajaMov = null;
-            if (!sinContabilidad) {
-                const concetoLedger = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
-                const { data: cajaMovData, error: moveErr } = await supabase.from('caja_movimientos').insert([{
-                    turno_id: turnoId,
-                    tipo: 'INGRESO',
-                    categoria: 'Cobro Pedido',
-                    concepto: concetoLedger,
-                    monto: amt, // ← monto completo, siempre es dinero nuevo
-                    vendedor_id: user?.id,
-                    metodo_pago: payMethod,
-                    origen: 'Pedidos'
-                }]).select('id').single();
-                if (moveErr) { audit.error(opId, 'ABONAR', 'insert_caja_movimiento', moveErr); throw moveErr; }
-                cajaMov = cajaMovData;
-                audit.step(opId, 'ABONAR', 'insert_caja_movimiento', { caja_mov_id: cajaMov.id, monto: amt, metodo: payMethod });
-            }
-
+            // Construir conceptos y el payload de ítems (para modo "items")
+            const conceptoCaja = `ABONO PEDIDO [${cli?.nombre || clienteId}]${payReference ? ' · Ref: ' + payReference : ''}${pagoConcepto ? ' · ' + pagoConcepto : ''}`;
+            let conceptoPago;
+            let itemsPayload = [];
             if (payMode === 'general') {
-                const { error: pErr } = await supabase.from('cliente_pagos').insert([{
-                    cliente_id: clienteId,
-                    monto: amt,
-                    concepto: pagoConcepto || 'Abono general',
-                    vendedor_id: user?.id,
-                    metodo_pago: payMethod,
-                    referencia: payReference || null,
-                    caja_mov_id: cajaMov?.id || null,
-                }]);
-                if (pErr) { audit.error(opId, 'ABONAR', 'insert_cliente_pago', pErr); throw pErr; }
-                audit.step(opId, 'ABONAR', 'insert_cliente_pago', { tipo: 'general', monto: amt, caja_mov_id: cajaMov?.id || null });
+                conceptoPago = pagoConcepto || 'Abono general';
             } else {
-                if (selectedPayItems.length === 0) return alert("Seleccione al menos un ítem");
-
+                if (selectedPayItems.length === 0) { setLoading(false); return alert("Seleccione al menos un ítem"); }
                 const itemsToUpdate = items.filter(i => selectedPayItems.includes(i.id));
-                
-                // Determinar si todos los ítems seleccionados se pagaron por completo
                 const todosCompletos = itemsToUpdate.every(eq => {
                     const deuda = Math.max(0, Number(eq.precio_venta) - Number(eq.monto_pagado || 0));
                     return Number(itemPayAmounts[eq.id] || 0) >= deuda;
                 });
-
-                // Crear registro RAÍZ en cliente_pagos por el monto completo pagado ahora
-                const { error: rootErr } = await supabase.from('cliente_pagos').insert([{
-                    cliente_id: clienteId,
-                    monto: amt,
-                    concepto: todosCompletos
-                        ? `Pago recibido · ${itemsToUpdate.length} ítem(s)`
-                        : `Pago parcial · ${itemsToUpdate.length} ítem(s)`,
-                    vendedor_id: user?.id,
-                    metodo_pago: payMethod,
-                    referencia: payReference || null,
-                    caja_mov_id: cajaMov?.id || null,
-                }]);
-                if (rootErr) { audit.error(opId, 'ABONAR', 'insert_cliente_pago_raiz', rootErr); throw rootErr; }
-                audit.step(opId, 'ABONAR', 'insert_cliente_pago_raiz', { tipo: 'items', monto: amt, items: itemsToUpdate.length, caja_mov_id: cajaMov?.id || null });
-
-                for (let eq of itemsToUpdate) {
-                    const aplicar = Number(itemPayAmounts[eq.id] || 0);
-                    
-                    if (aplicar > 0) {
-                        const nuevoMonto = round2(Number(eq.monto_pagado || 0) + aplicar);
-                        await supabase.from('cliente_items').update({
-                            monto_pagado: nuevoMonto,
-                            estado: eq.estado
-                        }).eq('id', eq.id);
-
-                        // Crear un registro de pago específico para este ítem
-                        await supabase.from('cliente_pagos').insert([{
-                            cliente_id: clienteId,
-                            monto: aplicar,
-                            concepto: `Asignado a: ${eq.titulo}`,
-                            vendedor_id: user?.id,
-                            metodo_pago: payMethod,
-                            referencia: payReference || null,
-                            caja_mov_id: cajaMov?.id || null, // Mismo ID de caja para todos
-                        }]);
-                        audit.step(opId, 'ABONAR', 'update_item', { item_id: eq.id, titulo: eq.titulo, aplicado: aplicar, nuevo_pagado: nuevoMonto });
-                    }
-                }
+                conceptoPago = todosCompletos
+                    ? `Pago recibido · ${itemsToUpdate.length} ítem(s)`
+                    : `Pago parcial · ${itemsToUpdate.length} ítem(s)`;
+                itemsPayload = itemsToUpdate
+                    .filter(eq => Number(itemPayAmounts[eq.id] || 0) > 0)
+                    .map(eq => {
+                        const aplicar = round2(Number(itemPayAmounts[eq.id] || 0));
+                        return {
+                            id: eq.id,
+                            aplicar,
+                            nuevo_monto: round2(Number(eq.monto_pagado || 0) + aplicar),
+                            titulo: eq.titulo,
+                        };
+                    });
             }
+
+            // ⚛️ LLAMADA ATÓMICA: el movimiento de caja + el pago + los ítems se hacen
+            // en UNA sola transacción en la base. Si se corta a la mitad (señal, pantalla
+            // cerrada), Postgres revierte TODO. Imposible que quede un movimiento huérfano.
+            const { data: cajaMovId, error: rpcErr } = await supabase.rpc('registrar_abono', {
+                p_cliente_id: clienteId,
+                p_monto: amt,
+                p_concepto_caja: conceptoCaja,
+                p_concepto_pago: conceptoPago,
+                p_metodo_pago: payMethod,
+                p_referencia: payReference || null,
+                p_turno_id: turnoId,
+                p_vendedor_id: user?.id,
+                p_sin_contab: sinContabilidad,
+                p_items: itemsPayload,
+            });
+            if (rpcErr) { audit.error(opId, 'ABONAR', 'rpc_registrar_abono', rpcErr); throw rpcErr; }
+            audit.step(opId, 'ABONAR', 'rpc_registrar_abono', { caja_mov_id: cajaMovId, monto: amt, modo: payMode, items: itemsPayload.length });
 
             audit.done(opId, 'ABONAR', { resultado: 'completado', monto: amt, modo: payMode });
             setShowPayModal(null);
@@ -1959,6 +1925,20 @@ export default function ClientOrdersView() {
             // Necesario para calcular balanceDisponible correctamente (todo el dinero recibido)
             const allPagItems = allMyItems.reduce((s,i)=>s+Number(i.monto_pagado||0), 0);
 
+            // SALDO A FAVOR REAL = por cada pago RAÍZ, lo que NO se distribuyó a sus subs
+            // ("Asignado a:"). Esto arregla el caso de raíces viejas en 0 ("Totalmente
+            // Distribuido"), donde la fórmula vieja (raíz − todos los ítems) daba negativo
+            // y se "comía" los abonos nuevos sin distribuir.
+            const cliPagosAll = (pagos || []).filter(p => p.cliente_id === c.id);
+            const esSubP = (p) => (p.concepto || '').startsWith('Asignado a:');
+            const subsP = cliPagosAll.filter(esSubP);
+            const saldoAFavor = cliPagosAll.filter(p => !esSubP(p)).reduce((acc, r) => {
+                const sumSubs = subsP
+                    .filter(s => (r.caja_mov_id && s.caja_mov_id === r.caja_mov_id) || (s.referencia && s.referencia === r.id))
+                    .reduce((a, s) => a + Number(s.monto || 0), 0);
+                return acc + Math.max(0, Number(r.monto || 0) - sumSubs);
+            }, 0);
+
             // Ordenar ítems de visualización
             const sortedItems = [...myItems].sort((a, b) => {
                 const eA = estadoOrder(a), eB = estadoOrder(b);
@@ -1978,7 +1958,8 @@ export default function ClientOrdersView() {
                 totalVentas: cVentas,
                 totalPagadoItems: cPagItems,
                 allPagadoItems: allPagItems,
-                pagos: getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto), 0)
+                pagos: getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto), 0),
+                saldoAFavor
             };
         });
 
@@ -2370,8 +2351,10 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        // balanceDisponible usa allPagadoItems (todos los ítems) para no inflarse artificialmente
-                        const balanceDisponible = Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
+                        // balanceDisponible = saldo a favor REAL (por raíz, lo no distribuido).
+                        // Reemplaza la fórmula vieja (raíz − todos los ítems) que daba 0 cuando
+                        // las raíces viejas estaban en "Totalmente Distribuido" (monto 0).
+                        const balanceDisponible = group.saldoAFavor ?? Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
                         const totalPagado = cPagItems + balanceDisponible;
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
