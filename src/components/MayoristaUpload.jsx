@@ -160,7 +160,7 @@ export default function MayoristaUpload() {
                 .select(`
                     *,
                     semana:semanas(nombre),
-                    items:pedido_items(id, titulo, cantidad, precio, precio_original, fuente, catalog_id, estado)
+                    items:pedido_items(id, titulo, cantidad, precio, precio_original, precio_bs, fuente, catalog_id, estado)
                 `)
                 .eq('vendedor_id', selectedVendedor)
                 .eq('tipo', 'mayorista')
@@ -178,7 +178,10 @@ export default function MayoristaUpload() {
                 order.items.forEach(it => {
                     if (it.estado?.includes('RECORTADO') || it.estado === 'CANCELADO') return; // EXCLUIR RECORTADOS Y CANCELADOS DEL TOTAL
                     const prod = catalog[normalizeTitle(it.titulo)];
-                    const unitPriceBs = prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0;
+                    // Precio CONGELADO del pedido si existe; si no, el del catálogo (vivo)
+                    const unitPriceBs = (it.precio_bs != null && Number(it.precio_bs) > 0)
+                        ? Number(it.precio_bs)
+                        : (prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0);
                     orderTotalBs += (unitPriceBs * it.cantidad);
                 });
                 totalD += orderTotalBs;
@@ -305,6 +308,8 @@ export default function MayoristaUpload() {
                                 cantidad: it.cantidad,
                                 precio: exactPrecio,
                                 precio_tapa: prod?.precio_tapa || exactPrecio,
+                                // Precio Bs CONGELADO al momento del pedido (no se mueve si cambia el catálogo)
+                                precio_bs: prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0,
                                 subtotal: exactPrecio * it.cantidad,
                                 editorial: sheetName,
                                 stock_fisico: prod?.stock_fisico || 0,
@@ -358,6 +363,7 @@ export default function MayoristaUpload() {
                         titulo: it.titulo,
                         cantidad: it.cantidad_entelequia,
                         precio: it.precio_tapa,
+                        precio_bs: it.precio_bs,   // precio Bs congelado al momento del pedido
                         fuente: 'entelequia',
                         catalog_id: it.catalog_id,
                         editorial: it.editorial,
@@ -370,6 +376,7 @@ export default function MayoristaUpload() {
                         titulo: it.titulo,
                         cantidad: it.cantidad_stock,
                         precio: it.precio_tapa,
+                        precio_bs: it.precio_bs,   // precio Bs congelado al momento del pedido
                         fuente: 'stock',
                         catalog_id: it.catalog_id,
                         editorial: it.editorial,
@@ -765,7 +772,9 @@ export default function MayoristaUpload() {
 
             const tableRows = itemsParaPDF.map(it => {
                 const prod = catalog[normalizeTitle(it.titulo)];
-                const pBs = prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0;
+                const pBs = (it.precio_bs != null && Number(it.precio_bs) > 0)
+                    ? Number(it.precio_bs)
+                    : (prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0);
                 const subtotal = pBs * it.cantidad;
                 const isRecortado = it.estado?.includes('RECORTADO');
                 const isDespachado = it.estado === 'DESPACHADO' || it.estado === 'ENTREGADO' || it.estado === 'EN TIENDA';
@@ -1222,7 +1231,9 @@ export default function MayoristaUpload() {
                                                 <tbody className="divide-y divide-slate-200">
                                                     {pedido.items.map(it => {
                                                         const prod = catalog[normalizeTitle(it.titulo)];
-                                                        const pBs = prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0;
+                                                        const pBs = (it.precio_bs != null && Number(it.precio_bs) > 0)
+                                                            ? Number(it.precio_bs)
+                                                            : (prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0);
                                                         return (
                                                             <tr key={it.id} className="group">
                                                                 <td className="py-3"><p className="font-bold text-navy group-hover:text-orange-600 transition-colors">{it.titulo}</p></td>
