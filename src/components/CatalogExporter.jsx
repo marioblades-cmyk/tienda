@@ -163,6 +163,8 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                         : (item.precio_venta_bs_prox || item.precio_venta_bs) * 0.90)
                     : base) || item.precio_tapa || 0;
                 rowData.precio_orig = p;
+                // Columna "PRECIO DTO": el precio CON el descuento aplicado
+                if (discount > 0) rowData.precio_dto = Math.round(p * (1 - discount / 100) * 100) / 100;
             }
             
             if (selectedFields.has('stock')) {
@@ -420,10 +422,10 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                         </label>
                         <div className="grid grid-cols-2 gap-4">
                             <button
-                                onClick={() => setFormat('pdf')}
-                                className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${format === 'pdf' ? 'bg-[#f07d2a]/10 border-[#f07d2a] text-white' : 'bg-white/5 border-white/5 text-white/40 hover:border-white/20'}`}
+                                onClick={() => { setFormat('pdf'); setPdfLayout('grid'); }}
+                                className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${format === 'pdf' && pdfLayout === 'grid' ? 'bg-[#f07d2a]/10 border-[#f07d2a] text-white' : 'bg-white/5 border-white/5 text-white/40 hover:border-white/20'}`}
                             >
-                                <div className={`p-2 rounded-lg ${format === 'pdf' ? 'bg-[#f07d2a] text-white' : 'bg-white/5'}`}>
+                                <div className={`p-2 rounded-lg ${format === 'pdf' && pdfLayout === 'grid' ? 'bg-[#f07d2a] text-white' : 'bg-white/5'}`}>
                                     <LayoutGrid size={18} />
                                 </div>
                                 <div className="text-left">
