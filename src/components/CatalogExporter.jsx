@@ -244,7 +244,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
         const margin = 10; // Margen menor para ganar espacio
         const colGap = 3;
         const rowGap = 3;
-        const itemsPerRow = pdfLayout === 'grid' ? 3 : 3; // 3 columnas para ambos, pero lista es más baja
+        const itemsPerRow = pdfLayout === 'grid' ? 3 : 2; // Catálogo: 3 cols visuales; Lista: 2 cols anchas y compactas
         const colWidth = (pageWidth - (margin * 2) - (colGap * (itemsPerRow - 1))) / itemsPerRow;
         const rowHeight = pdfLayout === 'grid' ? 85 : 22; // Lista ultra-compacta
 
@@ -328,7 +328,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                         // Precio Original Tachado
                         doc.setTextColor(150);
                         doc.setFontSize(pdfLayout === 'grid' ? 6 : 5);
-                        const origText = `Bs. ${pOrig}`;
+                        const origText = `Bs. ${Number(pOrig).toFixed(2)}`;
                         doc.text(origText, textX, textY);
                         
                         // Línea de tachado
@@ -344,7 +344,7 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
                     } else {
                         doc.setTextColor(240, 125, 42);
                         doc.setFont("helvetica", "bold");
-                        doc.text(`Bs. ${pOrig}`, textX, textY);
+                        doc.text(`Bs. ${Number(pOrig).toFixed(2)}`, textX, textY);
                     }
                     textY += pdfLayout === 'grid' ? 3.5 : 2.5;
                 }
