@@ -129,9 +129,9 @@ export default function CatalogExporter({ isOpen, onClose, data }) {
         if (selectedFields.has('editorial')) columns.push({ header: 'EDITORIAL', key: 'editorial', width: 20 });
         if (selectedFields.has('categoria')) columns.push({ header: 'CATEGORÍA', key: 'categoria', width: 20 });
         if (selectedFields.has('precio')) {
-            columns.push({ header: tipoPrice === 'mayoreo' ? 'PRECIO MAYORISTA (Bs)' : 'PRECIO PVP (Bs)', key: 'precio_orig', width: 18 });
+            columns.push({ header: tipoPrice === 'mayoreo' ? 'PRECIO MAYORISTA (Bs)' : 'PRECIO RETAIL (Bs)', key: 'precio_orig', width: 18 });
             if (discount > 0) {
-                columns.push({ header: `PRECIO DTO (${discount}%)`, key: 'precio_dto', width: 18 });
+                columns.push({ header: `PRECIO CON DTO (${discount}%)`, key: 'precio_dto', width: 20 });
             }
         }
         if (selectedFields.has('stock')) columns.push({ header: 'STOCK', key: 'stock', width: 15 });
