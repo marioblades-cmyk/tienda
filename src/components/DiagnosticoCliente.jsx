@@ -214,37 +214,53 @@ export default function DiagnosticoCliente() {
             });
 
             const activos = filas.filter(f => f.nItems > 0 || f.nPagos > 0);
-            const problemas = activos.filter(f => f.creditoReal < -0.5 || f.saldoMostrado < -0.5 || f.itemsSobrepagados > 0);
-            problemas.sort((a, b) => a.creditoReal - b.creditoReal); // el más negativo (peor enredo) primero
+            // 🔴 Errores accionables: el cliente pagó de más en conjunto (saldo negativo) o un ítem quedó sobrepagado
+            const errores = activos.filter(f => f.saldoMostrado < -0.5 || f.itemsSobrepagados > 0);
+            // 🟡 A revisar: se aplicó a ítems más plata de la registrada, pero el saldo NO es negativo
+            //    → casi siempre es pago histórico previo al sistema (benigno). Verificar fechas de ítems viejos.
+            const revisar = activos.filter(f => f.creditoReal < -0.5 && !(f.saldoMostrado < -0.5 || f.itemsSobrepagados > 0));
+            errores.sort((a, b) => a.saldoMostrado - b.saldoMostrado);
+            revisar.sort((a, b) => a.creditoReal - b.creditoReal);
 
             let R = '';
             R += `═══════════════════════════════════════════════════════\n`;
             R += `REPORTE GLOBAL DE CUENTAS — TODOS LOS CLIENTES\n`;
             R += `Generado: ${new Date().toLocaleString('es-BO')}\n`;
-            R += `Clientes con actividad: ${activos.length}  |  Con posibles errores: ${problemas.length}\n`;
+            R += `Clientes con actividad: ${activos.length}\n`;
+            R += `🔴 Errores accionables: ${errores.length}   |   🟡 A revisar (posible histórico): ${revisar.length}\n`;
             R += `═══════════════════════════════════════════════════════\n\n`;
 
-            R += `⚠️ CLIENTES CON POSIBLES ERRORES (${problemas.length}) — revisar con el Diagnóstico individual\n`;
-            R += `   Crédito = (raíces de pago + históricos) − pagado a ítems.\n`;
-            R += `   Negativo = se aplicó a ítems MÁS plata de la que se recibió (vínculo roto / pago sin respaldo).\n`;
+            R += `🔴 ERRORES ACCIONABLES (${errores.length}) — saldo negativo o ítem sobrepagado\n`;
+            R += `   Estos sí requieren corrección: el cliente figura pagando de más.\n`;
             R += `─────────────────────────────────────────────────────────\n`;
-            if (problemas.length === 0) R += `  (ninguno detectado)\n`;
-            problemas.forEach(fc => {
+            if (errores.length === 0) R += `  (ninguno) ✅\n`;
+            errores.forEach(fc => {
                 const flags = [];
-                if (fc.creditoReal < -0.5) flags.push(`CRÉDITO NEGATIVO ${f(fc.creditoReal)} (recibió ${f(fc.dineroRecibido)} / aplicó ${f(fc.totPagItems)})`);
                 if (fc.saldoMostrado < -0.5) flags.push(`SALDO NEGATIVO ${f(fc.saldoMostrado)}`);
                 if (fc.itemsSobrepagados > 0) flags.push(`${fc.itemsSobrepagados} ítem(s) sobrepagado(s)`);
                 R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | venta ${f(fc.totVentas).padStart(8)} | pag ${f(fc.totPagItems).padStart(8)} | saldo ${f(fc.saldoMostrado).padStart(8)} | ${flags.join(' · ')}\n`;
             });
             R += `\n`;
 
+            R += `🟡 A REVISAR — crédito negativo con saldo OK (${revisar.length})\n`;
+            R += `   Se aplicó a ítems más plata de la registrada, pero el saldo del cliente está bien.\n`;
+            R += `   Suele ser pago HISTÓRICO previo al sistema (benigno): falta solo el registro contable.\n`;
+            R += `─────────────────────────────────────────────────────────\n`;
+            if (revisar.length === 0) R += `  (ninguno)\n`;
+            revisar.forEach(fc => {
+                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | venta ${f(fc.totVentas).padStart(8)} | recibió ${f(fc.dineroRecibido).padStart(8)} | aplicó ${f(fc.totPagItems).padStart(8)} | falta registrar ${f(-fc.creditoReal).padStart(8)}\n`;
+            });
+            R += `\n`;
+
             R += `── TODOS LOS CLIENTES CON ACTIVIDAD (${activos.length}) ──\n`;
-            R += `  CLIENTE                      |   VENTAS |   PAGADO |    SALDO | RECIBIDO |  CRÉDITO | OK\n`;
+            R += `  CLIENTE                      |   VENTAS |   PAGADO |    SALDO | RECIBIDO |  CRÉDITO | EST\n`;
             R += `  -----------------------------------------------------------------------------------------\n`;
             activos.sort((a, b) => (a.c.nombre || '').localeCompare(b.c.nombre || ''));
             activos.forEach(fc => {
-                const ok = !(fc.creditoReal < -0.5 || fc.saldoMostrado < -0.5 || fc.itemsSobrepagados > 0);
-                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | ${f(fc.totVentas).padStart(8)} | ${f(fc.totPagItems).padStart(8)} | ${f(fc.saldoMostrado).padStart(8)} | ${f(fc.dineroRecibido).padStart(8)} | ${f(fc.creditoReal).padStart(8)} | ${ok ? 'OK' : '⚠️'}\n`;
+                const esError = fc.saldoMostrado < -0.5 || fc.itemsSobrepagados > 0;
+                const esRevisar = fc.creditoReal < -0.5 && !esError;
+                const mark = esError ? '🔴' : (esRevisar ? '🟡' : 'OK');
+                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | ${f(fc.totVentas).padStart(8)} | ${f(fc.totPagItems).padStart(8)} | ${f(fc.saldoMostrado).padStart(8)} | ${f(fc.dineroRecibido).padStart(8)} | ${f(fc.creditoReal).padStart(8)} | ${mark}\n`;
             });
             R += `═══════════════════════════════════════════════════════\n`;
 
