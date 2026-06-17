@@ -11,6 +11,21 @@ import { Search, Stethoscope, Copy, Check, Loader2 } from 'lucide-react';
 
 const f = (n) => Number(n || 0).toFixed(2);
 
+// Trae TODAS las filas de una tabla en lotes de 1000 (Supabase corta en 1000 por defecto)
+const fetchAll = async (table, columns, filterFn) => {
+    let all = [], from = 0; const size = 1000;
+    while (true) {
+        let q = supabase.from(table).select(columns).range(from, from + size - 1);
+        if (filterFn) q = filterFn(q);
+        const { data, error } = await q;
+        if (error) throw error;
+        all = all.concat(data || []);
+        if (!data || data.length < size) break;
+        from += size;
+    }
+    return all;
+};
+
 export default function DiagnosticoCliente() {
     const [busqueda, setBusqueda] = useState('');
     const [resultados, setResultados] = useState([]);
@@ -151,6 +166,96 @@ export default function DiagnosticoCliente() {
         }
     };
 
+    // ── REPORTE GLOBAL: corre el mismo análisis sobre TODOS los clientes ──
+    const generarTodos = async () => {
+        setLoading(true);
+        setClienteSel({ nombre: 'TODOS LOS CLIENTES' });
+        setBusqueda('');
+        setResultados([]);
+        try {
+            const [CL, IT, PG, CJ] = await Promise.all([
+                fetchAll('clientes', 'id, nombre, celular'),
+                fetchAll('cliente_items', 'cliente_id, precio_venta, monto_pagado, estado'),
+                fetchAll('cliente_pagos', 'cliente_id, monto, concepto, caja_mov_id, referencia, id'),
+                fetchAll('caja_movimientos', 'monto, concepto, tipo', q => q.neq('tipo', 'EGRESO')),
+            ]);
+
+            // Agrupar por cliente
+            const itemsBy = new Map(), pagosBy = new Map();
+            IT.forEach(i => { (itemsBy.get(i.cliente_id) || itemsBy.set(i.cliente_id, []).get(i.cliente_id)).push(i); });
+            PG.forEach(p => { (pagosBy.get(p.cliente_id) || pagosBy.set(p.cliente_id, []).get(p.cliente_id)).push(p); });
+
+            const esSub = (p) => (p.concepto || '').startsWith('Asignado a:');
+
+            const filas = CL.map(c => {
+                const cItems = itemsBy.get(c.id) || [];
+                const cPagos = pagosBy.get(c.id) || [];
+                const totVentas = cItems.reduce((s, i) => s + Number(i.precio_venta || 0), 0);
+                const totPagItems = cItems.reduce((s, i) => s + Number(i.monto_pagado || 0), 0);
+                const saldoMostrado = totVentas - totPagItems;
+                const itemsSobrepagados = cItems.filter(i => Number(i.monto_pagado || 0) > Number(i.precio_venta || 0) + 0.01).length;
+
+                const raices = cPagos.filter(p => !esSub(p));
+                const subs = cPagos.filter(esSub);
+                let saldoFavorReal = 0;
+                raices.forEach(r => {
+                    const subsVinc = subs.filter(s => (r.caja_mov_id && s.caja_mov_id === r.caja_mov_id) || (s.referencia && s.referencia === r.id));
+                    const sumSubs = subsVinc.reduce((a, s) => a + Number(s.monto || 0), 0);
+                    saldoFavorReal += Math.max(0, Number(r.monto || 0) - sumSubs);
+                });
+                const totHistoricos = subs.filter(s => !s.caja_mov_id).reduce((a, s) => a + Number(s.monto || 0), 0);
+
+                const nombre = (c.nombre || '').trim().toLowerCase();
+                const totCaja = nombre ? CJ.filter(m => (m.concepto || '').toLowerCase().includes(nombre)).reduce((s, m) => s + Number(m.monto || 0), 0) : 0;
+
+                const ladoA = totCaja + totHistoricos;
+                const ladoB = totPagItems + saldoFavorReal;
+                const difVerif = Math.abs(ladoA - ladoB);
+                const confiable = difVerif < 1;
+
+                return { c, totVentas, totPagItems, saldoMostrado, saldoFavorReal, totCaja, totHistoricos, difVerif, confiable, itemsSobrepagados, nItems: cItems.length, nPagos: cPagos.length };
+            });
+
+            const activos = filas.filter(f => f.nItems > 0 || f.nPagos > 0);
+            const problemas = activos.filter(f => !f.confiable || f.saldoMostrado < -0.01 || f.itemsSobrepagados > 0);
+            problemas.sort((a, b) => b.difVerif - a.difVerif);
+
+            let R = '';
+            R += `═══════════════════════════════════════════════════════\n`;
+            R += `REPORTE GLOBAL DE CUENTAS — TODOS LOS CLIENTES\n`;
+            R += `Generado: ${new Date().toLocaleString('es-BO')}\n`;
+            R += `Clientes con actividad: ${activos.length}  |  Con posibles errores: ${problemas.length}\n`;
+            R += `═══════════════════════════════════════════════════════\n\n`;
+
+            R += `⚠️ CLIENTES CON POSIBLES ERRORES (${problemas.length}) — revisar con el Diagnóstico individual\n`;
+            R += `─────────────────────────────────────────────────────────\n`;
+            if (problemas.length === 0) R += `  (ninguno detectado)\n`;
+            problemas.forEach(fc => {
+                const flags = [];
+                if (!fc.confiable) flags.push(`NO-CONFIABLE |A−B|=${f(fc.difVerif)}`);
+                if (fc.saldoMostrado < -0.01) flags.push(`SALDO NEGATIVO ${f(fc.saldoMostrado)}`);
+                if (fc.itemsSobrepagados > 0) flags.push(`${fc.itemsSobrepagados} ítem(s) sobrepagado(s)`);
+                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | venta ${f(fc.totVentas).padStart(8)} | pag ${f(fc.totPagItems).padStart(8)} | saldo ${f(fc.saldoMostrado).padStart(8)} | ${flags.join(' · ')}\n`;
+            });
+            R += `\n`;
+
+            R += `── TODOS LOS CLIENTES CON ACTIVIDAD (${activos.length}) ──\n`;
+            R += `  CLIENTE                      |   VENTAS |   PAGADO |    SALDO |  A FAVOR | CAJA+HIST | CONF\n`;
+            R += `  -----------------------------------------------------------------------------------------\n`;
+            activos.sort((a, b) => (a.c.nombre || '').localeCompare(b.c.nombre || ''));
+            activos.forEach(fc => {
+                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | ${f(fc.totVentas).padStart(8)} | ${f(fc.totPagItems).padStart(8)} | ${f(fc.saldoMostrado).padStart(8)} | ${f(fc.saldoFavorReal).padStart(8)} | ${f(fc.totCaja + fc.totHistoricos).padStart(9)} | ${fc.confiable ? 'OK' : '⚠️'}\n`;
+            });
+            R += `═══════════════════════════════════════════════════════\n`;
+
+            setReporte(R);
+        } catch (e) {
+            setReporte('ERROR al generar reporte global: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const copiar = () => {
         navigator.clipboard.writeText(reporte);
         setCopiado(true);
@@ -176,7 +281,17 @@ export default function DiagnosticoCliente() {
                             className="flex-1 outline-none text-sm"
                         />
                     </div>
+                    <button
+                        onClick={generarTodos}
+                        disabled={loading}
+                        className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all whitespace-nowrap"
+                    >
+                        <Stethoscope size={14} /> Analizar TODOS
+                    </button>
                 </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                    "Analizar TODOS" corre el diagnóstico sobre toda la cartera y lista arriba los clientes con posibles errores. Puede tardar unos segundos.
+                </p>
                 {resultados.length > 0 && (
                     <div className="mt-2 border border-border/30 rounded-xl divide-y divide-border/20 max-h-60 overflow-y-auto">
                         {resultados.map(c => (
