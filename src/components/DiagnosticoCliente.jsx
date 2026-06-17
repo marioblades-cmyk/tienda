@@ -173,11 +173,10 @@ export default function DiagnosticoCliente() {
         setBusqueda('');
         setResultados([]);
         try {
-            const [CL, IT, PG, CJ] = await Promise.all([
+            const [CL, IT, PG] = await Promise.all([
                 fetchAll('clientes', 'id, nombre, celular'),
                 fetchAll('cliente_items', 'cliente_id, precio_venta, monto_pagado, estado'),
-                fetchAll('cliente_pagos', 'cliente_id, monto, concepto, caja_mov_id, referencia, id'),
-                fetchAll('caja_movimientos', 'monto, concepto, tipo', q => q.neq('tipo', 'EGRESO')),
+                fetchAll('cliente_pagos', 'cliente_id, monto, concepto, caja_mov_id'),
             ]);
 
             // Agrupar por cliente
@@ -195,30 +194,20 @@ export default function DiagnosticoCliente() {
                 const saldoMostrado = totVentas - totPagItems;
                 const itemsSobrepagados = cItems.filter(i => Number(i.monto_pagado || 0) > Number(i.precio_venta || 0) + 0.01).length;
 
-                const raices = cPagos.filter(p => !esSub(p));
+                // Dinero recibido = pagos raíz (cada uno es plata real) + históricos (asignaciones sin caja)
                 const subs = cPagos.filter(esSub);
-                let saldoFavorReal = 0;
-                raices.forEach(r => {
-                    const subsVinc = subs.filter(s => (r.caja_mov_id && s.caja_mov_id === r.caja_mov_id) || (s.referencia && s.referencia === r.id));
-                    const sumSubs = subsVinc.reduce((a, s) => a + Number(s.monto || 0), 0);
-                    saldoFavorReal += Math.max(0, Number(r.monto || 0) - sumSubs);
-                });
+                const totRaices = cPagos.filter(p => !esSub(p)).reduce((a, r) => a + Number(r.monto || 0), 0);
                 const totHistoricos = subs.filter(s => !s.caja_mov_id).reduce((a, s) => a + Number(s.monto || 0), 0);
+                const dineroRecibido = totRaices + totHistoricos;
+                // Crédito real: + = saldo a favor legítimo ; − = se aplicó a ítems más de lo recibido (ENREDO)
+                const creditoReal = dineroRecibido - totPagItems;
 
-                const nombre = (c.nombre || '').trim().toLowerCase();
-                const totCaja = nombre ? CJ.filter(m => (m.concepto || '').toLowerCase().includes(nombre)).reduce((s, m) => s + Number(m.monto || 0), 0) : 0;
-
-                const ladoA = totCaja + totHistoricos;
-                const ladoB = totPagItems + saldoFavorReal;
-                const difVerif = Math.abs(ladoA - ladoB);
-                const confiable = difVerif < 1;
-
-                return { c, totVentas, totPagItems, saldoMostrado, saldoFavorReal, totCaja, totHistoricos, difVerif, confiable, itemsSobrepagados, nItems: cItems.length, nPagos: cPagos.length };
+                return { c, totVentas, totPagItems, saldoMostrado, dineroRecibido, creditoReal, itemsSobrepagados, nItems: cItems.length, nPagos: cPagos.length };
             });
 
             const activos = filas.filter(f => f.nItems > 0 || f.nPagos > 0);
-            const problemas = activos.filter(f => !f.confiable || f.saldoMostrado < -0.01 || f.itemsSobrepagados > 0);
-            problemas.sort((a, b) => b.difVerif - a.difVerif);
+            const problemas = activos.filter(f => f.creditoReal < -0.5 || f.saldoMostrado < -0.5 || f.itemsSobrepagados > 0);
+            problemas.sort((a, b) => a.creditoReal - b.creditoReal); // el más negativo (peor enredo) primero
 
             let R = '';
             R += `═══════════════════════════════════════════════════════\n`;
@@ -228,23 +217,26 @@ export default function DiagnosticoCliente() {
             R += `═══════════════════════════════════════════════════════\n\n`;
 
             R += `⚠️ CLIENTES CON POSIBLES ERRORES (${problemas.length}) — revisar con el Diagnóstico individual\n`;
+            R += `   Crédito = (raíces de pago + históricos) − pagado a ítems.\n`;
+            R += `   Negativo = se aplicó a ítems MÁS plata de la que se recibió (vínculo roto / pago sin respaldo).\n`;
             R += `─────────────────────────────────────────────────────────\n`;
             if (problemas.length === 0) R += `  (ninguno detectado)\n`;
             problemas.forEach(fc => {
                 const flags = [];
-                if (!fc.confiable) flags.push(`NO-CONFIABLE |A−B|=${f(fc.difVerif)}`);
-                if (fc.saldoMostrado < -0.01) flags.push(`SALDO NEGATIVO ${f(fc.saldoMostrado)}`);
+                if (fc.creditoReal < -0.5) flags.push(`CRÉDITO NEGATIVO ${f(fc.creditoReal)} (recibió ${f(fc.dineroRecibido)} / aplicó ${f(fc.totPagItems)})`);
+                if (fc.saldoMostrado < -0.5) flags.push(`SALDO NEGATIVO ${f(fc.saldoMostrado)}`);
                 if (fc.itemsSobrepagados > 0) flags.push(`${fc.itemsSobrepagados} ítem(s) sobrepagado(s)`);
                 R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | venta ${f(fc.totVentas).padStart(8)} | pag ${f(fc.totPagItems).padStart(8)} | saldo ${f(fc.saldoMostrado).padStart(8)} | ${flags.join(' · ')}\n`;
             });
             R += `\n`;
 
             R += `── TODOS LOS CLIENTES CON ACTIVIDAD (${activos.length}) ──\n`;
-            R += `  CLIENTE                      |   VENTAS |   PAGADO |    SALDO |  A FAVOR | CAJA+HIST | CONF\n`;
+            R += `  CLIENTE                      |   VENTAS |   PAGADO |    SALDO | RECIBIDO |  CRÉDITO | OK\n`;
             R += `  -----------------------------------------------------------------------------------------\n`;
             activos.sort((a, b) => (a.c.nombre || '').localeCompare(b.c.nombre || ''));
             activos.forEach(fc => {
-                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | ${f(fc.totVentas).padStart(8)} | ${f(fc.totPagItems).padStart(8)} | ${f(fc.saldoMostrado).padStart(8)} | ${f(fc.saldoFavorReal).padStart(8)} | ${f(fc.totCaja + fc.totHistoricos).padStart(9)} | ${fc.confiable ? 'OK' : '⚠️'}\n`;
+                const ok = !(fc.creditoReal < -0.5 || fc.saldoMostrado < -0.5 || fc.itemsSobrepagados > 0);
+                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | ${f(fc.totVentas).padStart(8)} | ${f(fc.totPagItems).padStart(8)} | ${f(fc.saldoMostrado).padStart(8)} | ${f(fc.dineroRecibido).padStart(8)} | ${f(fc.creditoReal).padStart(8)} | ${ok ? 'OK' : '⚠️'}\n`;
             });
             R += `═══════════════════════════════════════════════════════\n`;
 
