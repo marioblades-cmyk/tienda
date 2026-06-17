@@ -173,10 +173,11 @@ export default function DiagnosticoCliente() {
         setBusqueda('');
         setResultados([]);
         try {
-            const [CL, IT, PG] = await Promise.all([
+            const [CL, IT, PG, CJ] = await Promise.all([
                 fetchAll('clientes', 'id, nombre, celular'),
                 fetchAll('cliente_items', 'cliente_id, precio_venta, monto_pagado, estado'),
                 fetchAll('cliente_pagos', 'cliente_id, monto, concepto, caja_mov_id'),
+                fetchAll('caja_movimientos', 'monto, concepto, tipo', q => q.neq('tipo', 'EGRESO')),
             ]);
 
             // Agrupar por cliente
@@ -194,12 +195,19 @@ export default function DiagnosticoCliente() {
                 const saldoMostrado = totVentas - totPagItems;
                 const itemsSobrepagados = cItems.filter(i => Number(i.monto_pagado || 0) > Number(i.precio_venta || 0) + 0.01).length;
 
-                // Dinero recibido = pagos raíz (cada uno es plata real) + históricos (asignaciones sin caja)
+                // Dinero recibido — se toma LO MEJOR de dos fuentes independientes:
+                //  (1) ledger de pagos: raíces (plata real) + históricos (asignaciones sin caja)
+                //  (2) caja/contabilidad: movimientos a nombre del cliente + históricos
+                // Muchos pagos quedan en una fuente y no en la otra; con el máximo evitamos
+                // marcar como error la plata que SÍ está registrada (solo por otra vía).
                 const subs = cPagos.filter(esSub);
                 const totRaices = cPagos.filter(p => !esSub(p)).reduce((a, r) => a + Number(r.monto || 0), 0);
                 const totHistoricos = subs.filter(s => !s.caja_mov_id).reduce((a, s) => a + Number(s.monto || 0), 0);
-                const dineroRecibido = totRaices + totHistoricos;
-                // Crédito real: + = saldo a favor legítimo ; − = se aplicó a ítems más de lo recibido (ENREDO)
+                const viaPagos = totRaices + totHistoricos;
+                const nombre = (c.nombre || '').trim().toLowerCase();
+                const viaCaja = (nombre ? CJ.filter(m => (m.concepto || '').toLowerCase().includes(nombre)).reduce((s, m) => s + Number(m.monto || 0), 0) : 0) + totHistoricos;
+                const dineroRecibido = Math.max(viaPagos, viaCaja);
+                // Crédito: + = saldo a favor legítimo ; − = se aplicó a ítems más de lo recibido por CUALQUIER vía (ENREDO real)
                 const creditoReal = dineroRecibido - totPagItems;
 
                 return { c, totVentas, totPagItems, saldoMostrado, dineroRecibido, creditoReal, itemsSobrepagados, nItems: cItems.length, nPagos: cPagos.length };
