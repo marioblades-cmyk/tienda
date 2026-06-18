@@ -348,7 +348,10 @@ export default function MayoristaUpload() {
         if (!selectedVendedor) { setError('Selecciona un mayorista primero.'); return; }
         setError('');
         const ahora = new Date();
-        const nombre = `VENTA STOCK ${ahora.toLocaleDateString('es-BO')} ${ahora.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}`;
+        // Número correlativo: el mayor existente + 1
+        const nums = semanas.filter(s => isStockName(s.nombre)).map(s => parseInt(((s.nombre || '').trim().match(/^\d+/) || ['0'])[0], 10));
+        const next = (nums.length ? Math.max(...nums) : 0) + 1;
+        const nombre = `${next} VENTA STOCK ${ahora.toLocaleDateString('es-BO')} ${ahora.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
         const { data, error: insErr } = await supabase.from('semanas').insert({ nombre, abierta: true }).select().single();
         if (insErr || !data) { setError('No se pudo crear la venta de stock: ' + (insErr?.message || '')); return; }
         setSemanas(prev => [data, ...prev]);
