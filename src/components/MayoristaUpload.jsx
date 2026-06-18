@@ -394,6 +394,38 @@ export default function MayoristaUpload() {
         });
     };
 
+    // Cambiar la cantidad de un ítem de stock (tope = lo ya tomado + lo que queda en stock)
+    const setCantidadStock = (idx, val) => {
+        setPreviewData(prev => {
+            const data = [...prev];
+            const it = { ...data[idx] };
+            const max = (it.cantidad_stock_original || 0) + (it.stock_fisico || 0);
+            const v = Math.max(0, Math.min(max, parseInt(val) || 0));
+            it.cantidad_stock = v;
+            it.cantidad_entelequia = 0;
+            it.cantidad = v;
+            it.subtotal = v * (it.precio || 0);
+            data[idx] = it;
+            return data;
+        });
+    };
+
+    // Quitar un ítem del pedido desde stock
+    const quitarItemStock = (idx) => {
+        setError('');
+        setPreviewData(prev => {
+            const data = [...prev];
+            const it = data[idx];
+            if ((it.cantidad_stock_original || 0) > 0) {
+                // ya estaba guardado: dejarlo en 0 para que al confirmar se devuelva el stock y se borre del pedido
+                data[idx] = { ...it, cantidad_stock: 0, cantidad_entelequia: 0, cantidad: 0 };
+            } else {
+                data.splice(idx, 1);
+            }
+            return data;
+        });
+    };
+
     const handleConfirmarPedido = async () => {
         if (!selectedVendedor || !selectedSemana || !previewData) return;
         setProcessing(true);
@@ -1060,7 +1092,12 @@ export default function MayoristaUpload() {
                                 <div className="bg-white rounded-3xl border-2 border-orange-100 shadow-sm p-6 space-y-4">
                                     <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-2"><Package className="text-orange-500" size={18} /><h4 className="font-black text-navy text-sm uppercase tracking-widest">Pedido desde Stock</h4></div>
-                                        <button onClick={salirModoStock} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest">✕ Salir</button>
+                                        <div className="flex items-center gap-4">
+                                            {previewData && previewData.length > 0 && (
+                                                <span className="text-[11px] font-black text-emerald-600">Bs {previewData.reduce((s, i) => s + (i.cantidad_stock || 0) * (i.precio_bs || 0), 0).toFixed(2)} · {previewData.reduce((s, i) => s + (i.cantidad_stock || 0), 0)} u.</span>
+                                            )}
+                                            <button onClick={salirModoStock} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest">✕ Salir</button>
+                                        </div>
                                     </div>
                                     <input value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="Buscar producto en stock por título…" className="w-full px-4 py-3 border-2 border-slate-50 rounded-2xl text-xs font-bold bg-slate-50 focus:border-orange-400 focus:bg-white outline-none transition-all" />
                                     {(() => {
@@ -1103,6 +1140,67 @@ export default function MayoristaUpload() {
                                     <button onClick={iniciarPedidoStock} className="w-full py-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-3"><Package size={18} /> Armar Pedido desde Stock</button>
                                 </div>
                                 )
+                            ) : stockMode ? (
+                                <div className="bg-white rounded-[2.5rem] border border-orange-100 shadow-2xl overflow-hidden">
+                                    <div className="p-6 bg-navy text-white flex justify-between items-center">
+                                        <div className="flex items-center gap-3"><Package className="text-orange-500" /> <h4 className="font-black text-sm uppercase tracking-widest">Pedido desde Stock</h4></div>
+                                        <button onClick={salirModoStock} className="p-2 hover:bg-white/10 rounded-full"><X size={20} /></button>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs">
+                                            <thead className="bg-slate-50 border-b border-slate-100">
+                                                <tr className="text-slate-400 font-black uppercase tracking-widest text-[9px]">
+                                                    <th className="p-5">Producto</th>
+                                                    <th className="p-5 text-center">Cantidad</th>
+                                                    <th className="p-5 text-right">Precio Bs</th>
+                                                    <th className="p-5 text-right">Subtotal Bs</th>
+                                                    <th className="p-5"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {previewData.map((it, idx) => (
+                                                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                                        <td className="p-5">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className="bg-slate-100 text-slate-500 text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase">{it.editorial}</span>
+                                                                <span className="text-slate-400 font-mono text-[9px]">Stock disp. {(it.cantidad_stock_original || 0) + (it.stock_fisico || 0)}</span>
+                                                            </div>
+                                                            <p className="font-black text-navy uppercase text-[10px] leading-tight">{it.titulo}</p>
+                                                        </td>
+                                                        <td className="p-5 text-center">
+                                                            <input type="number" min="0" max={(it.cantidad_stock_original || 0) + (it.stock_fisico || 0)} value={it.cantidad_stock}
+                                                                onChange={(e) => setCantidadStock(idx, e.target.value)}
+                                                                className="w-16 p-1.5 bg-orange-50 border-orange-100 rounded-lg text-center font-black text-orange-600 outline-none focus:border-orange-500 border-2 transition-all" />
+                                                        </td>
+                                                        <td className="p-5 text-right font-mono font-black text-navy">{(it.precio_bs || 0).toFixed(2)}</td>
+                                                        <td className="p-5 text-right font-mono font-black text-emerald-600">{((it.cantidad_stock || 0) * (it.precio_bs || 0)).toFixed(2)}</td>
+                                                        <td className="p-5 text-center">
+                                                            <button onClick={() => quitarItemStock(idx)} className="text-slate-300 hover:text-red-500 transition-colors p-1"><Trash2 size={16} /></button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {previewData.length === 0 && (
+                                                    <tr><td colSpan="5" className="p-8 text-center text-slate-400 text-[10px] font-black uppercase tracking-widest">Agregá productos desde el buscador de arriba</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div className="p-8 bg-slate-50 border-t flex flex-col md:flex-row justify-between items-center gap-8">
+                                        <div className="flex gap-8">
+                                            <div className="text-center md:text-left">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Unidades</p>
+                                                <p className="text-2xl font-black text-navy">{previewData.reduce((s, i) => s + (i.cantidad_stock || 0), 0)}</p>
+                                            </div>
+                                            <div className="text-center md:text-left">
+                                                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Total Bs (mayorista)</p>
+                                                <p className="text-2xl font-black text-emerald-600">{previewData.reduce((s, i) => s + (i.cantidad_stock || 0) * (i.precio_bs || 0), 0).toFixed(2)}</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={handleConfirmarPedido} disabled={processing || previewData.reduce((s, i) => s + (i.cantidad_stock || 0), 0) === 0} className="w-full md:w-auto px-12 py-5 bg-navy text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50">
+                                            {processing ? <Loader2 className="animate-spin" /> : <Save size={18} />} CONFIRMAR PEDIDO
+                                        </button>
+                                    </div>
+                                </div>
                             ) : (
                                 <div className="bg-white rounded-[2.5rem] border border-border/40 shadow-2xl overflow-hidden">
                                     <div className="p-6 bg-navy text-white flex justify-between items-center">
