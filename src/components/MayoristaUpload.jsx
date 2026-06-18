@@ -44,7 +44,9 @@ export default function MayoristaUpload() {
     // --- 2. ESTADOS TAB 1: CARGA DE PEDIDO ---
     const [previewData, setPreviewData] = useState(null);
     const [catalog, setCatalog] = useState({});
-    const [existingOrder, setExistingOrder] = useState(null); 
+    const [existingOrder, setExistingOrder] = useState(null);
+    const [stockMode, setStockMode] = useState(false);   // armar pedido 100% desde stock de tienda
+    const [stockSearch, setStockSearch] = useState('');
 
     // --- 3. ESTADOS TAB 2: ESTADO DE CUENTA ---
     const [pagos, setPagos] = useState([]);
@@ -331,6 +333,67 @@ export default function MayoristaUpload() {
         }
     };
 
+    // Busca la semana especial "VENTA DESDE STOCK"
+    const getStockSemana = () => semanas.find(s =>
+        (s.nombre || '').toUpperCase().includes('VENTA') && (s.nombre || '').toUpperCase().includes('STOCK'));
+
+    // Inicia el modo "pedido desde stock": fija la semana especial y carga lo existente (si hay)
+    const iniciarPedidoStock = () => {
+        if (!selectedVendedor) { setError('Selecciona un mayorista primero.'); return; }
+        const ss = getStockSemana();
+        if (!ss) { setError('No existe la semana "VENTA DESDE STOCK". Hay que crearla primero.'); return; }
+        setError('');
+        setStockMode(true);
+        setSelectedSemana(ss.id);   // dispara checkExistingOrder → carga el pedido de stock existente si lo hay
+    };
+
+    const salirModoStock = () => {
+        setStockMode(false);
+        setStockSearch('');
+        setPreviewData(null);
+        setExistingOrder(null);
+        setSelectedSemana('');
+    };
+
+    // Agrega (o incrementa) un producto del catálogo al pedido desde stock
+    const agregarProductoStock = (prod) => {
+        const norm = normalizeTitle(prod.titulo);
+        setPreviewData(prev => {
+            const data = prev ? [...prev] : [];
+            const idx = data.findIndex(d => normalizeTitle(d.titulo) === norm);
+            if (idx >= 0) {
+                const it = { ...data[idx] };
+                // tope: lo ya tomado (original) + lo que queda en stock físico
+                if (it.cantidad_stock + 1 > (it.cantidad_stock_original || 0) + (it.stock_fisico || 0)) {
+                    setError(`No hay más stock de "${it.titulo}".`);
+                    return data;
+                }
+                it.cantidad_stock += 1;
+                it.cantidad = it.cantidad_entelequia + it.cantidad_stock;
+                it.subtotal = it.cantidad * it.precio;
+                data[idx] = it;
+                return data;
+            }
+            if ((prod.stock_fisico || 0) < 1) { setError(`"${prod.titulo}" no tiene stock.`); return data; }
+            setError('');
+            data.push({
+                titulo: prod.titulo,
+                cantidad: 1,
+                precio: prod.precio_tapa || 0,
+                precio_tapa: prod.precio_tapa || 0,
+                precio_bs: prod.precio_mayoreo_bs || prod.precio_venta_bs || 0,  // precio mayorista congelado
+                subtotal: prod.precio_tapa || 0,
+                editorial: prod.editorial || 'STOCK',
+                stock_fisico: prod.stock_fisico || 0,
+                catalog_id: prod.id || null,
+                cantidad_entelequia: 0,
+                cantidad_stock: 1,
+                cantidad_stock_original: 0
+            });
+            return data;
+        });
+    };
+
     const handleConfirmarPedido = async () => {
         if (!selectedVendedor || !selectedSemana || !previewData) return;
         setProcessing(true);
@@ -408,7 +471,9 @@ export default function MayoristaUpload() {
             setSuccess("¡Pedido mayorista registrado con éxito!");
             setPreviewData(null);
             setExistingOrder(null);
-            fetchInitialData(); 
+            setStockMode(false);
+            setStockSearch('');
+            fetchInitialData();
         } catch (err) {
             setError(err.message || "Error al confirmar el pedido.");
         } finally {
@@ -990,15 +1055,54 @@ export default function MayoristaUpload() {
                                 </div>
                             )}
 
-                            {!previewData ? (
-                                <div {...getRootProps()} className={`border-4 border-dashed rounded-[3.5rem] p-24 text-center transition-all cursor-pointer group bg-white/40 ${isDragActive ? 'border-navy bg-slate-50' : 'border-slate-100'}`}>
-                                    <input {...getInputProps()} />
-                                    <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-8 group-hover:scale-110 group-hover:bg-navy group-hover:text-white transition-all shadow-lg">
-                                        <Upload size={40} />
+                            {/* Buscador para Pedido desde Stock */}
+                            {stockMode && (
+                                <div className="bg-white rounded-3xl border-2 border-orange-100 shadow-sm p-6 space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-2"><Package className="text-orange-500" size={18} /><h4 className="font-black text-navy text-sm uppercase tracking-widest">Pedido desde Stock</h4></div>
+                                        <button onClick={salirModoStock} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest">✕ Salir</button>
                                     </div>
-                                    <h4 className="text-2xl font-black text-navy uppercase tracking-tighter">Procesar Pedido Mayorista</h4>
-                                    <p className="text-xs text-slate-400 mt-3 font-bold uppercase tracking-widest">Arrastra el Excel del Distribuidor aquí</p>
+                                    <input value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="Buscar producto en stock por título…" className="w-full px-4 py-3 border-2 border-slate-50 rounded-2xl text-xs font-bold bg-slate-50 focus:border-orange-400 focus:bg-white outline-none transition-all" />
+                                    {(() => {
+                                        const q = stockSearch.trim().toLowerCase();
+                                        const results = q.length >= 2
+                                            ? Object.values(catalog).filter(p => (p.stock_fisico || 0) > 0 && (p.titulo || '').toLowerCase().includes(q)).slice(0, 20)
+                                            : [];
+                                        if (q.length >= 2 && results.length === 0) return <p className="text-[10px] text-slate-400 font-bold px-2">Sin resultados con stock para "{stockSearch}".</p>;
+                                        if (results.length === 0) return null;
+                                        return (
+                                            <div className="border border-slate-100 rounded-2xl divide-y divide-slate-50 max-h-72 overflow-y-auto">
+                                                {results.map(p => (
+                                                    <div key={p.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50">
+                                                        <div className="min-w-0 pr-3">
+                                                            <p className="font-black text-navy text-[10px] uppercase leading-tight truncate">{p.titulo}</p>
+                                                            <p className="text-[9px] text-slate-400 font-bold">Stock {p.stock_fisico} · Bs {(p.precio_mayoreo_bs || p.precio_venta_bs || 0).toFixed(2)} mayorista</p>
+                                                        </div>
+                                                        <button onClick={() => agregarProductoStock(p)} className="shrink-0 bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-black px-3 py-1.5 rounded-lg transition-all">+ Agregar</button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
+                            )}
+
+                            {!previewData ? (
+                                stockMode ? (
+                                    <div className="text-center py-12 text-slate-400 text-xs font-bold uppercase tracking-widest">Buscá y agregá productos del stock arriba para armar el pedido.</div>
+                                ) : (
+                                <div className="space-y-4">
+                                    <div {...getRootProps()} className={`border-4 border-dashed rounded-[3.5rem] p-24 text-center transition-all cursor-pointer group bg-white/40 ${isDragActive ? 'border-navy bg-slate-50' : 'border-slate-100'}`}>
+                                        <input {...getInputProps()} />
+                                        <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-8 group-hover:scale-110 group-hover:bg-navy group-hover:text-white transition-all shadow-lg">
+                                            <Upload size={40} />
+                                        </div>
+                                        <h4 className="text-2xl font-black text-navy uppercase tracking-tighter">Procesar Pedido Mayorista</h4>
+                                        <p className="text-xs text-slate-400 mt-3 font-bold uppercase tracking-widest">Arrastra el Excel del Distribuidor aquí</p>
+                                    </div>
+                                    <button onClick={iniciarPedidoStock} className="w-full py-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-3"><Package size={18} /> Armar Pedido desde Stock</button>
+                                </div>
+                                )
                             ) : (
                                 <div className="bg-white rounded-[2.5rem] border border-border/40 shadow-2xl overflow-hidden">
                                     <div className="p-6 bg-navy text-white flex justify-between items-center">
