@@ -333,20 +333,28 @@ export default function MayoristaUpload() {
     };
 
     // Busca la semana especial "VENTA DESDE STOCK"
-    const getStockSemana = () => semanas.find(s =>
-        (s.nombre || '').toUpperCase().includes('VENTA') && (s.nombre || '').toUpperCase().includes('STOCK'));
+    // Una "semana" es una venta-de-stock si su nombre menciona VENTA + STOCK
+    const isStockName = (nombre) => {
+        const u = (nombre || '').toUpperCase();
+        return u.includes('VENTA') && u.includes('STOCK');
+    };
+    // Lista de ventas de stock guardadas (para seleccionar/editar)
+    const stockSemanas = semanas.filter(s => isStockName(s.nombre));
+    // Modo stock = la semana seleccionada es una venta-de-stock (única fuente de verdad)
+    const esStock = isStockName(semanas.find(s => s.id === selectedSemana)?.nombre);
 
-    // Modo stock = la semana seleccionada es la especial "VENTA DESDE STOCK" (única fuente de verdad)
-    const esStock = !!selectedSemana && getStockSemana()?.id === selectedSemana;
-
-    // Inicia el modo "pedido desde stock": fija la semana especial y carga lo existente (si hay)
-    const iniciarPedidoStock = () => {
+    // Crea una NUEVA venta desde stock: cada venta es su propia "semana" con fecha en el nombre
+    const nuevaVentaStock = async () => {
         if (!selectedVendedor) { setError('Selecciona un mayorista primero.'); return; }
-        const ss = getStockSemana();
-        if (!ss) { setError('No existe la semana "VENTA DESDE STOCK". Hay que crearla primero.'); return; }
         setError('');
-        setSelectedSemana(ss.id);
-        checkExistingOrder(ss.id);   // carga el pedido de stock existente (si lo hay) para poder editarlo
+        const ahora = new Date();
+        const nombre = `VENTA STOCK ${ahora.toLocaleDateString('es-BO')} ${ahora.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}`;
+        const { data, error: insErr } = await supabase.from('semanas').insert({ nombre, abierta: true }).select().single();
+        if (insErr || !data) { setError('No se pudo crear la venta de stock: ' + (insErr?.message || '')); return; }
+        setSemanas(prev => [data, ...prev]);
+        setPreviewData(null);
+        setExistingOrder(null);
+        setSelectedSemana(data.id);   // semana nueva → sin pedido previo → arranca en blanco
     };
 
     const salirModoStock = () => {
@@ -501,7 +509,7 @@ export default function MayoristaUpload() {
                 }
             }
 
-            const fueStock = getStockSemana()?.id === selectedSemana;
+            const fueStock = isStockName(semanas.find(s => s.id === selectedSemana)?.nombre);
             setSuccess("¡Pedido mayorista registrado con éxito!");
             setPreviewData(null);
             setExistingOrder(null);
@@ -1061,7 +1069,7 @@ export default function MayoristaUpload() {
                                 className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl text-xs font-black bg-slate-50 focus:border-navy focus:bg-white outline-none transition-all"
                             >
                                 <option value="">-- SELECCIONAR SEMANA --</option>
-                                {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                {semanas.filter(s => !isStockName(s.nombre)).map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                             </select>
                         </div>
                     )}
@@ -1093,7 +1101,7 @@ export default function MayoristaUpload() {
                             {esStock && (
                                 <div className="bg-white rounded-3xl border-2 border-orange-100 shadow-sm p-6 space-y-4">
                                     <div className="flex justify-between items-center">
-                                        <div className="flex items-center gap-2"><Package className="text-orange-500" size={18} /><h4 className="font-black text-navy text-sm uppercase tracking-widest">Pedido desde Stock</h4></div>
+                                        <div className="flex items-center gap-2"><Package className="text-orange-500" size={18} /><div><h4 className="font-black text-navy text-sm uppercase tracking-widest leading-none">Pedido desde Stock</h4><p className="text-[9px] text-slate-400 font-bold mt-0.5">{semanas.find(s => s.id === selectedSemana)?.nombre}</p></div></div>
                                         <div className="flex items-center gap-4">
                                             {previewData && previewData.length > 0 && (
                                                 <span className="text-[11px] font-black text-emerald-600">Bs {previewData.reduce((s, i) => s + (i.cantidad_stock || 0) * (i.precio_bs || 0), 0).toFixed(2)} · {previewData.reduce((s, i) => s + (i.cantidad_stock || 0), 0)} u.</span>
@@ -1139,7 +1147,19 @@ export default function MayoristaUpload() {
                                         <h4 className="text-2xl font-black text-navy uppercase tracking-tighter">Procesar Pedido Mayorista</h4>
                                         <p className="text-xs text-slate-400 mt-3 font-bold uppercase tracking-widest">Arrastra el Excel del Distribuidor aquí</p>
                                     </div>
-                                    <button onClick={iniciarPedidoStock} className="w-full py-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-3"><Package size={18} /> Armar Pedido desde Stock</button>
+                                    <div className="bg-white rounded-3xl border-2 border-orange-100 p-5 space-y-3">
+                                        <div className="flex items-center gap-2"><Package className="text-orange-500" size={16} /><span className="font-black text-navy text-xs uppercase tracking-widest">Venta desde Stock</span></div>
+                                        <button onClick={nuevaVentaStock} className="w-full py-4 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-3"><Plus size={18} /> Nueva Venta desde Stock</button>
+                                        {stockSemanas.length > 0 && (
+                                            <div>
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">O editar una venta anterior</label>
+                                                <select value="" onChange={(e) => { if (e.target.value) setSelectedSemana(e.target.value); }} className="w-full mt-1 px-4 py-3 border-2 border-slate-50 rounded-2xl text-xs font-bold bg-slate-50 focus:border-orange-400 focus:bg-white outline-none transition-all">
+                                                    <option value="">-- Seleccionar venta de stock --</option>
+                                                    {stockSemanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                                 )
                             ) : esStock ? (
