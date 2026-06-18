@@ -45,7 +45,6 @@ export default function MayoristaUpload() {
     const [previewData, setPreviewData] = useState(null);
     const [catalog, setCatalog] = useState({});
     const [existingOrder, setExistingOrder] = useState(null);
-    const [stockMode, setStockMode] = useState(false);   // armar pedido 100% desde stock de tienda
     const [stockSearch, setStockSearch] = useState('');
 
     // --- 3. ESTADOS TAB 2: ESTADO DE CUENTA ---
@@ -337,19 +336,20 @@ export default function MayoristaUpload() {
     const getStockSemana = () => semanas.find(s =>
         (s.nombre || '').toUpperCase().includes('VENTA') && (s.nombre || '').toUpperCase().includes('STOCK'));
 
+    // Modo stock = la semana seleccionada es la especial "VENTA DESDE STOCK" (única fuente de verdad)
+    const esStock = !!selectedSemana && getStockSemana()?.id === selectedSemana;
+
     // Inicia el modo "pedido desde stock": fija la semana especial y carga lo existente (si hay)
     const iniciarPedidoStock = () => {
         if (!selectedVendedor) { setError('Selecciona un mayorista primero.'); return; }
         const ss = getStockSemana();
         if (!ss) { setError('No existe la semana "VENTA DESDE STOCK". Hay que crearla primero.'); return; }
         setError('');
-        setStockMode(true);
         setSelectedSemana(ss.id);
         checkExistingOrder(ss.id);   // carga el pedido de stock existente (si lo hay) para poder editarlo
     };
 
     const salirModoStock = () => {
-        setStockMode(false);
         setStockSearch('');
         setPreviewData(null);
         setExistingOrder(null);
@@ -501,11 +501,12 @@ export default function MayoristaUpload() {
                 }
             }
 
+            const fueStock = getStockSemana()?.id === selectedSemana;
             setSuccess("¡Pedido mayorista registrado con éxito!");
             setPreviewData(null);
             setExistingOrder(null);
-            setStockMode(false);
             setStockSearch('');
+            if (fueStock) setSelectedSemana('');   // limpia el modo stock tras confirmar (carga queda en blanco)
             fetchInitialData();
         } catch (err) {
             setError(err.message || "Error al confirmar el pedido.");
@@ -1089,7 +1090,7 @@ export default function MayoristaUpload() {
                             )}
 
                             {/* Buscador para Pedido desde Stock */}
-                            {stockMode && (
+                            {esStock && (
                                 <div className="bg-white rounded-3xl border-2 border-orange-100 shadow-sm p-6 space-y-4">
                                     <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-2"><Package className="text-orange-500" size={18} /><h4 className="font-black text-navy text-sm uppercase tracking-widest">Pedido desde Stock</h4></div>
@@ -1126,7 +1127,7 @@ export default function MayoristaUpload() {
                             )}
 
                             {!previewData ? (
-                                stockMode ? (
+                                esStock ? (
                                     <div className="text-center py-12 text-slate-400 text-xs font-bold uppercase tracking-widest">Buscá y agregá productos del stock arriba para armar el pedido.</div>
                                 ) : (
                                 <div className="space-y-4">
@@ -1141,7 +1142,7 @@ export default function MayoristaUpload() {
                                     <button onClick={iniciarPedidoStock} className="w-full py-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-3"><Package size={18} /> Armar Pedido desde Stock</button>
                                 </div>
                                 )
-                            ) : stockMode ? (
+                            ) : esStock ? (
                                 <div className="bg-white rounded-[2.5rem] border border-orange-100 shadow-2xl overflow-hidden">
                                     <div className="p-6 bg-navy text-white flex justify-between items-center">
                                         <div className="flex items-center gap-3"><Package className="text-orange-500" /> <h4 className="font-black text-sm uppercase tracking-widest">Pedido desde Stock</h4></div>
