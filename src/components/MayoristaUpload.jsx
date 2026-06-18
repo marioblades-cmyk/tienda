@@ -199,13 +199,13 @@ export default function MayoristaUpload() {
         }
     };
 
-    const checkExistingOrder = async () => {
+    const checkExistingOrder = async (semanaIdParam = selectedSemana) => {
         setLoading(true);
         try {
             const { data: existingPedido } = await supabase
                 .from('pedidos')
                 .select('id, vendedor_nombre, estado')
-                .eq('semana_id', selectedSemana)
+                .eq('semana_id', semanaIdParam)
                 .eq('vendedor_id', selectedVendedor)
                 .eq('tipo', 'mayorista')
                 .maybeSingle();
@@ -344,7 +344,8 @@ export default function MayoristaUpload() {
         if (!ss) { setError('No existe la semana "VENTA DESDE STOCK". Hay que crearla primero.'); return; }
         setError('');
         setStockMode(true);
-        setSelectedSemana(ss.id);   // dispara checkExistingOrder → carga el pedido de stock existente si lo hay
+        setSelectedSemana(ss.id);
+        checkExistingOrder(ss.id);   // carga el pedido de stock existente (si lo hay) para poder editarlo
     };
 
     const salirModoStock = () => {
