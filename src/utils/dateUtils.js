@@ -53,6 +53,22 @@ export const ffechaHora = (val) => {
 };
 
 /**
+ * "YYYY-MM-DD" de HOY en Bolivia — para defaults de inputs <input type="date">.
+ * (Evita que después de las 20:00 se use la fecha UTC del día siguiente.)
+ */
+export const hoyBO = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+
+/**
+ * Formatea una fecha pura "YYYY-MM-DD" como "DD/MM/YYYY" SIN conversión de zona.
+ * Usar para fechas-solo (sin hora) para que no se corran un día.
+ */
+export const ffechaDia = (val) => {
+    if (!val) return '—';
+    const [y, m, d] = String(val).slice(0, 10).split('-');
+    return (y && m && d) ? `${d}/${m}/${y}` : String(val);
+};
+
+/**
  * "19/05/2026 22:55" — para notas y tags internos
  */
 export const fstamp = (val) => {

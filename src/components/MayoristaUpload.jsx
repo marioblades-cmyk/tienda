@@ -4,6 +4,7 @@ import { useDropzone } from 'react-dropzone';
 import ExcelJS from 'exceljs';
 import { SHEET_PROCESSORS } from '../utils/excelProcessors';
 import { catalogService } from '../services/catalogService';
+import { hoyBO, ffechaDia } from '../utils/dateUtils';
 import { 
     Upload, Store, CheckCircle2, AlertCircle, X, 
     Loader2, Calendar, Package, ArrowRight, Save,
@@ -53,7 +54,7 @@ export default function MayoristaUpload() {
     const [showPagoModal, setShowPagoModal] = useState(false);
     const [pagoForm, setPagoForm] = useState({
         monto: '',
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: hoyBO(),
         metodo: 'Efectivo',
         notas: ''
     });
@@ -559,7 +560,7 @@ export default function MayoristaUpload() {
 
             setSuccess("✓ Pago registrado y sincronizado con contabilidad.");
             setShowPagoModal(false);
-            setPagoForm({ monto: '', fecha: new Date().toISOString().split('T')[0], metodo: 'Efectivo', notas: '' });
+            setPagoForm({ monto: '', fecha: hoyBO(), metodo: 'Efectivo', notas: '' });
             fetchAccountData();
         } catch (err) {
             setError("Error al registrar pago: " + err.message);
@@ -960,7 +961,7 @@ export default function MayoristaUpload() {
         currentY += 5;
 
         const pagoRows = pagos.map(p => [
-            new Date(p.fecha).toLocaleDateString(),
+            ffechaDia(p.fecha),
             p.metodo_pago,
             `Bs ${Number(p.monto).toLocaleString()}`,
             p.notas || '-'
@@ -1360,7 +1361,7 @@ export default function MayoristaUpload() {
                                         <tbody className="divide-y divide-slate-50">
                                             {pagos.map(p => (
                                                 <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                                                    <td className="p-6 font-black text-navy">{new Date(p.fecha).toLocaleDateString()}</td>
+                                                    <td className="p-6 font-black text-navy">{ffechaDia(p.fecha)}</td>
                                                     <td className="p-6"><span className="bg-slate-100 text-slate-500 text-[9px] font-black px-2 py-1 rounded-lg uppercase">{p.metodo_pago}</span></td>
                                                     <td className="p-6 text-right font-black text-emerald-600 text-sm">Bs {Number(p.monto).toLocaleString()}</td>
                                                     <td className="p-6 text-slate-400 italic text-[10px]">{p.notas || 'Sin notas'}</td>
