@@ -854,28 +854,41 @@ export default function MayoristaUpload() {
         doc.text(`Cliente: ${storeName}`, 105, 34, { align: "center" });
 
         // Account Summary
+        const saldoRaw = deudaRep - pagadoRep;
+        // Absorber diferencias de redondeo menores a Bs 1
+        const saldoGlobal = (saldoRaw < 0 && Math.abs(saldoRaw) < 1) ? 0 : saldoRaw;
+        // Saldo pendiente = suma de lo que falta en cada pedido mostrado
+        const saldoPendiente = pedidosReporte.reduce((s, p) => s + Math.max(0, (p.totalBs || 0) - (Number(p.monto_pagado) || 0)), 0);
+        const saldo = soloPendientes ? saldoPendiente : saldoGlobal;
+
         doc.setDrawColor(240);
         doc.setFillColor(250, 250, 250);
         doc.roundedRect(14, 45, 182, 35, 3, 3, 'FD');
-        
         doc.setFontSize(9);
         doc.setTextColor(150);
-        doc.text("TOTAL ACUMULADO PEDIDOS", 20, 55);
-        doc.text("TOTAL PAGADO", 85, 55);
-        doc.text("SALDO PENDIENTE", 150, 55);
 
-        doc.setFontSize(14);
-        doc.setTextColor(navy[0], navy[1], navy[2]);
-        doc.text(`Bs ${deudaRep.toLocaleString()}`, 20, 65);
-        doc.setTextColor(0, 150, 0);
-        doc.text(`Bs ${pagadoRep.toLocaleString()}`, 85, 65);
-
-        const saldoRaw = deudaRep - pagadoRep;
-        // Absorber diferencias de redondeo menores a Bs 1
-        const saldo = (saldoRaw < 0 && Math.abs(saldoRaw) < 1) ? 0 : saldoRaw;
-        if (saldo > 0) doc.setTextColor(200, 0, 0);
-        else doc.setTextColor(0, 150, 0);
-        doc.text(`Bs ${saldo.toLocaleString()}`, 150, 65);
+        if (soloPendientes) {
+            // En "pendientes": foco en cuántos pedidos faltan y el saldo total de ellos
+            doc.text("PEDIDOS PENDIENTES", 20, 55);
+            doc.text("SALDO TOTAL PENDIENTE (de estos pedidos)", 80, 55);
+            doc.setFontSize(14);
+            doc.setTextColor(navy[0], navy[1], navy[2]);
+            doc.text(`${pedidosReporte.length}`, 20, 65);
+            doc.setTextColor(saldo > 0 ? 200 : 0, saldo > 0 ? 0 : 150, 0);
+            doc.text(`Bs ${saldo.toLocaleString()}`, 80, 65);
+        } else {
+            doc.text("TOTAL ACUMULADO PEDIDOS", 20, 55);
+            doc.text("TOTAL PAGADO", 85, 55);
+            doc.text("SALDO PENDIENTE", 150, 55);
+            doc.setFontSize(14);
+            doc.setTextColor(navy[0], navy[1], navy[2]);
+            doc.text(`Bs ${deudaRep.toLocaleString()}`, 20, 65);
+            doc.setTextColor(0, 150, 0);
+            doc.text(`Bs ${pagadoRep.toLocaleString()}`, 85, 65);
+            if (saldo > 0) doc.setTextColor(200, 0, 0);
+            else doc.setTextColor(0, 150, 0);
+            doc.text(`Bs ${saldo.toLocaleString()}`, 150, 65);
+        }
 
         let currentY = 90;
 
