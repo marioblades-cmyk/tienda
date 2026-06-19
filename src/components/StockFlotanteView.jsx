@@ -103,7 +103,11 @@ export default function ConfirmationInfoView() {
                 }
                 return total;
             })();
-            const weeks = weeksRes.data || [];
+            // Excluir las "ventas desde stock" (son ventas a mayoristas, no arribos/confirmaciones del distribuidor)
+            const weeks = (weeksRes.data || []).filter(w => {
+                const u = (w.nombre || '').toUpperCase();
+                return !(u.includes('VENTA') && u.includes('STOCK'));
+            });
             const masters = mastersRes.data || [];
 
             setClientItems(cItems || []);
