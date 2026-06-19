@@ -930,10 +930,11 @@ export default function MayoristaUpload() {
                     : (prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0);
                 const subtotal = pBs * it.cantidad;
                 const isRecortado = it.estado?.includes('RECORTADO');
+                const isCancelado = it.estado === 'CANCELADO';
                 const isDespachado = it.estado === 'DESPACHADO' || it.estado === 'ENTREGADO' || it.estado === 'EN TIENDA';
 
                 if (isRecortado) totalRecortes += subtotal;
-                else orderTotal += subtotal;
+                else if (!isCancelado) orderTotal += subtotal;   // los CANCELADO no se cobran
 
                 // En la columna "Est. Llegada": todos muestran la fecha ETA del pedido
                 // excepto RECORTADO (no llega) y DESPACHADO/EN TIENDA (ya llegó)
