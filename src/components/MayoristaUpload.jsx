@@ -574,6 +574,14 @@ export default function MayoristaUpload() {
             const updateObj = { estado: newEstado };
             if (newEstado === 'DESPACHADO') updateObj.fecha_despacho = new Date().toISOString();
             await supabase.from('pedidos').update(updateObj).eq('id', pedidoId);
+            // Al despachar, los ítems activos del pedido pasan a DESPACHADO (no se tocan RECORTADO/CANCELADO)
+            if (newEstado === 'DESPACHADO') {
+                const ped = pedidosWholesale.find(p => p.id === pedidoId);
+                const ids = (ped?.items || [])
+                    .filter(it => !(it.estado || '').includes('RECORTADO') && it.estado !== 'CANCELADO')
+                    .map(it => it.id);
+                if (ids.length > 0) await supabase.from('pedido_items').update({ estado: 'DESPACHADO' }).in('id', ids);
+            }
             fetchAccountData();
         } catch (err) {
             alert("Error: " + err.message);
@@ -1536,7 +1544,9 @@ export default function MayoristaUpload() {
 
                                                                         let badgeClass = 'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/20'; 
                                                                         if (it.fuente === 'stock') {
-                                                                            badgeClass = 'bg-orange-500/10 border border-orange-500/30 text-orange-500 shadow-sm shadow-orange-500/10';
+                                                                            badgeClass = (est === 'DESPACHADO' || est === 'ENTREGADO')
+                                                                                ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 shadow-sm shadow-emerald-500/10'
+                                                                                : 'bg-orange-500/10 border border-orange-500/30 text-orange-500 shadow-sm shadow-orange-500/10';
                                                                         } else if (est === 'CANCELADO') {
                                                                             badgeClass = 'bg-slate-200/80 border-slate-300 text-slate-400 line-through';
                                                                         } else if (est === 'RECOTIZAR') {
@@ -1568,7 +1578,7 @@ export default function MayoristaUpload() {
                                                                         return (
                                                                             <div className="flex flex-col items-center gap-0.5">
                                                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wide border transition-colors whitespace-nowrap ${badgeClass}`}>
-                                                                                    {it.fuente === 'stock' ? '🏠 EN TIENDA (STOCK)' : est}
+                                                                                    {it.fuente === 'stock' ? (est === 'DESPACHADO' || est === 'ENTREGADO' ? `🏠 ${est}` : '🏠 EN TIENDA (STOCK)') : est}
                                                                                 </span>
                                                                                 {dateStr && <span className="text-[8px] text-slate-400 font-bold italic opacity-70">Est. ~{dateStr}</span>}
                                                                             </div>
