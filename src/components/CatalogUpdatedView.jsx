@@ -185,8 +185,10 @@ const CatalogUpdatedView = () => {
             setIsLoadingFloating(true); // ← indicador secundario mientras carga el stock flotante
 
             // ── FASE 2: Semanas (necesarias para saber qué queries hacer) ──
-            const { data: weeks } = await supabase
-                .from('semanas').select('*').order('created_at', { ascending: false }).limit(10);
+            const { data: weeksRaw } = await supabase
+                .from('semanas').select('*').order('created_at', { ascending: false }).limit(20);
+            // Excluir ventas desde stock (no son semanas de distribución)
+            const weeks = (weeksRaw || []).filter(w => { const u = (w.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); }).slice(0, 10);
             const weekIds = (weeks || []).map(w => w.id);
 
             if (weekIds.length === 0) {

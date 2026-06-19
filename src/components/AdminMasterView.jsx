@@ -47,7 +47,7 @@ export default function AdminMasterView() {
             .select('*')
             .order('created_at', { ascending: false });
 
-        if (data) setSemanas(data);
+        if (data) setSemanas(data.filter(s => { const u = (s.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); }));
         if (error) console.error("Error cargando semanas:", error);
         setLoading(false);
     };

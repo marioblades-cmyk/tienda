@@ -41,12 +41,13 @@ export default function SellerDashboard({ isAdmin }) {
     const fetchSemanaYPedidos = async () => {
         setLoading(true);
         try {
-            const { data: semanadata, error: semanaError } = await supabase
+            const { data: semsRaw, error: semanaError } = await supabase
                 .from('semanas')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
+                .limit(10);
+            // Tomar la semana de distribución más reciente, excluyendo ventas desde stock
+            const semanadata = (semsRaw || []).find(s => { const u = (s.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); }) || null;
 
             if (semanaError) console.error('Error fetching week:', semanaError);
             setSemanaActual(semanadata);

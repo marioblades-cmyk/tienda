@@ -91,10 +91,11 @@ export default function PublicSalesView({ onBack }) {
                 .from('semanas')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(8);
+                .limit(20);
 
             if (sErr) throw sErr;
-            setSemanas(sems || []);
+            // Excluir ventas desde stock y dejar las últimas 8 reales
+            setSemanas((sems || []).filter(s => { const u = (s.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); }).slice(0, 8));
 
             // FASE 3: Cargar Próximas Entregas (Caché + Query Optimizada)
             if (sems && sems.length > 0) {

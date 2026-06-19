@@ -58,7 +58,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     }, [selectedSemana]);
 
     const fetchSemanas = async () => {
-        const { data } = await supabase.from('semanas').select('id, nombre, archivo_url, archivo_nombre').order('created_at', { ascending: false });
+        const { data: raw } = await supabase.from('semanas').select('id, nombre, archivo_url, archivo_nombre').order('created_at', { ascending: false });
+        const data = (raw || []).filter(s => { const u = (s.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); });
         if (data?.length) {
             setSemanas(data);
             setSelectedSemana(data[0].id);

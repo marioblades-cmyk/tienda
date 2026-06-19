@@ -58,7 +58,7 @@ export default function ReceptionManagement() {
             .from('semanas')
             .select('*')
             .order('created_at', { ascending: false });
-        if (semData) setSemanas(semData);
+        if (semData) setSemanas(semData.filter(s => { const u = (s.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); }));
 
         const { data: vendData } = await supabase
             .from('vendedores')
