@@ -836,6 +836,9 @@ export default function MayoristaUpload() {
         const pedidosReporte = soloPendientes
             ? pedidosWholesale.filter(p => !((p.estado === 'DESPACHADO') && (Number(p.monto_pagado) || 0) >= ((p.totalBs || 0) - 0.5)))
             : pedidosWholesale;
+        // En "pendientes" el resumen se calcula solo sobre los pedidos mostrados; en "completo" usa el saldo global
+        const deudaRep = soloPendientes ? pedidosReporte.reduce((s, p) => s + (p.totalBs || 0), 0) : balance.totalDeuda;
+        const pagadoRep = soloPendientes ? pedidosReporte.reduce((s, p) => s + (Number(p.monto_pagado) || 0), 0) : balance.totalPagado;
         const doc = new jsPDF();
         const navy = [30, 58, 95];
         const orange = [232, 137, 26];
@@ -863,11 +866,11 @@ export default function MayoristaUpload() {
 
         doc.setFontSize(14);
         doc.setTextColor(navy[0], navy[1], navy[2]);
-        doc.text(`Bs ${balance.totalDeuda.toLocaleString()}`, 20, 65);
+        doc.text(`Bs ${deudaRep.toLocaleString()}`, 20, 65);
         doc.setTextColor(0, 150, 0);
-        doc.text(`Bs ${balance.totalPagado.toLocaleString()}`, 85, 65);
-        
-        const saldoRaw = balance.totalDeuda - balance.totalPagado;
+        doc.text(`Bs ${pagadoRep.toLocaleString()}`, 85, 65);
+
+        const saldoRaw = deudaRep - pagadoRep;
         // Absorber diferencias de redondeo menores a Bs 1
         const saldo = (saldoRaw < 0 && Math.abs(saldoRaw) < 1) ? 0 : saldoRaw;
         if (saldo > 0) doc.setTextColor(200, 0, 0);
@@ -989,34 +992,38 @@ export default function MayoristaUpload() {
         });
 
         // Pagos
-        if (currentY > 220) { doc.addPage(); currentY = 20; }
-        doc.setFontSize(12);
-        doc.setTextColor(orange[0], orange[1], orange[2]);
-        doc.text("HISTORIAL DE PAGOS", 14, currentY);
-        currentY += 5;
+        // Historial global de pagos: solo en el reporte COMPLETO
+        // (en "pendientes" no aplica porque incluiría pagos de pedidos ya cerrados)
+        if (!soloPendientes) {
+            if (currentY > 220) { doc.addPage(); currentY = 20; }
+            doc.setFontSize(12);
+            doc.setTextColor(orange[0], orange[1], orange[2]);
+            doc.text("HISTORIAL DE PAGOS", 14, currentY);
+            currentY += 5;
 
-        const pagoRows = pagos.map(p => [
-            ffechaDia(p.fecha),
-            p.metodo_pago,
-            `Bs ${Number(p.monto).toLocaleString()}`,
-            p.notas || '-'
-        ]);
+            const pagoRows = pagos.map(p => [
+                ffechaDia(p.fecha),
+                p.metodo_pago,
+                `Bs ${Number(p.monto).toLocaleString()}`,
+                p.notas || '-'
+            ]);
 
-        autoTable(doc, {
-            startY: currentY,
-            head: [['Fecha', 'Método', 'Monto', 'Notas']],
-            body: pagoRows,
-            headStyles: { fillColor: orange },
-            styles: { fontSize: 8 },
-            margin: { left: 14, right: 14 },
-            theme: 'grid'
-        });
+            autoTable(doc, {
+                startY: currentY,
+                head: [['Fecha', 'Método', 'Monto', 'Notas']],
+                body: pagoRows,
+                headStyles: { fillColor: orange },
+                styles: { fontSize: 8 },
+                margin: { left: 14, right: 14 },
+                theme: 'grid'
+            });
+        }
 
         // Footer
-        const finalY = doc.lastAutoTable.finalY + 20;
+        const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : currentY) + 20;
         doc.setFontSize(11);
         doc.setTextColor(navy[0], navy[1], navy[2]);
-        doc.text(`Saldo Final Pendiente: Bs ${saldo.toLocaleString()}`, 105, finalY, { align: "center" });
+        doc.text(`${soloPendientes ? 'Saldo Pendiente (pedidos mostrados)' : 'Saldo Final Pendiente'}: Bs ${saldo.toLocaleString()}`, 105, finalY, { align: "center" });
 
         doc.save(`Reporte_Mayorista_${storeName.replace(/\s+/g, '_')}.pdf`);
     };
