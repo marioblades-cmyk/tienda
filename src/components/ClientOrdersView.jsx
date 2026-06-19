@@ -392,7 +392,11 @@ export default function ClientOrdersView() {
             setItems(itemsRes.data || []);
             setOtherSellersItems(othersRes.data || []);
             setPagos(pagosRes.data || []);
-            setSemanas(semanasRes.data || []);
+            // Excluir las "ventas desde stock" (son ventas a mayoristas, no semanas de pedido de clientes)
+            setSemanas((semanasRes.data || []).filter(s => {
+                const u = (s.nombre || '').toUpperCase();
+                return !(u.includes('VENTA') && u.includes('STOCK'));
+            }));
             setVendedores(vendedoresRes.data || []);
         } catch (error) {
             console.error("Error fetching data:", error);
