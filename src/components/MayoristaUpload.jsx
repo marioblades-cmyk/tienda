@@ -580,6 +580,20 @@ export default function MayoristaUpload() {
         }
     };
 
+    // Asignar (a mano) cuánto de lo pagado por el mayorista corresponde a un pedido
+    const asignarPagoPedido = async (pedido, montoStr) => {
+        const total = pedido.totalBs || 0;
+        const asignadoOtros = pedidosWholesale.reduce((s, p) => s + (p.id === pedido.id ? 0 : (Number(p.monto_pagado) || 0)), 0);
+        const disponible = Math.max(0, (balance.totalPagado || 0) - asignadoOtros); // tope: lo pagado que aún no está en otros pedidos
+        let monto = Math.max(0, Number(montoStr) || 0);
+        monto = Math.min(monto, total, disponible);
+        monto = Math.round(monto * 100) / 100;
+        try {
+            await supabase.from('pedidos').update({ monto_pagado: monto }).eq('id', pedido.id);
+            fetchAccountData();
+        } catch (err) { alert('Error al asignar pago: ' + err.message); }
+    };
+
     // Cambiar estado de un ítem individual (ej: "PEDIDO (Siguiente)" → "EN TIENDA")
     const handleUpdateItemEstado = async (itemId, newEstado) => {
         try {
@@ -1319,6 +1333,13 @@ export default function MayoristaUpload() {
                                 <div className="bg-emerald-50 p-8 rounded-[2rem] border border-emerald-100 shadow-sm">
                                     <p className="text-[10px] uppercase font-black text-emerald-600 tracking-widest mb-2">Total Pagado</p>
                                     <p className="text-3xl font-black text-emerald-700">Bs {balance.totalPagado.toLocaleString()}</p>
+                                    {(() => {
+                                        const totalAsignado = pedidosWholesale.reduce((s, p) => s + (Number(p.monto_pagado) || 0), 0);
+                                        const sinAsignar = Math.max(0, (balance.totalPagado || 0) - totalAsignado);
+                                        return sinAsignar > 0.5
+                                            ? <p className="text-[10px] font-black text-orange-500 mt-1">↳ Sin asignar a pedidos: Bs {sinAsignar.toLocaleString()}</p>
+                                            : ((balance.totalPagado || 0) > 0.5 ? <p className="text-[10px] font-black text-emerald-600 mt-1">↳ Todo asignado a pedidos ✓</p> : null);
+                                    })()}
                                 </div>
                                 <div className="bg-orange-50 p-8 rounded-[2rem] border border-orange-100 shadow-sm">
                                     <p className="text-[10px] uppercase font-black text-orange-600 tracking-widest mb-2">Saldo Deudor</p>
@@ -1445,6 +1466,28 @@ export default function MayoristaUpload() {
                                         </div>
                                         <button onClick={() => setExpandedPedido(expandedPedido === pedido.id ? null : pedido.id)} className="p-3 hover:bg-slate-50 rounded-2xl text-slate-300 hover:text-navy transition-all">{expandedPedido === pedido.id ? <ChevronUp size={24} /> : <ChevronDown size={24} />}</button>
                                     </div>
+                                    {(() => {
+                                        const totalPed = pedido.totalBs || 0;
+                                        const pagadoPed = Number(pedido.monto_pagado) || 0;
+                                        const faltaPed = Math.max(0, totalPed - pagadoPed);
+                                        const totalAsignado = pedidosWholesale.reduce((s, p) => s + (Number(p.monto_pagado) || 0), 0);
+                                        const sinAsignar = Math.max(0, (balance.totalPagado || 0) - totalAsignado);
+                                        const est = (totalPed > 0 && pagadoPed >= totalPed - 0.5) ? 'PAGADO' : (pagadoPed > 0.5 ? 'PARCIAL' : 'PENDIENTE');
+                                        const cls = est === 'PAGADO' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : est === 'PARCIAL' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-500 border-slate-200';
+                                        return (
+                                            <div className="px-6 py-3 bg-slate-50/60 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                                                <div className="flex items-center gap-3">
+                                                    <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-lg border ${cls}`}>{est}</span>
+                                                    <span className="text-[10px] font-bold text-slate-500">Pagado <b className="text-navy">Bs {pagadoPed.toLocaleString()}</b> de Bs {totalPed.toLocaleString()}{faltaPed > 0.5 && <span className="text-red-500"> · falta Bs {faltaPed.toLocaleString()}</span>}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button onClick={() => asignarPagoPedido(pedido, totalPed)} className="text-[9px] font-black text-emerald-600 hover:text-white hover:bg-emerald-500 border border-emerald-300 px-2.5 py-1 rounded-lg transition-all">✓ Saldar</button>
+                                                    <button onClick={() => { const v = window.prompt(`Monto pagado a asignar a este pedido (sin asignar disponible: Bs ${sinAsignar.toLocaleString()}):`, pagadoPed); if (v !== null) asignarPagoPedido(pedido, v); }} className="text-[9px] font-black text-navy hover:text-white hover:bg-navy border border-slate-300 px-2.5 py-1 rounded-lg transition-all">✏️ Asignar</button>
+                                                    {pagadoPed > 0.5 && <button onClick={() => asignarPagoPedido(pedido, 0)} className="text-[9px] font-black text-red-500 hover:text-white hover:bg-red-500 border border-red-200 px-2.5 py-1 rounded-lg transition-all">Quitar</button>}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                     {expandedPedido === pedido.id && (
                                         <div className="bg-slate-50/50 border-t p-8 animate-in slide-in-from-top-4">
                                             <table className="w-full text-[10px]">
