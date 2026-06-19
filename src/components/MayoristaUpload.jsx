@@ -897,7 +897,8 @@ export default function MayoristaUpload() {
             if (currentY > 240) { doc.addPage(); currentY = 20; }
             
             const semana = pedido.semana;
-            const eta = semana?.fecha_estimada_llegada 
+            const esPedidoStock = isStockName(semana?.nombre);   // venta desde stock: ya está en tienda, sin ETA
+            const eta = semana?.fecha_estimada_llegada
                 ? new Date(semana.fecha_estimada_llegada)
                 : new Date(new Date(pedido.created_at).getTime() + (22*24*60*60*1000));
 
@@ -915,7 +916,7 @@ export default function MayoristaUpload() {
             currentY += 12;
             doc.setTextColor(100);
             doc.setFontSize(8);
-            doc.text(`Estado: ${pedido.estado} | Entrega estimada: ${etaStr}`, 14, currentY);
+            doc.text(`Estado: ${pedido.estado} | ${esPedidoStock ? 'Desde stock (en tienda)' : `Entrega estimada: ${etaStr}`}`, 14, currentY);
             currentY += 5;
 
             let orderTotal = 0;
@@ -941,8 +942,11 @@ export default function MayoristaUpload() {
                 let displayStatus;
                 if (isRecortado) {
                     displayStatus = 'RECORTADO';
-                } else if (it.estado === 'CANCELADO') {
+                } else if (isCancelado) {
                     displayStatus = 'CANCELADO';
+                } else if (it.fuente === 'stock' || isDespachado) {
+                    // ya está en tienda / despachado: no tiene fecha de llegada
+                    displayStatus = it.estado === 'DESPACHADO' ? 'DESPACHADO' : (it.estado === 'ENTREGADO' ? 'ENTREGADO' : 'EN TIENDA');
                 } else {
                     displayStatus = etaStr;
                 }
