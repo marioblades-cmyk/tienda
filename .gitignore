@@ -32,3 +32,9 @@ dist-ssr
 # Excel temporary files
 ~$*
 .vercel
+
+# Scripts temporales de debug
+*.mjs
+parse_pedido.js
+pedido_temp.xlsx
+query_db.mjs
