@@ -180,8 +180,16 @@ export default function LanzamientosCurator({ isOpen, onClose, catalogData, onRe
     if (!isOpen) return null;
 
     const currentList = (activeTab === 'novedades' ? novedades : reimpresiones).filter(item => {
-        if (editorialFilter === 'TODAS') return true;
-        return item.editorial === editorialFilter;
+        if (editorialFilter !== 'TODAS' && item.editorial !== editorialFilter) return false;
+        // El buscador también filtra entre los que ya están en la lista
+        const q = searchManual.trim().toLowerCase();
+        if (q.length >= 2) {
+            const match = (item.titulo || '').toLowerCase().includes(q)
+                || (item.product_id || '').toLowerCase().includes(q)
+                || (item.ean_oficial || '').includes(q);
+            if (!match) return false;
+        }
+        return true;
     });
 
     return (
@@ -226,7 +234,7 @@ export default function LanzamientosCurator({ isOpen, onClose, catalogData, onRe
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
                             <input 
                                 type="text"
-                                placeholder="Buscar en catálogo maestro..."
+                                placeholder="Buscar en la lista o agregar del catálogo..."
                                 value={searchManual}
                                 onChange={(e) => {
                                     setSearchManual(e.target.value);
