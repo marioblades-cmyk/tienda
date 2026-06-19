@@ -75,7 +75,8 @@ export default function AdminWeeklyView() {
             .order('created_at', { ascending: false });
 
         if (error) console.error('Error fetching semanas:', error);
-        else setSemanas(data || []);
+        // Excluir ventas desde stock (se gestionan desde Mayoristas, no son semanas de distribución)
+        else setSemanas((data || []).filter(s => { const u = (s.nombre || '').toUpperCase(); return !(u.includes('VENTA') && u.includes('STOCK')); }));
         setLoading(false);
     };
 
