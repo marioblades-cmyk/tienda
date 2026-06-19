@@ -822,8 +822,12 @@ export default function MayoristaUpload() {
         }
     };
 
-    const generatePDF = () => {
+    const generatePDF = (soloPendientes = false) => {
         const storeName = vendedores.find(v => v.id === selectedVendedor)?.nombre || 'Socio Mayorista';
+        // En modo "pendientes": ocultar pedidos ya cerrados (DESPACHADO + totalmente pagado)
+        const pedidosReporte = soloPendientes
+            ? pedidosWholesale.filter(p => !((p.estado === 'DESPACHADO') && (Number(p.monto_pagado) || 0) >= ((p.totalBs || 0) - 0.5)))
+            : pedidosWholesale;
         const doc = new jsPDF();
         const navy = [30, 58, 95];
         const orange = [232, 137, 26];
@@ -835,7 +839,7 @@ export default function MayoristaUpload() {
         
         doc.setFontSize(10);
         doc.setTextColor(100);
-        doc.text(`REPORTE DE ESTADO DE CUENTA - ${new Date().toLocaleDateString()}`, 105, 28, { align: "center" });
+        doc.text(`REPORTE DE ESTADO DE CUENTA ${soloPendientes ? '(PENDIENTES)' : '(COMPLETO)'} - ${new Date().toLocaleDateString()}`, 105, 28, { align: "center" });
         doc.text(`Cliente: ${storeName}`, 105, 34, { align: "center" });
 
         // Account Summary
@@ -865,7 +869,7 @@ export default function MayoristaUpload() {
         let currentY = 90;
 
         // Pedidos
-        pedidosWholesale.forEach((pedido, idx) => {
+        pedidosReporte.forEach((pedido, idx) => {
             if (currentY > 240) { doc.addPage(); currentY = 20; }
             
             const semana = pedido.semana;
@@ -964,6 +968,15 @@ export default function MayoristaUpload() {
                 doc.setTextColor(150, 0, 0);
                 doc.text(`(+ Bs ${totalRecortes.toLocaleString()} recortados por Entelequia — no se cobran)`, 196, currentY, { align: "right" });
             }
+            // Pagado y saldo de ESTE pedido (según lo asignado)
+            const pagadoPed = Number(pedido.monto_pagado) || 0;
+            const saldoPed = Math.max(0, orderTotal - pagadoPed);
+            currentY += 5;
+            doc.setFontSize(8);
+            doc.setTextColor(0, 150, 0);
+            doc.text(`Pagado: Bs ${pagadoPed.toLocaleString()}`, 120, currentY, { align: "right" });
+            if (saldoPed > 0.5) doc.setTextColor(200, 0, 0); else doc.setTextColor(0, 150, 0);
+            doc.text(`Saldo: Bs ${saldoPed.toLocaleString()}`, 196, currentY, { align: "right" });
             currentY += 15;
         });
 
@@ -1426,12 +1439,18 @@ export default function MayoristaUpload() {
                                     </div>
                                 );
                             })()}
-                            <div className="flex justify-end mb-4">
-                                <button 
-                                    onClick={generatePDF}
+                            <div className="flex justify-end gap-3 mb-4">
+                                <button
+                                    onClick={() => generatePDF(false)}
                                     className="flex items-center gap-2 bg-navy text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-navy/90 transition-all shadow-xl shadow-navy/20"
                                 >
-                                    <FileDown size={18} /> Generar Reporte PDF
+                                    <FileDown size={18} /> Reporte Completo
+                                </button>
+                                <button
+                                    onClick={() => generatePDF(true)}
+                                    className="flex items-center gap-2 bg-orange-500 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 transition-all shadow-xl shadow-orange-500/20"
+                                >
+                                    <FileDown size={18} /> Reporte Pendientes
                                 </button>
                             </div>
                             {pedidosWholesale.map(pedido => (
