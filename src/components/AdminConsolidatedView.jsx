@@ -797,7 +797,9 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
                 const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
-                const totalMatch = Math.abs(realExcelTotal - Math.round(grandTotalSystem)) < 5; // Tolerancia pequeña para redondeos
+                // El total del Excel se RE-CALCULA releyendo las hojas (precios/columnas/descuentos) y puede
+                // diferir un poco del oficial. Toleramos hasta 1.5% para no dar falsas alarmas; lo confiable son las unidades.
+                const totalMatch = Math.abs(realExcelTotal - Math.round(grandTotalSystem)) <= Math.max(50, Math.round(grandTotalSystem) * 0.015);
                 const qtyMatch = diff === 0;
 
                 setExportVerification({
