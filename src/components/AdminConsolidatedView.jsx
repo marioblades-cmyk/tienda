@@ -751,6 +751,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 // Re-escaneamos el Excel ya lleno para ver qué hay realmente ahí dentro
                 let realExcelTotal = 0;
                 const excelTotalsByEditorial = {};
+                const unpricedTitles = [];   // títulos con cantidad pero sin precio (posibles culpables)
 
                 productSheets.forEach(({ ws, titleColIndex, qtyColIndex, priceColIndex }) => {
                     let sheetTotal = 0;
@@ -773,6 +774,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                 if (flatProducts[cellTitle]) price = flatProducts[cellTitle].precio;
                             }
 
+                            if (price === 0) unpricedTitles.push({ hoja: ws.name, titulo: String(row.getCell(titleColIndex + 1).value || ''), qty });
                             sheetTotal += (qty * price);
                         }
                     });
@@ -802,6 +804,17 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                 const totalMatch = Math.abs(realExcelTotal - Math.round(grandTotalSystem)) < 5; // deben coincidir
                 const qtyMatch = diff === 0;
 
+                // Desglose por editorial: sistema vs recálculo del Excel (para ver cuál descuadra)
+                const systemTotalsByEditorial = {};
+                Object.entries(summaryData).forEach(([ed, d]) => { systemTotalsByEditorial[ed] = Math.round(d.total || 0); });
+                const allEds = Array.from(new Set([...Object.keys(systemTotalsByEditorial), ...Object.keys(excelTotalsByEditorial)]));
+                const breakdown = allEds.map(ed => ({
+                    editorial: ed,
+                    sistema: systemTotalsByEditorial[ed] || 0,
+                    excel: excelTotalsByEditorial[ed] || 0,
+                    diff: (systemTotalsByEditorial[ed] || 0) - (excelTotalsByEditorial[ed] || 0)
+                })).filter(r => r.sistema || r.excel);
+
                 setExportVerification({
                     success: qtyMatch && totalMatch,
                     msg: (qtyMatch && totalMatch) ? "¡Verificación Exitosa!" : "Discrepancia Detectada",
@@ -811,7 +824,9 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         excelQty: totalQtyFilledInExcel,
                         systemTotal: Math.round(grandTotalSystem),
                         excelTotal: realExcelTotal,
-                        diff: diff
+                        diff: diff,
+                        breakdown,
+                        unpriced: unpricedTitles
                     }
                 });
             }
@@ -1576,6 +1591,44 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                     </p>
                                 </div>
                             </div>
+
+                            {!exportVerification.success && exportVerification.details.breakdown && (
+                                <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 space-y-3">
+                                    <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">🔎 Diagnóstico — dónde difiere</h4>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-[11px]">
+                                            <thead>
+                                                <tr className="text-slate-400 font-black uppercase text-[9px] tracking-wider border-b border-slate-200">
+                                                    <th className="text-left py-1.5">Editorial</th>
+                                                    <th className="text-right py-1.5">Sistema</th>
+                                                    <th className="text-right py-1.5">Excel</th>
+                                                    <th className="text-right py-1.5">Dif.</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {exportVerification.details.breakdown.map((r) => (
+                                                    <tr key={r.editorial} className={`border-b border-slate-100 ${r.diff !== 0 ? 'bg-amber-50' : ''}`}>
+                                                        <td className="py-1.5 font-bold text-navy">{r.editorial}</td>
+                                                        <td className="py-1.5 text-right font-mono">{r.sistema.toLocaleString('es-AR')}</td>
+                                                        <td className="py-1.5 text-right font-mono">{r.excel.toLocaleString('es-AR')}</td>
+                                                        <td className={`py-1.5 text-right font-mono font-black ${r.diff !== 0 ? 'text-amber-700' : 'text-slate-300'}`}>{r.diff !== 0 ? r.diff.toLocaleString('es-AR') : '—'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {exportVerification.details.unpriced && exportVerification.details.unpriced.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-1">Títulos sin precio leído ({exportVerification.details.unpriced.length})</p>
+                                            <div className="max-h-32 overflow-y-auto space-y-0.5">
+                                                {exportVerification.details.unpriced.map((u, i) => (
+                                                    <p key={i} className="text-[10px] text-slate-600"><span className="text-slate-400">[{u.hoja}]</span> {u.titulo} <span className="text-slate-400">×{u.qty}</span></p>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             <button
                                 onClick={() => setExportVerification(null)}
