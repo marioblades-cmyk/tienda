@@ -755,9 +755,9 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
                 productSheets.forEach(({ ws, titleColIndex, qtyColIndex, priceColIndex }) => {
                     let sheetTotal = 0;
-                    ws.eachRow((row, rowNumber) => {
-                        if (rowNumber <= 5) return; // Saltar headers
-
+                    ws.eachRow((row) => {
+                        // No saltamos por número de fila: el filtro "qty > 0" ya excluye encabezados.
+                        // (La hoja "Otras" tiene datos desde la fila 3 — antes se perdían 3 filas.)
                         const qty = Number(row.getCell(qtyColIndex + 1).value) || 0;
                         if (qty > 0) {
                             // Intentar obtener precio de la columna detectada, o del sistema si no hay columna
