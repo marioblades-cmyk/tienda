@@ -508,7 +508,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         const r = ws.getRow(j);
                         r.eachCell((cell, colNumber) => {
                             const v = String(cell.value || '').toLowerCase();
-                            if (foundPrice === -1 && (v.includes('precio') || v.includes('p. publico') || v.includes('p. lista') || v.includes('importe') || v.includes('unit'))) {
+                            if (foundPrice === -1 && (v.includes('precio') || v.includes('pvp') || v.includes('p. publico') || v.includes('p. lista') || v.includes('importe') || v.includes('unit'))) {
                                 if (colNumber - 1 !== foundTitle && colNumber - 1 !== foundQty) {
                                     foundPrice = colNumber - 1;
                                 }
@@ -774,7 +774,6 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             }
 
                             sheetTotal += (qty * price);
-                            if (price === 0) console.warn('⚠️ VERIF precio 0:', ws.name, '|', String(row.getCell(titleColIndex + 1).value || ''), '| qty', qty);
                         }
                     });
 
@@ -797,8 +796,6 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         excelTotalsByEditorial[edMatch] = (excelTotalsByEditorial[edMatch] || 0) + sheetNet;
                     }
                 });
-                console.log('🔎 VERIF recompute (Excel) por editorial:', excelTotalsByEditorial);
-                console.log('🔎 VERIF sistema por editorial:', Object.fromEntries(Object.entries(summaryData).map(([k, v]) => [k, Math.round(v.total)])));
 
                 const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
