@@ -774,6 +774,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             }
 
                             sheetTotal += (qty * price);
+                            if (price === 0) console.warn('⚠️ VERIF precio 0:', ws.name, '|', String(row.getCell(titleColIndex + 1).value || ''), '| qty', qty);
                         }
                     });
 
@@ -791,15 +792,17 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                         else if (wsName.includes('hotel')) edMatch = 'Hotel de las Ideas';
 
                         const dto = EDITORIAL_DTOS[edMatch] || 35;
-                        realExcelTotal += Math.round(sheetTotal * (1 - (dto / 100)));
+                        const sheetNet = Math.round(sheetTotal * (1 - (dto / 100)));
+                        realExcelTotal += sheetNet;
+                        excelTotalsByEditorial[edMatch] = (excelTotalsByEditorial[edMatch] || 0) + sheetNet;
                     }
                 });
+                console.log('🔎 VERIF recompute (Excel) por editorial:', excelTotalsByEditorial);
+                console.log('🔎 VERIF sistema por editorial:', Object.fromEntries(Object.entries(summaryData).map(([k, v]) => [k, Math.round(v.total)])));
 
                 const grandTotalSystem = Object.values(summaryData).reduce((sum, ed) => sum + ed.total, 0);
                 const diff = totalQtyInDB - totalQtyFilledInExcel;
-                // El total del Excel se RE-CALCULA releyendo las hojas (precios/columnas/descuentos) y puede
-                // diferir un poco del oficial. Toleramos hasta 1.5% para no dar falsas alarmas; lo confiable son las unidades.
-                const totalMatch = Math.abs(realExcelTotal - Math.round(grandTotalSystem)) <= Math.max(50, Math.round(grandTotalSystem) * 0.015);
+                const totalMatch = Math.abs(realExcelTotal - Math.round(grandTotalSystem)) < 5; // deben coincidir
                 const qtyMatch = diff === 0;
 
                 setExportVerification({
