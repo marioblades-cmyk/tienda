@@ -763,8 +763,8 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                             let price = 0;
                             if (priceColIndex !== -1) {
                                 const pVal = row.getCell(priceColIndex + 1).value;
-                                if (typeof pVal === 'number') price = pVal;
-                                else if (typeof pVal === 'object' && pVal?.result) price = pVal.result;
+                                if (pVal && typeof pVal === 'object') price = Number(pVal.result) || 0;
+                                else price = Number(String(pVal).replace(/[^\d]/g, '')) || 0; // maneja número Y texto ("22000", "22.000")
                             }
 
                             // Si no hay precio en el Excel, buscamos en nuestro mapa para no perder la verificación
