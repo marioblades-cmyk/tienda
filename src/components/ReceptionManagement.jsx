@@ -281,25 +281,24 @@ export default function ReceptionManagement() {
             // Recolectar la demanda por vendedor
             const vendorDemand = {}; // { [key]: { [vendedor]: { pedido: 0, cliente: 0 } } }
             
-            // 1. Demandas de Pedidos Directos (Mayorista)
+            // 1. Pedidos directos: separar MAYOREO (tipo 'mayorista') de PERSONAL (consolidación del vendedor)
             (orders || []).forEach(item => {
                 const key = normalizeTitle(item.titulo);
                 if (!vendorDemand[key]) vendorDemand[key] = {};
-                
-                if (item.pedido.tipo !== 'tienda') {
-                    const vendName = item.pedido.vendedor_nombre;
-                    if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { pedido: 0, cliente: 0 };
-                    vendorDemand[key][vendName].pedido += item.cantidad;
+                const vendName = item.pedido.vendedor_nombre;
+                if (item.pedido.tipo === 'mayorista' || item.pedido.tipo === 'personal') {
+                    if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { mayorista: 0, personal: 0, cliente: 0 };
+                    if (item.pedido.tipo === 'mayorista') vendorDemand[key][vendName].mayorista += item.cantidad;
+                    else vendorDemand[key][vendName].personal += item.cantidad;
                 }
             });
-            
-            // 2. Demandas de Clientes (Manuales/Reservas)
+
+            // 2. Demandas de Clientes (de Pedidos Clientes)
             cItems.forEach(ci => {
                 const key = normalizeTitle(ci.titulo);
                 if (!vendorDemand[key]) vendorDemand[key] = {};
-                
                 const vendName = vList.find(v => v.id === ci.vendedor_id)?.nombre || 'Desconocido';
-                if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { pedido: 0, cliente: 0 };
+                if (!vendorDemand[key][vendName]) vendorDemand[key][vendName] = { mayorista: 0, personal: 0, cliente: 0 };
                 vendorDemand[key][vendName].cliente += 1;
             });
             
@@ -321,9 +320,11 @@ export default function ReceptionManagement() {
                 // Asignar a vendedores usando la regla del Math.max
                 if (vendorDemand[key]) {
                     Object.entries(vendorDemand[key]).forEach(([vendName, demands]) => {
-                        // Mayoreo (venta por mayor) y clientes son demanda SEPARADA → se suman
-                        const mayoreo = demands.pedido || 0;
-                        const cliente = demands.cliente || 0;
+                        // MAYOREO = solo pedidos tipo 'mayorista' (venta por mayor; demanda aparte → se suma)
+                        const mayoreo = demands.mayorista || 0;
+                        // CLIENTES = demanda minorista; el pedido 'personal' es la consolidación de los clientes
+                        //   del vendedor, por eso se toma el máximo (no se duplica con sus cliente_items)
+                        const cliente = Math.max(demands.personal || 0, demands.cliente || 0);
                         const trueDemand = mayoreo + cliente;
                         if (trueDemand > 0) {
                             breakdown[key].push({
