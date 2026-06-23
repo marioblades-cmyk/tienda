@@ -52,6 +52,7 @@ export default function MayoristaUpload() {
     const [pagos, setPagos] = useState([]);
     const [balance, setBalance] = useState({ totalDeuda: 0, totalPagado: 0 });
     const [showPagoModal, setShowPagoModal] = useState(false);
+    const [editingPago, setEditingPago] = useState(null);   // pago en edición (null = nuevo)
     const [pagoForm, setPagoForm] = useState({
         monto: '',
         fecha: hoyBO(),
@@ -527,39 +528,90 @@ export default function MayoristaUpload() {
         }
     };
 
+    // Abrir el modal para EDITAR un pago existente
+    const abrirEditarPago = (p) => {
+        setEditingPago(p);
+        setPagoForm({ monto: String(p.monto ?? ''), fecha: p.fecha || hoyBO(), metodo: p.metodo_pago || 'Efectivo', notas: p.notas || '' });
+        setShowPagoModal(true);
+    };
+
+    // Eliminar un pago (y su movimiento de caja vinculado)
+    const handleDeletePago = async (p) => {
+        if (!window.confirm(`¿Eliminar el pago de Bs ${Number(p.monto).toLocaleString()}? Se borrará también de contabilidad.`)) return;
+        setProcessing(true);
+        setError('');
+        try {
+            if (p.caja_mov_id) {
+                const { error: cErr } = await supabase.from('caja_movimientos').delete().eq('id', p.caja_mov_id);
+                if (cErr) throw new Error('Error al borrar de contabilidad: ' + cErr.message);
+            }
+            const { error: pErr } = await supabase.from('mayorista_pagos').delete().eq('id', p.id);
+            if (pErr) throw new Error('Error al borrar el pago: ' + pErr.message);
+            setSuccess('✓ Pago eliminado (y contabilidad).');
+            fetchAccountData();
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const handleSavePago = async () => {
         if (!pagoForm.monto || Number(pagoForm.monto) <= 0) return alert("Monto inválido");
         setProcessing(true);
         try {
             const storeName = vendedores.find(v => v.id === selectedVendedor)?.nombre;
-            const { data: cajaMov, error: cajError } = await supabase
-                .from('caja_movimientos')
-                .insert([{
-                    tipo: 'INGRESO',
-                    categoria: 'Cobro Mayorista',
-                    origen: 'Pedidos',
-                    monto: Number(pagoForm.monto),
-                    metodo_pago: pagoForm.metodo,
-                    concepto: `Cobro tienda mayorista: ${storeName}`,
-                    vendedor_id: selectedVendedor
-                }])
-                .select().single();
-            if (cajError) throw new Error('Error en contabilidad: ' + cajError.message);
 
-            const { error: pagoError } = await supabase
-                .from('mayorista_pagos')
-                .insert([{
-                    vendedor_id: selectedVendedor,
+            if (editingPago) {
+                // ── EDITAR: actualizar el pago y su caja vinculada ──
+                const { error: pErr } = await supabase.from('mayorista_pagos').update({
                     monto: Number(pagoForm.monto),
                     fecha: pagoForm.fecha,
                     metodo_pago: pagoForm.metodo,
-                    notas: pagoForm.notas,
-                    caja_mov_id: cajaMov.id
-                }]);
-            if (pagoError) throw new Error('Error al guardar en cuenta del mayorista: ' + pagoError.message);
+                    notas: pagoForm.notas
+                }).eq('id', editingPago.id);
+                if (pErr) throw new Error('Error al actualizar el pago: ' + pErr.message);
 
-            setSuccess("✓ Pago registrado y sincronizado con contabilidad.");
+                if (editingPago.caja_mov_id) {
+                    const { error: cErr } = await supabase.from('caja_movimientos').update({
+                        monto: Number(pagoForm.monto),
+                        metodo_pago: pagoForm.metodo
+                    }).eq('id', editingPago.caja_mov_id);
+                    if (cErr) throw new Error('Error al actualizar contabilidad: ' + cErr.message);
+                }
+                setSuccess('✓ Pago actualizado y sincronizado con contabilidad.');
+            } else {
+                // ── NUEVO: crear caja + pago ──
+                const { data: cajaMov, error: cajError } = await supabase
+                    .from('caja_movimientos')
+                    .insert([{
+                        tipo: 'INGRESO',
+                        categoria: 'Cobro Mayorista',
+                        origen: 'Pedidos',
+                        monto: Number(pagoForm.monto),
+                        metodo_pago: pagoForm.metodo,
+                        concepto: `Cobro tienda mayorista: ${storeName}`,
+                        vendedor_id: selectedVendedor
+                    }])
+                    .select().single();
+                if (cajError) throw new Error('Error en contabilidad: ' + cajError.message);
+
+                const { error: pagoError } = await supabase
+                    .from('mayorista_pagos')
+                    .insert([{
+                        vendedor_id: selectedVendedor,
+                        monto: Number(pagoForm.monto),
+                        fecha: pagoForm.fecha,
+                        metodo_pago: pagoForm.metodo,
+                        notas: pagoForm.notas,
+                        caja_mov_id: cajaMov.id
+                    }]);
+                if (pagoError) throw new Error('Error al guardar en cuenta del mayorista: ' + pagoError.message);
+                setSuccess("✓ Pago registrado y sincronizado con contabilidad.");
+            }
+
             setShowPagoModal(false);
+            setEditingPago(null);
             setPagoForm({ monto: '', fecha: hoyBO(), metodo: 'Efectivo', notas: '' });
             fetchAccountData();
         } catch (err) {
@@ -1413,7 +1465,7 @@ export default function MayoristaUpload() {
                             <div className="bg-white rounded-[2.5rem] border border-border/40 shadow-xl overflow-hidden">
                                 <div className="p-8 bg-navy text-white flex justify-between items-center">
                                     <h4 className="text-sm font-black uppercase tracking-widest flex items-center gap-3"><CreditCard className="text-orange-500" /> Historial Financiero</h4>
-                                    <button onClick={() => setShowPagoModal(true)} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl shadow-orange-500/20 flex items-center gap-2"><Plus size={16} /> Registrar Pago</button>
+                                    <button onClick={() => { setEditingPago(null); setPagoForm({ monto: '', fecha: hoyBO(), metodo: 'Efectivo', notas: '' }); setShowPagoModal(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl shadow-orange-500/20 flex items-center gap-2"><Plus size={16} /> Registrar Pago</button>
                                 </div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left text-xs">
@@ -1423,6 +1475,7 @@ export default function MayoristaUpload() {
                                                 <th className="p-6">Método de Pago</th>
                                                 <th className="p-6 text-right">Monto</th>
                                                 <th className="p-6">Referencia</th>
+                                                <th className="p-6 text-center">Acciones</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
@@ -1432,9 +1485,15 @@ export default function MayoristaUpload() {
                                                     <td className="p-6"><span className="bg-slate-100 text-slate-500 text-[9px] font-black px-2 py-1 rounded-lg uppercase">{p.metodo_pago}</span></td>
                                                     <td className="p-6 text-right font-black text-emerald-600 text-sm">Bs {Number(p.monto).toLocaleString()}</td>
                                                     <td className="p-6 text-slate-400 italic text-[10px]">{p.notas || 'Sin notas'}</td>
+                                                    <td className="p-6">
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            <button onClick={() => abrirEditarPago(p)} title="Editar pago" className="text-slate-400 hover:text-white hover:bg-navy border border-slate-200 rounded-lg p-1.5 transition-all"><FileText size={14} /></button>
+                                                            <button onClick={() => handleDeletePago(p)} title="Eliminar pago" className="text-slate-400 hover:text-white hover:bg-red-500 border border-slate-200 rounded-lg p-1.5 transition-all"><Trash2 size={14} /></button>
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             ))}
-                                            {pagos.length === 0 && <tr><td colSpan="4" className="p-12 text-center text-slate-300 font-black uppercase tracking-widest text-xs">No se registran cobros</td></tr>}
+                                            {pagos.length === 0 && <tr><td colSpan="5" className="p-12 text-center text-slate-300 font-black uppercase tracking-widest text-xs">No se registran cobros</td></tr>}
                                         </tbody>
                                     </table>
                                 </div>
@@ -1704,8 +1763,8 @@ export default function MayoristaUpload() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 backdrop-blur-md p-6">
                     <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-white/20">
                         <div className="p-8 bg-navy text-white flex justify-between items-center shadow-lg">
-                            <h4 className="text-xl font-black uppercase tracking-tighter">Registrar Ingreso</h4>
-                            <button onClick={() => setShowPagoModal(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24} /></button>
+                            <h4 className="text-xl font-black uppercase tracking-tighter">{editingPago ? 'Editar Pago' : 'Registrar Ingreso'}</h4>
+                            <button onClick={() => { setShowPagoModal(false); setEditingPago(null); }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24} /></button>
                         </div>
                         <div className="p-10 space-y-8">
                             {/* Chip de saldo restante */}
@@ -1797,7 +1856,7 @@ export default function MayoristaUpload() {
                                 <textarea value={pagoForm.notas} onChange={(e)=>setPagoForm({...pagoForm, notas: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-xs font-bold outline-none h-24 resize-none" placeholder="Referencia de transferencia, etc..." />
                             </div>
                             <button onClick={handleSavePago} disabled={processing} className="w-full py-6 bg-navy text-white rounded-3xl font-black text-xs uppercase tracking-widest hover:bg-navy/90 hover:scale-105 active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4">
-                                {processing ? <Loader2 className="animate-spin" /> : <Save size={20} />} REGISTRAR Y VINCULAR CAJA
+                                {processing ? <Loader2 className="animate-spin" /> : <Save size={20} />} {editingPago ? 'GUARDAR CAMBIOS (Y CAJA)' : 'REGISTRAR Y VINCULAR CAJA'}
                             </button>
                         </div>
                     </div>
