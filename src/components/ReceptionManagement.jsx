@@ -1624,7 +1624,7 @@ export default function ReceptionManagement() {
                                                 <div className="flex justify-between items-start mb-3 border-b border-border/40 pb-2 print:border-black">
                                                     <h5 className="font-black text-secondary uppercase text-sm print:text-black">{client.name}</h5>
                                                     <span className="text-[10px] font-bold bg-secondary/10 text-secondary px-2 py-0.5 rounded-full print:border print:border-black print:text-black">
-                                                        {client.totalItems} items
+                                                        {client.totalItems} u.
                                                     </span>
                                                 </div>
                                                 <ul className="space-y-1">
@@ -1637,6 +1637,9 @@ export default function ReceptionManagement() {
                                                 </ul>
                                             </div>
                                         ))}
+                                    </div>
+                                    <div className="flex justify-end pt-2 border-t border-secondary/20">
+                                        <span className="text-sm font-black uppercase text-secondary/70 print:text-black">Total Clientes: <span className="text-xl text-secondary print:text-black">{separatedData.clientes.reduce((a, c) => a + c.totalItems, 0)} unidades</span></span>
                                     </div>
                                 </div>
                             )}
@@ -1654,7 +1657,7 @@ export default function ReceptionManagement() {
                                                 <div className="flex justify-between items-start mb-3 border-b border-orange-200 pb-2 print:border-black">
                                                     <h5 className="font-black text-orange-600 uppercase text-sm print:text-black">{m.name}</h5>
                                                     <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full print:border print:border-black print:text-black">
-                                                        {m.totalItems} items
+                                                        {m.totalItems} u.
                                                     </span>
                                                 </div>
                                                 <ul className="space-y-1">
@@ -1667,6 +1670,9 @@ export default function ReceptionManagement() {
                                                 </ul>
                                             </div>
                                         ))}
+                                    </div>
+                                    <div className="flex justify-end pt-2 border-t border-orange-200">
+                                        <span className="text-sm font-black uppercase text-orange-600/70 print:text-black">Total Mayoreo: <span className="text-xl text-orange-600 print:text-black">{separatedData.mayoreo.reduce((a, m) => a + m.totalItems, 0)} unidades</span></span>
                                     </div>
                                 </div>
                             )}
