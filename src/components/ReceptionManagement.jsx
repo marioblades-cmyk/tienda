@@ -37,7 +37,7 @@ export default function ReceptionManagement() {
     const [diagCatalogCount, setDiagCatalogCount] = useState(null);
     const [vendedoresList, setVendedoresList] = useState([]);
     const [showSeparated, setShowSeparated] = useState(false);
-    const [separatedData, setSeparatedData] = useState({ tienda: [], mayoristas: [], clientes: [] });
+    const [separatedData, setSeparatedData] = useState({ tienda: [], clientes: {} });
     const { isAdmin, isSocio } = useAuth();
 
     useEffect(() => {
@@ -317,53 +317,29 @@ export default function ReceptionManagement() {
                 breakdown[key] = [];
                 const confirmedQty = confirmedMap[key] || 0;
                 let usedByVendors = 0;
-
+                
                 // Asignar a vendedores usando la regla del Math.max
                 if (vendorDemand[key]) {
                     Object.entries(vendorDemand[key]).forEach(([vendName, demands]) => {
+                        // El vendedor necesita el máximo entre lo que pidió en el Excel y lo que le pidieron sus clientes
                         const trueDemand = Math.max(demands.pedido, demands.cliente);
                         if (trueDemand > 0) {
-                            if (demands.pedido > 0 && demands.cliente > 0) {
-                                // Mostrar por separado: pedido mayorista y reservas de clientes
-                                breakdown[key].push({
-                                    vendedor: vendName,
-                                    cantidad: demands.pedido,
-                                    cantidadReal: trueDemand,
-                                    tipo: 'vendedor_mayorista'
-                                });
-                                breakdown[key].push({
-                                    vendedor: vendName,
-                                    cantidad: demands.cliente,
-                                    cantidadReal: 0,
-                                    tipo: 'vendedor_clientes'
-                                });
-                            } else if (demands.pedido > 0) {
-                                breakdown[key].push({
-                                    vendedor: vendName,
-                                    cantidad: demands.pedido,
-                                    cantidadReal: demands.pedido,
-                                    tipo: 'vendedor_mayorista'
-                                });
-                            } else {
-                                breakdown[key].push({
-                                    vendedor: vendName,
-                                    cantidad: demands.cliente,
-                                    cantidadReal: demands.cliente,
-                                    tipo: 'vendedor_clientes'
-                                });
-                            }
+                            breakdown[key].push({
+                                vendedor: vendName,
+                                cantidad: trueDemand,
+                                tipo: 'vendedor' // generic seller type
+                            });
                             usedByVendors += trueDemand;
                         }
                     });
                 }
-
+                
                 // Lo que sobra del camión va para la tienda (Stock Libre)
                 const leftover = Math.max(0, confirmedQty - usedByVendors);
                 if (leftover > 0) {
                     breakdown[key].push({
                         vendedor: 'Tienda',
                         cantidad: leftover,
-                        cantidadReal: leftover,
                         tipo: 'tienda'
                     });
                 }
@@ -419,8 +395,7 @@ export default function ReceptionManagement() {
             // PRIORIDAD 1: Clientes / Vendedores (Incluso si el Excel decía Tienda)
             const vendorOrders = arr.filter(b => b.tipo !== 'tienda');
             vendorOrders.forEach(b => {
-                const alloc = b.cantidadReal !== undefined ? b.cantidadReal : b.cantidad;
-                const take = Math.min(remaining, alloc);
+                const take = Math.min(remaining, b.cantidad);
                 if (take > 0) {
                     const vName = b.vendedor || 'Socio';
                     stats.porVendedor[vName] = (stats.porVendedor[vName] || 0) + take;
@@ -639,7 +614,7 @@ export default function ReceptionManagement() {
             const destText = destInfo.length > 0 ? ` [Destinos: ${destInfo.join(', ')}]` : '';
 
             // Suma total de demanda de vendedores (incluye clientes finales + stock propio del vendedor)
-            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + (b.cantidadReal !== undefined ? b.cantidadReal : b.cantidad), 0);
+            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + b.cantidad, 0);
 
             // Buscamos cuántos clientes están esperando este título (independientemente de quién los pidió)
             const pendingForTitle = clientItems.filter(ci => {
@@ -958,7 +933,7 @@ export default function ReceptionManagement() {
 
                 const breakdown = orderBreakdown[key] || [];
                 const tiendaOrdered = breakdown.filter(b => b.tipo === 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
-                const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidadReal !== undefined ? b.cantidadReal : (b.cantidad || 0)), 0);
+                const totalVendorOrdered = breakdown.filter(b => b.tipo !== 'tienda').reduce((s, b) => s + (b.cantidad || 0), 0);
                 
                 let calcForStore = Math.min(tiendaOrdered, qtyRec);
                 if (calcForStore < 0) calcForStore = 0;
@@ -993,7 +968,6 @@ export default function ReceptionManagement() {
     const handleGenerateSeparatedOrder = () => {
         console.log('handleGenerateSeparatedOrder called');
         const tiendaItems = [];
-        const mayoristaGroups = {};
         const clientGroups = {};
 
         // 1. Identificar títulos con recepción (tanto los que se están ingresando como los ya guardados)
@@ -1018,52 +992,39 @@ export default function ReceptionManagement() {
             const originalItem = masterItems.find(it => normalizeTitle(it.titulo) === key);
             const titleLabel = originalItem?.titulo || titleKey.toUpperCase();
 
+            // Lógica idéntica a performReceptionUpdates
             const bd = orderBreakdown[key] || [];
-            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + (b.cantidadReal !== undefined ? b.cantidadReal : (b.cantidad || 0)), 0);
-
+            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + (b.cantidad || 0), 0);
+            
             const relevantItems = clientItems.filter(ci => {
                 if (normalizeTitle(ci.titulo) !== key) return false;
                 const normEstado = normalizeTitle(ci.estado);
-                return normEstado.includes('adjudicado') ||
-                       normEstado.includes('confirmado') ||
+                return normEstado.includes('adjudicado') || 
+                       normEstado.includes('confirmado') || 
                        normEstado === 'pedido' ||
                        normEstado === 'en tienda';
             });
 
-            // PRIORIDAD 1a: Pedidos mayoristas del vendedor (de orderBreakdown)
-            bd.filter(b => b.tipo === 'vendedor_mayorista').forEach(b => {
-                const vendorKey = b.vendedor.toUpperCase();
-                if (!mayoristaGroups[vendorKey]) mayoristaGroups[vendorKey] = {};
-                mayoristaGroups[vendorKey][titleLabel] = (mayoristaGroups[vendorKey][titleLabel] || 0) + b.cantidad;
-            });
-
-            // PRIORIDAD 1b: Reservas de clientes (cliente_items)
+            // PRIORIDAD 1: Clientes (Reservas manuales)
             const clientSliceLimit = Math.min(qtyRec, relevantItems.length);
             const allocated = relevantItems.slice(0, clientSliceLimit);
 
             allocated.forEach(ci => {
                 const vendedor = vendedoresList.find(v => v.id === ci.vendedor_id);
-                const vendorName = vendedor ? vendedor.nombre.toUpperCase() : 'DESCONOCIDO';
+                const vendorName = vendedor ? `VENDEDOR: ${vendedor.nombre.toUpperCase()}` : 'VENDEDOR: DESCONOCIDO';
 
                 if (!clientGroups[vendorName]) clientGroups[vendorName] = {};
                 clientGroups[vendorName][titleLabel] = (clientGroups[vendorName][titleLabel] || 0) + 1;
             });
 
-            // PRIORIDAD 2: Tienda (Sobrantes)
+            // PRIORIDAD 2: Tienda (Sobrantes o Pedidos de Tienda)
             const calcForStore = Math.max(0, qtyRec - sellerTotal);
             if (calcForStore > 0) {
                 tiendaItems.push({ titulo: titleLabel, cantidad: calcForStore });
             }
         });
 
-        const sortedMayoristas = Object.entries(mayoristaGroups)
-            .map(([name, items]) => ({
-                name,
-                items: Object.entries(items).map(([t, c]) => ({ titulo: t, cantidad: c })),
-                totalItems: Object.values(items).reduce((a, b) => a + b, 0)
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name, 'es'));
-
+        // Convertir grupos de clientes a array ordenado alfabéticamente
         const sortedClients = Object.entries(clientGroups)
             .map(([name, items]) => ({
                 name,
@@ -1074,7 +1035,6 @@ export default function ReceptionManagement() {
 
         setSeparatedData({
             tienda: tiendaItems,
-            mayoristas: sortedMayoristas,
             clientes: sortedClients
         });
         setShowSeparated(true);
@@ -1364,18 +1324,10 @@ export default function ReceptionManagement() {
                                                         <td className="p-4">
                                                             <div className="flex flex-wrap gap-1">
                                                                 {breakdown.map((b, bIdx) => (
-                                                                    <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                                                                        b.tipo === 'tienda'
-                                                                            ? 'bg-navy/5 text-navy border-navy/10'
-                                                                            : b.tipo === 'vendedor_mayorista'
-                                                                                ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                                                                : 'bg-secondary/5 text-secondary border-secondary/10'
-                                                                    }`}>
-                                                                        {b.tipo === 'tienda'
+                                                                    <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
+                                                                        {b.tipo === 'tienda' 
                                                                             ? `TIENDA: ${b.cantidad}`
-                                                                            : b.tipo === 'vendedor_mayorista'
-                                                                                ? `${b.vendedor} · Mayorista: ${b.cantidad}`
-                                                                                : `${b.vendedor} · Clientes: ${b.cantidad}`
+                                                                            : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
                                                                         }
                                                                     </span>
                                                                 ))}
@@ -1649,47 +1601,12 @@ export default function ReceptionManagement() {
                                 </div>
                             )}
 
-                            {/* Sección Mayoristas */}
-                            {separatedData.mayoristas?.length > 0 && (
-                                <div className="space-y-4 print-break-inside-avoid">
-                                    <div className="flex items-center gap-2 mb-4 border-l-4 border-purple-500 pl-4">
-                                        <Package className="text-purple-600 no-print" size={20} />
-                                        <h4 className="text-lg font-black uppercase tracking-wide">📦 SECCIÓN 2 — PEDIDOS MAYORISTA</h4>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:block">
-                                        {separatedData.mayoristas.map((vendor, i) => (
-                                            <div key={i} className="bg-purple-50 border border-purple-200 p-5 rounded-2xl shadow-sm print:border-black print:rounded-none print:shadow-none print:mb-4 print:break-inside-avoid">
-                                                <div className="flex justify-between items-start mb-3 border-b border-purple-200 pb-2 print:border-black">
-                                                    <h5 className="font-black text-purple-700 uppercase text-sm print:text-black">{vendor.name}</h5>
-                                                    <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full print:border print:border-black print:text-black">
-                                                        {vendor.totalItems} unidades
-                                                    </span>
-                                                </div>
-                                                <ul className="space-y-1">
-                                                    {vendor.items.map((it, j) => (
-                                                        <li key={j} className="text-xs flex justify-between font-bold text-purple-900/80 print:text-black">
-                                                            <span>• {it.titulo}</span>
-                                                            <span className="font-black">× {it.cantidad}</span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="flex justify-end pt-1">
-                                        <span className="text-sm font-black uppercase text-purple-600/70 print:text-black">
-                                            Total Mayorista: <span className="text-xl text-purple-700 print:text-black">{separatedData.mayoristas.reduce((a, v) => a + v.totalItems, 0)} unidades</span>
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
-
                             {/* Sección Clientes */}
                             {separatedData.clientes.length > 0 && (
                                 <div className="space-y-6">
                                     <div className="flex items-center gap-2 mb-4 border-l-4 border-secondary pl-4">
                                         <Users className="text-secondary no-print" size={20} />
-                                        <h4 className="text-lg font-black uppercase tracking-wide">👥 SECCIÓN {separatedData.mayoristas?.length > 0 ? '3' : '2'} — POR CLIENTE</h4>
+                                        <h4 className="text-lg font-black uppercase tracking-wide">👥 SECCIÓN 2 — POR CLIENTE</h4>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:block">
                                         {separatedData.clientes.map((client, i) => (
