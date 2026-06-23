@@ -37,7 +37,7 @@ export default function ReceptionManagement() {
     const [diagCatalogCount, setDiagCatalogCount] = useState(null);
     const [vendedoresList, setVendedoresList] = useState([]);
     const [showSeparated, setShowSeparated] = useState(false);
-    const [separatedData, setSeparatedData] = useState({ tienda: [], clientes: {} });
+    const [separatedData, setSeparatedData] = useState({ tienda: [], clientes: [], mayoreo: [] });
     const { isAdmin, isSocio } = useAuth();
 
     useEffect(() => {
@@ -321,13 +321,17 @@ export default function ReceptionManagement() {
                 // Asignar a vendedores usando la regla del Math.max
                 if (vendorDemand[key]) {
                     Object.entries(vendorDemand[key]).forEach(([vendName, demands]) => {
-                        // El vendedor necesita el máximo entre lo que pidió en el Excel y lo que le pidieron sus clientes
-                        const trueDemand = Math.max(demands.pedido, demands.cliente);
+                        // Mayoreo (venta por mayor) y clientes son demanda SEPARADA → se suman
+                        const mayoreo = demands.pedido || 0;
+                        const cliente = demands.cliente || 0;
+                        const trueDemand = mayoreo + cliente;
                         if (trueDemand > 0) {
                             breakdown[key].push({
                                 vendedor: vendName,
                                 cantidad: trueDemand,
-                                tipo: 'vendedor' // generic seller type
+                                mayoreo,
+                                cliente,
+                                tipo: 'vendedor'
                             });
                             usedByVendors += trueDemand;
                         }
@@ -969,6 +973,7 @@ export default function ReceptionManagement() {
         console.log('handleGenerateSeparatedOrder called');
         const tiendaItems = [];
         const clientGroups = {};
+        const mayoreoGroups = {};
 
         // 1. Identificar títulos con recepción (tanto los que se están ingresando como los ya guardados)
         const titlesSet = new Set([
@@ -992,40 +997,43 @@ export default function ReceptionManagement() {
             const originalItem = masterItems.find(it => normalizeTitle(it.titulo) === key);
             const titleLabel = originalItem?.titulo || titleKey.toUpperCase();
 
-            // Lógica idéntica a performReceptionUpdates
             const bd = orderBreakdown[key] || [];
-            const sellerTotal = bd.filter(b => b.tipo !== 'tienda').reduce((sum, b) => sum + (b.cantidad || 0), 0);
-            
+            let remaining = qtyRec;
+
+            // PRIORIDAD 1: Clientes (de Pedidos Clientes)
             const relevantItems = clientItems.filter(ci => {
                 if (normalizeTitle(ci.titulo) !== key) return false;
                 const normEstado = normalizeTitle(ci.estado);
-                return normEstado.includes('adjudicado') || 
-                       normEstado.includes('confirmado') || 
+                return normEstado.includes('adjudicado') ||
+                       normEstado.includes('confirmado') ||
                        normEstado === 'pedido' ||
                        normEstado === 'en tienda';
             });
-
-            // PRIORIDAD 1: Clientes (Reservas manuales)
-            const clientSliceLimit = Math.min(qtyRec, relevantItems.length);
-            const allocated = relevantItems.slice(0, clientSliceLimit);
-
-            allocated.forEach(ci => {
+            const clientSliceLimit = Math.min(remaining, relevantItems.length);
+            relevantItems.slice(0, clientSliceLimit).forEach(ci => {
                 const vendedor = vendedoresList.find(v => v.id === ci.vendedor_id);
-                const vendorName = vendedor ? `VENDEDOR: ${vendedor.nombre.toUpperCase()}` : 'VENDEDOR: DESCONOCIDO';
-
+                const vendorName = `CLIENTES · ${vendedor ? vendedor.nombre.toUpperCase() : 'DESCONOCIDO'}`;
                 if (!clientGroups[vendorName]) clientGroups[vendorName] = {};
                 clientGroups[vendorName][titleLabel] = (clientGroups[vendorName][titleLabel] || 0) + 1;
             });
+            remaining -= clientSliceLimit;
 
-            // PRIORIDAD 2: Tienda (Sobrantes o Pedidos de Tienda)
-            const calcForStore = Math.max(0, qtyRec - sellerTotal);
-            if (calcForStore > 0) {
-                tiendaItems.push({ titulo: titleLabel, cantidad: calcForStore });
-            }
+            // PRIORIDAD 2: Mayoreo (venta por mayor) — separado de los clientes
+            bd.filter(b => b.tipo !== 'tienda' && (b.mayoreo || 0) > 0).forEach(b => {
+                const take = Math.min(remaining, b.mayoreo);
+                if (take > 0) {
+                    const vName = `MAYOREO · ${(b.vendedor || 'SOCIO').toUpperCase()}`;
+                    if (!mayoreoGroups[vName]) mayoreoGroups[vName] = {};
+                    mayoreoGroups[vName][titleLabel] = (mayoreoGroups[vName][titleLabel] || 0) + take;
+                    remaining -= take;
+                }
+            });
+
+            // PRIORIDAD 3: Tienda (lo que sobra)
+            if (remaining > 0) tiendaItems.push({ titulo: titleLabel, cantidad: remaining });
         });
 
-        // Convertir grupos de clientes a array ordenado alfabéticamente
-        const sortedClients = Object.entries(clientGroups)
+        const toSorted = (groups) => Object.entries(groups)
             .map(([name, items]) => ({
                 name,
                 items: Object.entries(items).map(([t, c]) => ({ titulo: t, cantidad: c })),
@@ -1035,7 +1043,8 @@ export default function ReceptionManagement() {
 
         setSeparatedData({
             tienda: tiendaItems,
-            clientes: sortedClients
+            clientes: toSorted(clientGroups),
+            mayoreo: toSorted(mayoreoGroups)
         });
         setShowSeparated(true);
     };
@@ -1325,9 +1334,9 @@ export default function ReceptionManagement() {
                                                             <div className="flex flex-wrap gap-1">
                                                                 {breakdown.map((b, bIdx) => (
                                                                     <span key={bIdx} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${b.tipo === 'tienda' ? 'bg-navy/5 text-navy border-navy/10' : 'bg-secondary/5 text-secondary border-secondary/10'}`}>
-                                                                        {b.tipo === 'tienda' 
+                                                                        {b.tipo === 'tienda'
                                                                             ? `TIENDA: ${b.cantidad}`
-                                                                            : `VENDEDOR · ${b.vendedor}: ${b.cantidad}`
+                                                                            : `${b.vendedor}: ${b.cantidad}${(b.mayoreo > 0 && b.cliente > 0) ? ` (May ${b.mayoreo} · Cli ${b.cliente})` : (b.mayoreo > 0 ? ' · Mayoreo' : '')}`
                                                                         }
                                                                     </span>
                                                                 ))}
@@ -1619,6 +1628,36 @@ export default function ReceptionManagement() {
                                                 </div>
                                                 <ul className="space-y-1">
                                                     {client.items.map((it, j) => (
+                                                        <li key={j} className="text-xs flex justify-between font-bold text-navy/80 print:text-black">
+                                                            <span>• {it.titulo}</span>
+                                                            <span className="font-black">× {it.cantidad}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Sección Mayoreo (venta por mayor) — separada de los clientes */}
+                            {separatedData.mayoreo && separatedData.mayoreo.length > 0 && (
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-2 mb-4 border-l-4 border-orange-500 pl-4">
+                                        <Package className="text-orange-500 no-print" size={20} />
+                                        <h4 className="text-lg font-black uppercase tracking-wide">📦 SECCIÓN 3 — MAYOREO (VENTA POR MAYOR)</h4>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:block">
+                                        {separatedData.mayoreo.map((m, i) => (
+                                            <div key={i} className="bg-white border border-orange-200 p-5 rounded-2xl shadow-sm print:border-black print:rounded-none print:shadow-none print:mb-4 print:break-inside-avoid">
+                                                <div className="flex justify-between items-start mb-3 border-b border-orange-200 pb-2 print:border-black">
+                                                    <h5 className="font-black text-orange-600 uppercase text-sm print:text-black">{m.name}</h5>
+                                                    <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full print:border print:border-black print:text-black">
+                                                        {m.totalItems} items
+                                                    </span>
+                                                </div>
+                                                <ul className="space-y-1">
+                                                    {m.items.map((it, j) => (
                                                         <li key={j} className="text-xs flex justify-between font-bold text-navy/80 print:text-black">
                                                             <span>• {it.titulo}</span>
                                                             <span className="font-black">× {it.cantidad}</span>
