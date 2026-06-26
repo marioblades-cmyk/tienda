@@ -2392,6 +2392,7 @@ function TurnoDetailModal({ turno, onClose }) {
                                             <tr>
                                                 <th className="p-3 text-left">Hora</th>
                                                 <th className="p-3 text-left">Categoría</th>
+                                                <th className="p-3 text-left">Método</th>
                                                 <th className="p-3 text-left">Detalle</th>
                                                 <th className="p-3 text-right">Monto</th>
                                             </tr>
@@ -2401,6 +2402,11 @@ function TurnoDetailModal({ turno, onClose }) {
                                                 <tr key={m.id} className="hover:bg-background transition-all">
                                                     <td className="p-3 border-r border-border/5 font-mono opacity-60">{fhora(m.created_at)}</td>
                                                     <td className="p-3 font-black">{m.categoria}</td>
+                                                    <td className="p-3">
+                                                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black border ${(m.metodo_pago || 'Efectivo') === 'Efectivo' ? 'bg-success/10 text-success border-success/20' : 'bg-primary/10 text-primary border-primary/20'}`}>
+                                                            {(m.metodo_pago || 'Efectivo') === 'Efectivo' ? '💵' : '📲'} {m.metodo_pago || 'Efectivo'}
+                                                        </span>
+                                                    </td>
                                                     <td className="p-3 italic opacity-80">{m.concepto || '—'}</td>
                                                     <td className={`p-3 text-right font-black font-mono ${m.tipo === 'INGRESO' ? 'text-success' : 'text-error'}`}>
                                                         {m.tipo === 'INGRESO' ? '+' : '-'} {m.monto.toLocaleString()}
