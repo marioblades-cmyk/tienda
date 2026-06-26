@@ -86,20 +86,6 @@ export default function ClientOrdersView() {
     
     // Helper para obtener abonos reales (excluyendo distribuciones/asignaciones)
     const getPagosRaiz = (list, cid) => (list || []).filter(p => p.cliente_id === cid && !p.concepto?.startsWith('Asignado a:'));
-    // Saldo a favor REAL del cliente (crédito sin asignar).
-    // Por cada abono raíz: max(0, su monto − sus sub-asignaciones). Suma de todos.
-    // Robusto a abonos viejos vaciados a 0 por la lógica antigua (su sobrante da 0, no resta de más).
-    const getSaldoFavor = (list, cid) => {
-        const ps = (list || []).filter(p => p.cliente_id === cid);
-        const esSub = (p) => p.concepto?.startsWith('Asignado a:');
-        const subs = ps.filter(esSub);
-        return ps.filter(p => !esSub(p)).reduce((tot, r) => {
-            const usado = subs
-                .filter(s => s.referencia === r.id || (r.caja_mov_id && s.caja_mov_id === r.caja_mov_id))
-                .reduce((a, s) => a + Number(s.monto || 0), 0);
-            return tot + Math.max(0, Number(r.monto || 0) - usado);
-        }, 0);
-    };
     const [editPago, setEditPago] = useState(null); // { id, concepto, monto, metodo_pago, caja_mov_id }
     const [modoHistorico, setModoHistorico] = useState(false);
     const [histSemana, setHistSemana] = useState(''); // semana_id para modo histórico
@@ -1845,7 +1831,8 @@ export default function ClientOrdersView() {
         });
         let valorTotal = 0, cobrado = 0, porCobrar = 0;
         Object.entries(porCliente).forEach(([cid, d]) => {
-            const saldoAFavor = getSaldoFavor(pagos, cid); // crédito real sin asignar (robusto a abonos viejos en 0)
+            const abonos = getPagosRaiz(pagos, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
+            const saldoAFavor = Math.max(0, abonos - d.pagItemsAll); // abonos no aplicados a ningún ítem
             const pagadoActivo = d.pagItemsAct + saldoAFavor;        // lo abonado aplicable a lo pendiente
             valorTotal += d.ventasAct;
             cobrado    += Math.min(d.ventasAct, pagadoActivo);       // adelantos sobre lo pendiente
@@ -2009,6 +1996,7 @@ export default function ClientOrdersView() {
 
     const sendWhatsApp = (client, type, manualItems = null) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
+        const cliPagos = getPagosRaiz(pagos, client.id).reduce((s,p) => s + Number(p.monto), 0);
 
         // Helper de ordenamiento por serie + número de volumen
         const sortByTitle = (arr) => [...arr].sort((a, b) => {
@@ -2034,8 +2022,9 @@ export default function ClientOrdersView() {
         // pItmActivo es el abono aplicado a los ítems que vamos a mostrar
         const pItmAsignadoSet = activeItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
         
-        // Saldo a favor real sin asignar (por-abono, robusto a abonos viejos en 0)
-        const saldoGralSinAsignar = getSaldoFavor(pagos, client.id);
+        // El verdadero abono general es lo que se recibió en caja menos lo que ya se asignó a TODOS los ítems
+        const pItmTotalGlobal = cliItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
+        const saldoGralSinAsignar = Math.max(0, cliPagos - pItmTotalGlobal);
 
         // Cálculos de deuda según el tipo de mensaje
         let deuda;
@@ -2351,8 +2340,8 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        // balanceDisponible = saldo a favor real (por-abono), robusto a abonos viejos en 0
-                        const balanceDisponible = getSaldoFavor(pagos, group.client.id);
+                        // balanceDisponible usa allPagadoItems (todos los ítems) para no inflarse artificialmente
+                        const balanceDisponible = Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
                         const totalPagado = cPagItems + balanceDisponible;
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
@@ -3148,8 +3137,9 @@ export default function ClientOrdersView() {
                                 const cPagado = cItems.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
                                 const deuda = Math.max(0, cVentas - cPagado);
                                 
-                                // [BLOQUE 9] Saldo a favor sin asignar (por-abono, robusto a abonos viejos en 0)
-                                const saldoAbonado = getSaldoFavor(pagos, c.id);
+                                // [BLOQUE 9] Cálculo de saldo a favor sin asignar
+                                const cPagosTotales = getPagosRaiz(pagos, c.id).reduce((s,p) => s + Number(p.monto||0), 0);
+                                const saldoAbonado = Math.max(0, cPagosTotales - cPagado);
 
                                 return (
                                     <tr key={c.id} className="hover:bg-white/5 transition-colors">
@@ -4116,7 +4106,8 @@ export default function ClientOrdersView() {
                 const pItemsCli = items.filter(i => i.cliente_id === showPayModal);
                 const totalDeuda = pItemsCli.reduce((s,i) => s + Number(i.precio_venta), 0);
                 const totalPagado = pItemsCli.reduce((s,i) => s + Number(i.monto_pagado||0), 0);
-                const saldoDisponible = getSaldoFavor(pagos, showPayModal);
+                const totalAbonado = getPagosRaiz(pagos, showPayModal).reduce((s,p) => s + Number(p.monto), 0);
+                const saldoDisponible = Math.max(0, totalAbonado - totalPagado);
                 const deudaEfectiva = Math.max(0, totalDeuda - totalPagado - saldoDisponible);
 
                 const sortedItems = [...pItemsCli].sort((a, b) => {

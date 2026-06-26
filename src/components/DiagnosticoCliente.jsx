@@ -237,16 +237,16 @@ export default function DiagnosticoCliente() {
             const revisar = activos.filter(f => f.creditoReal < -0.5 && !(f.saldoMostrado < -0.5 || f.itemsSobrepagados > 0));
             errores.sort((a, b) => a.saldoMostrado - b.saldoMostrado);
             revisar.sort((a, b) => a.creditoReal - b.creditoReal);
-            // 🟠 Detector del fallo de crédito: abonos viejos en 0 o crédito que la fórmula vieja ocultaba
-            const creditoFlag = activos.filter(f => f.creditoOculto || f.abonosVaciados > 0);
-            creditoFlag.sort((a, b) => b.creditoCorrecto - a.creditoCorrecto);
+            // 🟠 Detector confiable: clientes con abonos viejos "Totalmente Distribuido" vaciados a 0
+            const creditoFlag = activos.filter(f => f.abonosVaciados > 0);
+            creditoFlag.sort((a, b) => b.abonosVaciados - a.abonosVaciados);
 
             let R = '';
             R += `═══════════════════════════════════════════════════════\n`;
             R += `REPORTE GLOBAL DE CUENTAS — TODOS LOS CLIENTES\n`;
             R += `Generado: ${new Date().toLocaleString('es-BO')}\n`;
             R += `Clientes con actividad: ${activos.length}\n`;
-            R += `🔴 Errores accionables: ${errores.length}   |   🟡 A revisar (posible histórico): ${revisar.length}   |   🟠 Crédito a revisar: ${creditoFlag.length}\n`;
+            R += `🔴 Errores accionables: ${errores.length}   |   🟡 A revisar (posible histórico): ${revisar.length}   |   🟠 Abonos viejos en 0: ${creditoFlag.length}\n`;
             R += `═══════════════════════════════════════════════════════\n\n`;
 
             R += `🔴 ERRORES ACCIONABLES (${errores.length}) — saldo negativo o ítem sobrepagado\n`;
@@ -271,17 +271,13 @@ export default function DiagnosticoCliente() {
             });
             R += `\n`;
 
-            R += `🟠 CRÉDITO A REVISAR — saldo a favor que el sistema podría mostrar mal (${creditoFlag.length})\n`;
-            R += `   Detecta el fallo del crédito "a cuenta": abonos viejos "Totalmente Distribuido" en 0,\n`;
-            R += `   o crédito real > 0 que la fórmula vieja daba en 0 (NO restaba del saldo ni salía como "disponible").\n`;
-            R += `   Con el fix de código ya se muestran bien. Si aparece un caso NUEVO acá → investigar.\n`;
+            R += `🟠 ABONOS VIEJOS EN 0 — abonos "Totalmente Distribuido" vaciados a 0 (${creditoFlag.length})\n`;
+            R += `   La lógica antigua vaciaba el abono raíz a 0 al distribuirlo, descuadrando el saldo a favor.\n`;
+            R += `   Arreglo: restaurar cada abono a su monto real (= su movimiento de caja, o la suma de sus asignaciones).\n`;
             R += `─────────────────────────────────────────────────────────\n`;
             if (creditoFlag.length === 0) R += `  (ninguno) ✅\n`;
             creditoFlag.forEach(fc => {
-                const flags = [];
-                if (fc.abonosVaciados > 0) flags.push(`${fc.abonosVaciados} abono(s) viejo(s) en 0`);
-                if (fc.creditoOculto) flags.push(`crédito oculto: real ${f(fc.creditoCorrecto)} vs vieja ${f(fc.creditoViejo)}`);
-                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | crédito a favor ${f(fc.creditoCorrecto).padStart(8)} | ${flags.join(' · ')}\n`;
+                R += `  ${(fc.c.nombre || '').slice(0, 28).padEnd(28)} | ${fc.abonosVaciados} abono(s) viejo(s) en 0 → restaurar\n`;
             });
             R += `\n`;
 
