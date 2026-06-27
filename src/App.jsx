@@ -12,6 +12,7 @@ import AdminMasterView from './components/AdminMasterView';
 import ComicAnalysisTool from './components/ComicAnalysisTool';
 import PriceAnalysisTool from './components/PriceAnalysisTool';
 import QuotationTool from './components/QuotationTool';
+import BuscalibreCotizador from './components/BuscalibreCotizador';
 import PreSaleGenerator from './components/PreSaleGenerator';
 import ReceptionManagement from './components/ReceptionManagement';
 import ConfirmationInfoView from './components/StockFlotanteView';
@@ -19,7 +20,7 @@ import {
     LayoutDashboard, Calendar, Users, LogOut,
     PanelLeftClose, PanelLeftOpen, Database,
     CheckCircle2, BookOpen, FileText, Image as ImageIcon,
-    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History, HandCoins, ShieldAlert, Stethoscope
+    Truck, BarChart3, ShoppingBag, Wallet, BookMarked, History, HandCoins, ShieldAlert, Stethoscope, Link2
 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useCatalogStatus } from './hooks/useCatalogStatus';
@@ -74,6 +75,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
+        { id: 'cotizador-buscalibre', icon: Link2, label: 'Cotizador Buscalibre' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
         { id: 'mayoristas', icon: Truck, label: 'Mayoristas' },
         { id: 'caja', icon: Wallet, label: 'Flujo de Caja' },
@@ -94,6 +96,7 @@ function SidebarContent({ activeTab, onTabChange, showLabels, isAdmin, isSocio, 
         { id: 'catalogo-actualizado', icon: CheckCircle2, label: 'Catálogo Actualizado' },
         { id: 'preventas', icon: ImageIcon, label: 'Generador de Preventas' },
         { id: 'cotizaciones', icon: FileText, label: 'Cotizaciones' },
+        { id: 'cotizador-buscalibre', icon: Link2, label: 'Cotizador Buscalibre' },
         { id: 'clientes', icon: ShoppingBag, label: 'Pedidos de Clientes' },
         { id: 'caja', icon: Wallet, label: 'Flujo de Caja' },
     ];
@@ -183,6 +186,7 @@ const TAB_TITLES = {
     recepcion: 'Control de Recepción de Cajas',
     preventas: 'Generador de Preventas',
     cotizaciones: 'Generador de Cotizaciones',
+    'cotizador-buscalibre': 'Cotizador Buscalibre',
     clientes: 'Pedidos de Clientes',
     caja: 'Flujo de Caja',
     contabilidad: 'Contabilidad General',
@@ -303,6 +307,7 @@ function Main({ onGoToPublic }) {
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
+        activeTab === 'cotizador-buscalibre' ? <BuscalibreCotizador /> :
         activeTab === 'clientes' ? <ClientOrdersView /> :
         activeTab === 'mayoristas' ? <MayoristaUpload /> :
         activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
@@ -321,6 +326,7 @@ function Main({ onGoToPublic }) {
         activeTab === 'catalogo-actualizado' ? <CatalogUpdatedView /> :
         activeTab === 'preventas' ? <PreSaleGenerator /> :
         activeTab === 'cotizaciones' ? <QuotationTool /> :
+        activeTab === 'cotizador-buscalibre' ? <BuscalibreCotizador /> :
         activeTab === 'clientes' ? <ClientOrdersView /> :
         activeTab === 'caja' ? <FlujoCajaView user={user} profile={profile} /> :
         <SellerDashboard isAdmin={isAdmin} />
