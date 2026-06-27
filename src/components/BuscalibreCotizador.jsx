@@ -43,22 +43,6 @@ export default function BuscalibreCotizador() {
         throw new Error('No se pudo traer la página. Probá de nuevo en unos segundos.');
     };
 
-    // Convierte una imagen remota a data URL (para que html2canvas la renderice sin CORS)
-    const toDataUrl = async (imgUrl) => {
-        try {
-            const proxied = `https://images.weserv.nl/?url=${encodeURIComponent(imgUrl.replace(/^https?:\/\//, ''))}`;
-            const res = await fetch(proxied);
-            const blob = await res.blob();
-            return await new Promise((r) => {
-                const fr = new FileReader();
-                fr.onloadend = () => r(fr.result);
-                fr.readAsDataURL(blob);
-            });
-        } catch {
-            return imgUrl;
-        }
-    };
-
     const parseBook = (html, srcUrl) => {
         const doc = new DOMParser().parseFromString(html, 'text/html');
         const meta = (prop) => doc.querySelector(`meta[property="${prop}"]`)?.getAttribute('content') || '';
@@ -127,7 +111,8 @@ export default function BuscalibreCotizador() {
             const html = await fetchHtml(url.trim());
             const data = parseBook(html, url.trim());
             if (!data.precioArs) throw new Error('No se encontró el precio en la página.');
-            data.coverData = data.cover ? await toDataUrl(data.cover) : '';
+            // La portada también se trae por nuestra función serverless (mismo origen → sin CORS, exportable)
+            data.coverData = data.cover ? `/api/scrape?url=${encodeURIComponent(data.cover)}` : '';
             setBook(data);
         } catch (e) {
             setError(e.message || 'Error al procesar el link.');
@@ -218,7 +203,7 @@ export default function BuscalibreCotizador() {
                         </div>
                         <div style={{ display: 'flex', gap: 16, padding: 18 }}>
                             {book.coverData && (
-                                <img src={book.coverData} alt="" crossOrigin="anonymous" style={{ width: 150, height: 220, objectFit: 'contain', borderRadius: 10, background: '#f3f4f6', flexShrink: 0 }} />
+                                <img src={book.coverData} alt="" crossOrigin="anonymous" onError={(e) => { if (book.cover && e.currentTarget.src !== book.cover) e.currentTarget.src = book.cover; }} style={{ width: 150, height: 220, objectFit: 'contain', borderRadius: 10, background: '#f3f4f6', flexShrink: 0 }} />
                             )}
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 17, fontWeight: 900, color: '#1a2d42', lineHeight: 1.2, marginBottom: 4 }}>{book.titulo}</div>
@@ -240,7 +225,7 @@ export default function BuscalibreCotizador() {
 
                     {/* Desglose del cálculo (solo en pantalla, no en la imagen) */}
                     <div className="bg-white border border-border/40 rounded-2xl p-4 text-xs text-slate-500 max-w-md mx-auto">
-                        <div className="flex justify-between"><span>Precio buscalibre (ARS)</span><span className="font-mono font-bold text-navy">{book.precioArs.toLocaleString('es-AR')}</span></div>
+                        <div className="flex justify-between"><span>Precio buscalibre (ARS)</span><span className="font-mono font-bold text-navy">{book.precioArs.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span></div>
                         <div className="flex justify-between"><span>× Tipo de cambio ({tc})</span><span className="font-mono">{(book.precioArs * Number(tc)).toFixed(2)} Bs</span></div>
                         <div className="flex justify-between"><span>+ Flete</span><span className="font-mono">35 Bs</span></div>
                         <div className="flex justify-between"><span>× Margen 1.3</span><span className="font-mono"></span></div>

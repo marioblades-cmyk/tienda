@@ -34,6 +34,15 @@ export default async function handler(req, res) {
             res.status(502).json({ error: `La página respondió ${r.status}.` });
             return;
         }
+        const ct = r.headers.get('content-type') || '';
+        // Si es una imagen (portada del CDN de buscalibre), devolver los bytes tal cual.
+        if (ct.startsWith('image/')) {
+            const buf = Buffer.from(await r.arrayBuffer());
+            res.setHeader('Content-Type', ct);
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.status(200).send(buf);
+            return;
+        }
         const html = await r.text();
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.status(200).send(html);
