@@ -501,7 +501,13 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                     }
                 }
 
-                if (foundTitle !== -1 && foundQty !== -1) {
+                const esVR = ws.name.toUpperCase().replace(/\s/g, '').includes('V&R') || ws.name.toUpperCase().replace(/\s/g, '').includes('VYR');
+                if (esVR) {
+                    // V&R tiene estructura especial sin encabezados: autor=A, título=B, ISBN=C, precio=D, cantidad=E.
+                    // Se fuerzan las columnas para que el exportador llene V&R (antes se saltaba la hoja entera).
+                    productSheets.push({ ws, titleColIndex: 1, qtyColIndex: 4, isbnColIndex: 2, priceColIndex: 3 });
+                    console.log(`✅ Hoja V&R "${ws.name}" forzada: Título=1, Cant=4, ISBN=2, Precio=3`);
+                } else if (foundTitle !== -1 && foundQty !== -1) {
                     // Buscar Precio
                     let foundPrice = -1;
                     for (let j = 1; j <= Math.min(50, ws.rowCount); j++) {
