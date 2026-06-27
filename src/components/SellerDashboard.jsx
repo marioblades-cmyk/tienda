@@ -230,7 +230,12 @@ export default function SellerDashboard({ isAdmin }) {
                     }
                 }
 
-                if (foundTitle !== -1 && foundQty !== -1) {
+                const esVR = ws.name.toUpperCase().replace(/\s/g, '').includes('V&R') || ws.name.toUpperCase().replace(/\s/g, '').includes('VYR');
+                if (esVR) {
+                    // V&R tiene estructura especial sin fila de encabezados: autor=A, título=B, ISBN=C, cantidad=E.
+                    // Se fuerzan las columnas para que el pre-llenado marque V&R (antes se saltaba la hoja entera).
+                    productSheets.push({ ws, titleColIndex: 1, qtyColIndex: 4, isbnColIndex: 2 });
+                } else if (foundTitle !== -1 && foundQty !== -1) {
                     productSheets.push({ ws, titleColIndex: foundTitle, qtyColIndex: foundQty, isbnColIndex: foundIsbn });
                 } else if (foundTitle !== -1 && foundQty === -1) {
                     const wsNameLower = ws.name.toLowerCase().replace(/\s/g, '');
