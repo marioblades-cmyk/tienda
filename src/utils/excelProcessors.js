@@ -124,9 +124,14 @@ export function processIvrea(sheetData) {
                 reimprMarked++;
             }
             const base = mainEntries[0];
-            finalItems.push({ 
-                ...base, 
-                isReimprWeek, 
+            // La cantidad pedida puede estar en la sección REIMPRESIONES (arriba) o en el catálogo (fondo).
+            // Sumar ambas para no perder pedidos cargados en reimpresiones (ej. CHAINSAW MAN 08/10).
+            // NOTA: solo afecta el campo cantidad, que usa Mayoristas; el catálogo ignora cantidad.
+            const cantTotal = (base.cantidad || 0) + reimprEntries.reduce((s, r) => s + (r.cantidad || 0), 0);
+            finalItems.push({
+                ...base,
+                cantidad: cantTotal || null,
+                isReimprWeek,
                 soloReimpr: false,
                 agotado_distribuidor: isReimprWeek ? false : base.agotado_distribuidor
             });

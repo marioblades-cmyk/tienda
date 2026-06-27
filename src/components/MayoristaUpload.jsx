@@ -1410,6 +1410,10 @@ export default function MayoristaUpload() {
                                                 <p className="text-[9px] font-black text-orange-500 uppercase tracking-widest mb-1">Desde Stock</p>
                                                 <p className="text-2xl font-black text-orange-600">{previewData.reduce((s,i)=>s+i.cantidad_stock,0)}</p>
                                             </div>
+                                            <div className="text-center md:text-left">
+                                                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Monto del Pedido</p>
+                                                <p className="text-2xl font-black text-emerald-600">Bs {previewData.reduce((s,i)=>s+(i.precio_bs||0)*(i.cantidad||0),0).toLocaleString('es-BO',{minimumFractionDigits:2,maximumFractionDigits:2})}</p>
+                                            </div>
                                         </div>
                                         <button onClick={handleConfirmarPedido} disabled={processing} className="w-full md:w-auto px-12 py-5 bg-navy text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3">
                                             {processing ? <Loader2 className="animate-spin" /> : <Save size={18} />} CONFIRMAR PEDIDO
