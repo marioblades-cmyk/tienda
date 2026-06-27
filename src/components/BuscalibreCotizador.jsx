@@ -14,11 +14,21 @@ export default function BuscalibreCotizador() {
     const [book, setBook] = useState(null);
     const cardRef = useRef(null);
 
-    // Trae el HTML de la página vía proxies CORS (igual estrategia que el resto de la app)
+    // Trae el HTML de la página. Primero usa nuestra función serverless (/api/scrape),
+    // confiable y sin CORS. Si no está disponible (ej. dev local), prueba proxies públicos.
     const fetchHtml = async (u) => {
+        // 1. Serverless propio (producción)
+        try {
+            const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`);
+            if (res.ok) {
+                const txt = await res.text();
+                if (txt && txt.length > 2000 && !txt.trimStart().startsWith('{')) return txt;
+            }
+        } catch { /* sin serverless: probar proxies */ }
+
+        // 2. Fallback: proxies públicos
         const proxies = [
             (x) => `https://api.allorigins.win/raw?url=${encodeURIComponent(x)}`,
-            (x) => `https://corsproxy.io/?url=${encodeURIComponent(x)}`,
             (x) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(x)}`,
         ];
         for (const p of proxies) {
@@ -28,9 +38,9 @@ export default function BuscalibreCotizador() {
                     const txt = await res.text();
                     if (txt && txt.length > 2000) return txt;
                 }
-            } catch { /* probar siguiente proxy */ }
+            } catch { /* probar siguiente */ }
         }
-        throw new Error('No se pudo traer la página (proxy caído). Probá de nuevo en unos segundos.');
+        throw new Error('No se pudo traer la página. Probá de nuevo en unos segundos.');
     };
 
     // Convierte una imagen remota a data URL (para que html2canvas la renderice sin CORS)
