@@ -71,13 +71,19 @@ export default function BuscalibreCotizador() {
             return '';
         };
 
-        // Precio en ARS — usamos el precio con descuento (el que se paga)
+        // Precio en ARS = el precio VISIBLE que se paga (el que está junto al botón "agregar al carro").
+        // OJO: NO usar 'precio_producto' del dataLayer — es otra métrica y da un valor distinto (mal).
         let precioArs = 0;
-        const pm = html.match(/'precio_producto':\s*'([\d.]+)'/);
-        if (pm) precioArs = parseFloat(pm[1]);
+        let pm = html.match(/<strong class="precio">\s*\$?\s*([\d.]+)\s*<\/strong>\s*<form[^>]*carro\/agregar/i);
+        if (!pm) pm = html.match(/<strong class="precio">\s*\$?\s*([\d.]+)\s*<\/strong>/i);
+        if (pm) precioArs = parseInt(pm[1].replace(/\./g, ''), 10) || 0; // los puntos son separador de miles
         if (!precioArs) {
-            const pj = html.match(/"price":\s*"?([\d.]+)"?/);
-            if (pj) precioArs = parseFloat(pj[1]);
+            const h = html.match(/name="precio_producto"\s+value="?([\d.]+)"?/i);
+            if (h) precioArs = Math.round(parseFloat(h[1])) || 0;
+        }
+        if (!precioArs) {
+            const j = html.match(/"price":\s*"?([\d.]+)"?/);
+            if (j) precioArs = Math.round(parseFloat(j[1])) || 0;
         }
 
         const isbnM = srcUrl.match(/(\d{13})/);
