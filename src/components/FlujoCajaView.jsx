@@ -10,6 +10,41 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+const METODOS_PAGO = ['Efectivo', 'Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Otros'];
+
+// Edita un movimiento de caja: actualiza el movimiento, sincroniza el pago de cliente
+// vinculado (Cobro Pedido → cliente_pagos) y recalcula el monto_final si el turno está cerrado.
+async function editarMovimientoCaja({ id, concepto, monto, metodo_pago, categoria, turno_id }) {
+    const amt = parseFloat(monto);
+    const { error } = await supabase.from('caja_movimientos')
+        .update({ concepto, monto: amt, metodo_pago })
+        .eq('id', id);
+    if (error) throw error;
+
+    // Sincronizar con el pago de cliente si es un Cobro Pedido
+    if (categoria === 'Cobro Pedido') {
+        await supabase.from('cliente_pagos')
+            .update({ monto: amt, concepto, metodo_pago })
+            .eq('caja_mov_id', id);
+    }
+
+    // Si el turno está cerrado, recalcular su monto_final (el cierre es automático según movimientos)
+    if (turno_id) {
+        const { data: t } = await supabase.from('turnos_caja')
+            .select('monto_inicial, estado').eq('id', turno_id).maybeSingle();
+        if (t && t.estado === 'CERRADO') {
+            const { data: movs } = await supabase.from('caja_movimientos')
+                .select('tipo, monto, metodo_pago').eq('turno_id', turno_id);
+            const esCash = (m) => (m.metodo_pago || 'Efectivo') === 'Efectivo';
+            const ing = (movs || []).filter((m) => m.tipo === 'INGRESO' && esCash(m)).reduce((a, m) => a + Number(m.monto || 0), 0);
+            const egr = (movs || []).filter((m) => m.tipo === 'EGRESO' && esCash(m)).reduce((a, m) => a + Number(m.monto || 0), 0);
+            await supabase.from('turnos_caja')
+                .update({ monto_final: Number(t.monto_inicial || 0) + ing - egr })
+                .eq('id', turno_id);
+        }
+    }
+}
+
 export default function FlujoCajaView({ user, profile }) {
     const isAdmin = profile?.is_admin === true ||
                     profile?.email === 'admin@gmail.com' ||
@@ -31,6 +66,8 @@ export default function FlujoCajaView({ user, profile }) {
     const [calcQty, setCalcQty] = useState(initCalc);
     const [showDetailModal, setShowDetailModal] = useState(null);
     const [showEditModal, setShowEditModal] = useState(null); // { id, responsable, turno, monto_inicial, monto_final }
+    const [editMovModal, setEditMovModal] = useState(null); // { id, concepto, monto, metodo_pago, categoria, turno_id }
+    const [savingMov, setSavingMov] = useState(false);
     const [ultimoTurno, setUltimoTurno] = useState(null);
     const [showRetiroModal, setShowRetiroModal] = useState(false);
     const [retiroForm, setRetiroForm] = useState({ monto: '', destino: 'Yasta (QR)' });
@@ -563,6 +600,27 @@ export default function FlujoCajaView({ user, profile }) {
         setMovimientos(prev => prev.filter(m => m.id !== id));
         if (searchTerm) fetchVentaResults(searchTerm);
         console.log('✅ Movimiento eliminado y stock restaurado correctamente.');
+    };
+
+    const handleEditMov = async () => {
+        if (!editMovModal) return;
+        const amt = parseFloat(editMovModal.monto);
+        if (!amt || amt <= 0) return showToast('Monto inválido.', 'error');
+        setSavingMov(true);
+        try {
+            await editarMovimientoCaja(editMovModal);
+            // Actualizar el movimiento en la lista del turno activo
+            setMovimientos(prev => prev.map(m => m.id === editMovModal.id
+                ? { ...m, concepto: editMovModal.concepto, monto: amt, metodo_pago: editMovModal.metodo_pago }
+                : m));
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
+            setEditMovModal(null);
+            showToast('Movimiento editado.', 'success');
+        } catch (e) {
+            showToast('Error al editar: ' + e.message, 'error');
+        } finally {
+            setSavingMov(false);
+        }
     };
 
     const handleCloseCaja = async () => {
@@ -1428,6 +1486,14 @@ export default function FlujoCajaView({ user, profile }) {
                                                     </td>
                                                     <td className="p-5 text-center">
                                                         {(isAdmin || turnoActivo?.vendedor_id === user?.id) && (
+                                                        <div className="flex items-center justify-center gap-1">
+                                                        <button
+                                                            onClick={() => setEditMovModal({ id: m.id, concepto: m.concepto || '', monto: m.monto, metodo_pago: m.metodo_pago || 'Efectivo', categoria: m.categoria, turno_id: m.turno_id })}
+                                                            className="p-3 text-muted hover:text-accent transition-all opacity-0 group-hover:opacity-100 hover:bg-accent/10 rounded-xl"
+                                                            title="Editar Movimiento"
+                                                        >
+                                                            <Edit3 size={18} />
+                                                        </button>
                                                         <button
                                                             onClick={() => deleteMovement(m.id)}
                                                             className="p-3 text-muted hover:text-error transition-all opacity-0 group-hover:opacity-100 hover:bg-error/10 rounded-xl"
@@ -1435,6 +1501,7 @@ export default function FlujoCajaView({ user, profile }) {
                                                         >
                                                             <Trash2 size={18} />
                                                         </button>
+                                                        </div>
                                                         )}
                                                     </td>
                                                 </motion.tr>
@@ -1967,10 +2034,48 @@ export default function FlujoCajaView({ user, profile }) {
                 {showDetailModal && (
                    <TurnoDetailModal
                         turno={showDetailModal}
+                        isAdmin={isAdmin}
                         onClose={() => setShowDetailModal(null)}
                    />
                 )}
             </AnimatePresence>
+
+            {/* ===== MODAL: EDITAR MOVIMIENTO (turno activo) ===== */}
+            {editMovModal && (
+                <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => !savingMov && setEditMovModal(null)}>
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-3" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-black text-navy">Editar movimiento</h3>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase">Concepto</label>
+                            <input value={editMovModal.concepto} onChange={e => setEditMovModal({ ...editMovModal, concepto: e.target.value })}
+                                className="w-full border border-border/40 rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase">Monto</label>
+                            <input type="number" value={editMovModal.monto} onChange={e => setEditMovModal({ ...editMovModal, monto: e.target.value })}
+                                className="w-full border border-border/40 rounded-xl px-3 py-2 text-sm font-mono outline-none focus:border-accent" />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase">Método de pago</label>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                                {METODOS_PAGO.map(mp => (
+                                    <button key={mp} onClick={() => setEditMovModal({ ...editMovModal, metodo_pago: mp })}
+                                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition-all ${editMovModal.metodo_pago === mp ? 'bg-navy border-navy text-white' : 'bg-background border-border/40 text-muted hover:border-navy/40'}`}>
+                                        {mp}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        {editMovModal.categoria === 'Cobro Pedido' && (
+                            <p className="text-[10px] text-slate-400">Este es un Cobro de Pedido: el cambio también se sincroniza con el pago del cliente y la contabilidad.</p>
+                        )}
+                        <div className="flex justify-end gap-2 pt-1">
+                            <button onClick={() => setEditMovModal(null)} disabled={savingMov} className="px-3 py-2 text-xs font-black text-muted">Cancelar</button>
+                            <button onClick={handleEditMov} disabled={savingMov} className="px-4 py-2 bg-navy text-white rounded-xl text-xs font-black disabled:opacity-50">{savingMov ? 'Guardando…' : 'Guardar'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ===== MODAL: CALCULADORA DE BILLETES ===== */}
             {showCalcModal && (() => {
@@ -2268,9 +2373,11 @@ function EditTurnoModal({ turno, vendedores, onSave, onClose }) {
     );
 }
 
-function TurnoDetailModal({ turno, onClose }) {
+function TurnoDetailModal({ turno, onClose, isAdmin }) {
     const [movs, setMovs] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [editMov, setEditMov] = useState(null);
+    const [savingEdit, setSavingEdit] = useState(false);
 
     useEffect(() => {
         fetchMovs();
@@ -2281,6 +2388,22 @@ function TurnoDetailModal({ turno, onClose }) {
         const { data } = await supabase.from('caja_movimientos').select('*').eq('turno_id', turno.id).order('created_at', { ascending: true });
         setMovs(data || []);
         setLoading(false);
+    };
+
+    const guardarEdicion = async () => {
+        const amt = parseFloat(editMov.monto);
+        if (!amt || amt <= 0) { alert('Monto inválido.'); return; }
+        setSavingEdit(true);
+        try {
+            await editarMovimientoCaja({ ...editMov, turno_id: turno.id });
+            window.dispatchEvent(new CustomEvent('contabilidad:refresh'));
+            setEditMov(null);
+            await fetchMovs();
+        } catch (e) {
+            alert('Error al editar: ' + e.message);
+        } finally {
+            setSavingEdit(false);
+        }
     };
 
     const ingresos = movs.filter(m => m.tipo === 'INGRESO').reduce((acc, m) => acc + m.monto, 0);
@@ -2395,6 +2518,7 @@ function TurnoDetailModal({ turno, onClose }) {
                                                 <th className="p-3 text-left">Método</th>
                                                 <th className="p-3 text-left">Detalle</th>
                                                 <th className="p-3 text-right">Monto</th>
+                                                {isAdmin && <th className="p-3 text-center">Editar</th>}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border/10 text-navy/80">
@@ -2411,6 +2535,11 @@ function TurnoDetailModal({ turno, onClose }) {
                                                     <td className={`p-3 text-right font-black font-mono ${m.tipo === 'INGRESO' ? 'text-success' : 'text-error'}`}>
                                                         {m.tipo === 'INGRESO' ? '+' : '-'} {m.monto.toLocaleString()}
                                                     </td>
+                                                    {isAdmin && (
+                                                    <td className="p-3 text-center">
+                                                        <button onClick={() => setEditMov({ id: m.id, concepto: m.concepto || '', monto: m.monto, metodo_pago: m.metodo_pago || 'Efectivo', categoria: m.categoria })} className="p-1.5 rounded-lg text-navy/50 hover:text-accent hover:bg-accent/10 transition-all" title="Editar movimiento"><Edit3 size={15} /></button>
+                                                    </td>
+                                                    )}
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -2426,6 +2555,39 @@ function TurnoDetailModal({ turno, onClose }) {
                     <p className="text-[10px] font-mono text-navy/30 uppercase tracking-[0.4em]">Fin del Reporte Auditado</p>
                 </div>
             </motion.div>
+
+            {/* Editar movimiento (admin, incluso turno cerrado) */}
+            {editMov && (
+                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={() => !savingEdit && setEditMov(null)}>
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-3" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-black text-navy">Editar movimiento</h3>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase">Concepto</label>
+                            <input value={editMov.concepto} onChange={e => setEditMov({ ...editMov, concepto: e.target.value })} className="w-full border border-border/40 rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase">Monto</label>
+                            <input type="number" value={editMov.monto} onChange={e => setEditMov({ ...editMov, monto: e.target.value })} className="w-full border border-border/40 rounded-xl px-3 py-2 text-sm font-mono outline-none focus:border-accent" />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase">Método de pago</label>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                                {METODOS_PAGO.map(mp => (
+                                    <button key={mp} onClick={() => setEditMov({ ...editMov, metodo_pago: mp })} className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition-all ${editMov.metodo_pago === mp ? 'bg-navy border-navy text-white' : 'bg-background border-border/40 text-muted hover:border-navy/40'}`}>{mp}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400">
+                            {editMov.categoria === 'Cobro Pedido' ? 'Cobro de Pedido: se sincroniza con el pago del cliente y la contabilidad. ' : ''}
+                            Si el turno está cerrado, se recalcula su monto final automáticamente.
+                        </p>
+                        <div className="flex justify-end gap-2 pt-1">
+                            <button onClick={() => setEditMov(null)} disabled={savingEdit} className="px-3 py-2 text-xs font-black text-muted">Cancelar</button>
+                            <button onClick={guardarEdicion} disabled={savingEdit} className="px-4 py-2 bg-navy text-white rounded-xl text-xs font-black disabled:opacity-50">{savingEdit ? 'Guardando…' : 'Guardar'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
