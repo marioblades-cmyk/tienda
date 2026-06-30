@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { useDropzone } from 'react-dropzone';
 import * as xlsx from 'xlsx';
 import { Upload, Database, CheckCircle2, AlertCircle, X, Loader2, Calendar, Trash2, Edit2, Check, RefreshCw, TrendingUp, DollarSign } from 'lucide-react';
+import VerificadorConfirmaciones from './VerificadorConfirmaciones';
 
 export default function AdminMasterView() {
     const [semanas, setSemanas] = useState([]);
@@ -794,6 +795,7 @@ export default function AdminMasterView() {
 
     return (
         <div className="space-y-8 max-w-5xl mx-auto">
+            <VerificadorConfirmaciones />
             {/* Cabecera */}
             <div className="bg-white p-6 rounded-2xl border border-border/40 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
