@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
-import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart, TrendingUp, Loader2 } from 'lucide-react';
+import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart, TrendingUp, Loader2, Link2 } from 'lucide-react';
+import { cotizarLink } from '../utils/buscalibre';
 import { useAuth } from '../hooks/useAuth';
 import { ffecha, fhora, ffechaLarga, fstamp } from '../utils/dateUtils';
 import { audit, newOpId } from '../services/auditLog';
@@ -55,6 +56,17 @@ export default function ClientOrdersView() {
 
     const [catalogSuggestions, setCatalogSuggestions] = useState([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
+
+    // Modo Buscalibre (pedido a pedido importado)
+    const [blLink, setBlLink] = useState('');
+    const [blTc, setBlTc] = useState(() => { try { return localStorage.getItem('mcb_bl_last_tc') || ''; } catch { return ''; } });
+    const [blLoading, setBlLoading] = useState(false);
+    const [blError, setBlError] = useState('');
+    const [blData, setBlData] = useState(null);      // { titulo, autor, editorial, isbn, cover, precioArs, link, tc }
+    const [blPrecio, setBlPrecio] = useState('');    // precio final en Bs (editable)
+    const [blMemoria, setBlMemoria] = useState([]);  // ítems buscalibre ya pedidos (memoria)
+    const [blSugs, setBlSugs] = useState([]);
+    const [blSearch, setBlSearch] = useState('');
     
     // Asignación Dinámica
     const [stockAnalysis, setStockAnalysis] = useState(null); // { fisico: int, flotantes: [{semana_id, nombre, qty, fechaArribo}] }
@@ -126,6 +138,7 @@ export default function ClientOrdersView() {
             setShowSuggestions(false);
             setStockAnalysis(null);
             setSelectedStockSource('');
+            setBlData(null); setBlPrecio(''); setBlLink(''); setBlError(''); setBlSearch(''); setBlSugs([]);
             setBatchDiscount('');
             setBatchAbono('');
             setOrderMethod('Yasta (QR)');
@@ -638,6 +651,47 @@ export default function ClientOrdersView() {
         );
     };
 
+    // --- Buscalibre ---
+    const cargarMemoriaBL = async () => {
+        const { data } = await supabase.from('buscalibre_items').select('*').order('updated_at', { ascending: false });
+        if (data) setBlMemoria(data);
+    };
+    useEffect(() => { cargarMemoriaBL(); }, []);
+
+    const aplicarBL = (d, precioBsVal) => {
+        setBlData(d);
+        setBlPrecio(precioBsVal != null ? String(precioBsVal) : '');
+        setBlError('');
+    };
+
+    const cotizarBL = async () => {
+        const url = (blLink || '').trim();
+        if (!url.includes('buscalibre')) { setBlError('Pegá un link de buscalibre.'); return; }
+        if (!Number(blTc) || Number(blTc) <= 0) { setBlError('Poné el tipo de cambio (mayor a 0).'); return; }
+        setBlError(''); setBlLoading(true);
+        try {
+            try { localStorage.setItem('mcb_bl_last_tc', String(blTc)); } catch { /* noop */ }
+            const d = await cotizarLink(url, blTc);
+            aplicarBL(d, d.precioBs);
+        } catch (e) { setBlError(e.message || 'No se pudo cotizar.'); }
+        finally { setBlLoading(false); }
+    };
+
+    // Elegir un ítem ya guardado en la memoria (sin recotizar)
+    const elegirMemoriaBL = (m) => {
+        setBlLink(m.link || '');
+        aplicarBL({ titulo: m.titulo, autor: m.autor, editorial: m.editorial, isbn: m.isbn, cover: m.cover, precioArs: m.precio_ars, link: m.link, tc: m.tc }, m.precio_bs);
+        setBlSearch(''); setBlSugs([]);
+    };
+
+    const buscarMemoriaBL = (val) => {
+        setBlSearch(val);
+        if (val.length > 1) {
+            const lower = val.toLowerCase();
+            setBlSugs(blMemoria.filter(m => (m.titulo || '').toLowerCase().includes(lower) || (m.isbn || '').includes(val)).slice(0, 30));
+        } else setBlSugs([]);
+    };
+
     const handleSearchCatalog = (val) => {
         setAddForm({ ...addForm, titulo: val });
         if (val.length > 2) {
@@ -773,6 +827,29 @@ export default function ClientOrdersView() {
     const addToCart = async () => {
         setLoading(true);
         try {
+            if (addForm.mode === 'buscalibre') {
+                if (!blData?.titulo) { alert("Cotizá o elegí un libro de Buscalibre primero."); return; }
+                const precio = Number(blPrecio) || 0;
+                if (precio <= 0) { alert("El precio en Bs debe ser mayor a 0."); return; }
+                const notaBL = `Buscalibre${blData.link ? ': ' + blData.link : ''}${blData.isbn ? ' · ISBN ' + blData.isbn : ''}${blData.precioArs ? ` · ARS ${blData.precioArs} @ ${blData.tc || blTc}` : ''}`;
+                setCart([...cart, {
+                    titulo: blData.titulo,
+                    catalog_id: null,
+                    product_id: null,
+                    precio_original: precio,
+                    descuento: 0,
+                    precio_venta: precio,
+                    monto_pagado: 0,
+                    pagoIndividual: 0,
+                    nota: notaBL,
+                    source: 'buscalibre',
+                    bl: { link: blData.link, isbn: blData.isbn, titulo: blData.titulo, autor: blData.autor, editorial: blData.editorial, cover: blData.cover, precioArs: blData.precioArs, tc: blData.tc || Number(blTc) || null },
+                    stockOptions: null,
+                }]);
+                // Limpiar para el siguiente
+                setBlData(null); setBlPrecio(''); setBlLink(''); setBlError(''); setBlSearch(''); setBlSugs([]);
+                return;
+            }
             if (addForm.mode === 'individual') {
                 if (!addForm.titulo) return alert("Título obligatorio");
                 
@@ -1012,7 +1089,11 @@ export default function ClientOrdersView() {
                 let targetSemanaId = null;
                 let estadoTarget = 'PEDIDO';
 
-                if (modoHistorico) {
+                if (cItem.source === 'buscalibre') {
+                    // Pedido importado de Buscalibre — sin semana, los estados se manejan manual
+                    estadoTarget = 'PEDIDO BUSCALIBRE';
+                    targetSemanaId = null;
+                } else if (modoHistorico) {
                     // Modo histórico: usar estado y semana definidos manualmente
                     estadoTarget = cItem.hist_estado || 'PEDIDO';
                     targetSemanaId = cItem.hist_semana_id || null;
@@ -1071,6 +1152,20 @@ export default function ClientOrdersView() {
             if (insErr) { audit.error(opId, 'NUEVO_PEDIDO', 'insert_items', insErr); }
             else audit.step(opId, 'NUEVO_PEDIDO', 'insert_items', { cliente_id: clienteId, cantidad: itemsToInsert.length });
             if (insErr) throw insErr;
+
+            // Guardar/actualizar memoria de ítems Buscalibre (para reusar la próxima vez)
+            for (const cItem of cart) {
+                if (cItem.source === 'buscalibre' && cItem.bl?.link) {
+                    const b = cItem.bl;
+                    await supabase.from('buscalibre_items').upsert({
+                        link: b.link, isbn: b.isbn || null, titulo: b.titulo || cItem.titulo,
+                        autor: b.autor || null, editorial: b.editorial || null, cover: b.cover || null,
+                        precio_ars: b.precioArs || null, tc: b.tc || null, precio_bs: cItem.precio_venta || null,
+                        updated_at: new Date().toISOString(),
+                    }, { onConflict: 'link' });
+                }
+            }
+            cargarMemoriaBL();
 
             // 4. Subtract stock (solo en modo normal, no histórico)
             for (let cItem of cart) {
@@ -3538,7 +3633,8 @@ export default function ClientOrdersView() {
                                         </div>
                                         <div className="flex bg-background p-1 rounded-xl border border-border">
                                             <button onClick={()=>setAddForm({...addForm, mode:'individual'})} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${addForm.mode==='individual'?'bg-surface text-primary shadow-md':'text-muted-2'}`}>Individual</button>
-                                            <button onClick={()=>setAddForm({...addForm, mode:'bulk'})} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${addForm.mode!=='individual'?'bg-surface text-secondary shadow-md':'text-muted-2'}`}>Lote</button>
+                                            <button onClick={()=>setAddForm({...addForm, mode:'bulk'})} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${addForm.mode==='bulk'?'bg-surface text-secondary shadow-md':'text-muted-2'}`}>Lote</button>
+                                            <button onClick={()=>setAddForm({...addForm, mode:'buscalibre'})} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1 ${addForm.mode==='buscalibre'?'bg-surface text-orange-500 shadow-md':'text-muted-2'}`}><Link2 size={11}/> Buscalibre</button>
                                         </div>
                                     </div>
 
@@ -3703,6 +3799,70 @@ export default function ClientOrdersView() {
                                                 addToCart();
                                                 setDropdownOpen(false);
                                             }} disabled={!addForm.titulo || loading} className="w-full py-4 bg-primary text-background font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-primary/20 disabled:opacity-50">
+                                                Añadir al Pedido
+                                            </button>
+                                        </div>
+                                    ) : addForm.mode === 'buscalibre' ? (
+                                        <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-left-2 duration-300">
+                                            {/* Reusar uno ya pedido (memoria) */}
+                                            <div>
+                                                <label className="block text-[10px] font-black uppercase mb-1.5 text-muted/80 tracking-[0.2em] pl-1">Ya pedidos antes ({blMemoria.length})</label>
+                                                <div className="relative">
+                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16}/>
+                                                    <input type="text" value={blSearch} onChange={e=>buscarMemoriaBL(e.target.value)} placeholder="Buscar título guardado..." className="w-full bg-background border-2 border-border/50 pl-10 pr-4 py-2.5 rounded-xl text-sm font-bold text-text outline-none focus:border-orange-400"/>
+                                                    {blSugs.length > 0 && (
+                                                        <div className="absolute top-full left-0 w-full mt-2 bg-surface border border-border rounded-xl shadow-2xl z-[200] max-h-72 overflow-y-auto p-1">
+                                                            {blSugs.map(m => (
+                                                                <div key={m.id} onClick={()=>elegirMemoriaBL(m)} className="p-2.5 rounded-lg hover:bg-orange-500/5 cursor-pointer flex justify-between items-center gap-2">
+                                                                    <div className="flex flex-col min-w-0">
+                                                                        <span className="text-[11px] font-bold text-text/80 leading-tight truncate">{m.titulo}</span>
+                                                                        <span className="text-[9px] text-muted-2 uppercase truncate">{m.editorial || ''}{m.isbn ? ' · ' + m.isbn : ''}</span>
+                                                                    </div>
+                                                                    <span className="text-[9px] font-black text-orange-500 shrink-0">BS {m.precio_bs}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Cotizar nuevo */}
+                                            <div className="space-y-2">
+                                                <label className="block text-[10px] font-black uppercase text-muted/80 pl-1">Cotizar nuevo (pegá el link)</label>
+                                                <input type="text" value={blLink} onChange={e=>setBlLink(e.target.value)} placeholder="https://www.buscalibre.com.ar/..." className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs font-mono text-text outline-none focus:border-orange-400"/>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 border border-border rounded-xl px-3 py-2 flex-1">
+                                                        <span className="text-[10px] font-black text-muted uppercase whitespace-nowrap">T. Cambio</span>
+                                                        <input type="number" value={blTc} onChange={e=>setBlTc(e.target.value)} placeholder="ej. 0.0066" className="w-full outline-none text-xs font-mono bg-transparent"/>
+                                                    </div>
+                                                    <button onClick={cotizarBL} disabled={blLoading} className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-black px-4 py-2.5 rounded-xl shrink-0">
+                                                        {blLoading ? <Loader2 size={14} className="animate-spin"/> : <Link2 size={14}/>} Cotizar
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-muted-2 pl-1">Fórmula: (ARS × T.Cambio + 35) × 1.3</p>
+                                            </div>
+
+                                            {blError && <div className="flex items-center gap-2 text-error text-xs font-bold"><AlertCircle size={14}/> {blError}</div>}
+
+                                            {/* Resultado de la cotización */}
+                                            {blData && (
+                                                <div className="bg-background border border-orange-400/30 rounded-xl p-3 flex gap-3">
+                                                    {blData.cover && <img src={`/api/scrape?url=${encodeURIComponent(blData.cover)}`} onError={e=>{e.currentTarget.style.display='none';}} alt="" className="w-14 h-20 object-contain rounded bg-surface shrink-0"/>}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-xs font-black text-text leading-tight">{blData.titulo}</div>
+                                                        {blData.autor && <div className="text-[10px] text-orange-500 font-bold">{blData.autor}</div>}
+                                                        <div className="text-[9px] text-muted-2 uppercase truncate">{blData.editorial}{blData.isbn ? ' · ' + blData.isbn : ''}</div>
+                                                        {blData.precioArs ? <div className="text-[10px] text-muted mt-0.5">ARS {Number(blData.precioArs).toLocaleString('es-AR')}</div> : null}
+                                                        <div className="flex items-center gap-2 mt-2">
+                                                            <span className="text-[10px] font-black uppercase text-primary">Precio Bs</span>
+                                                            <input type="number" value={blPrecio} onChange={e=>setBlPrecio(e.target.value)} className="w-24 bg-primary/5 border border-primary/20 px-2 py-1.5 rounded-lg text-xs text-primary font-black outline-none font-mono text-center"/>
+                                                            {blData.link && <button onClick={cotizarBL} title="Recotizar" className="text-orange-500 hover:text-orange-600"><RefreshCw size={13}/></button>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <button onClick={()=>addToCart()} disabled={!blData?.titulo || loading} className="w-full py-4 bg-orange-500 text-white font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg disabled:opacity-50">
                                                 Añadir al Pedido
                                             </button>
                                         </div>
@@ -3915,6 +4075,13 @@ export default function ClientOrdersView() {
                                                                             <option value="ENTREGADO">ENTREGADO</option>
                                                                         </select>
                                                                     </td>
+                                                                </>) : c.source === 'buscalibre' ? (<>
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <div className="text-[9px] font-black uppercase px-2 py-1.5 rounded-lg border bg-orange-500/5 border-orange-400/30 text-orange-500 flex items-center justify-center gap-1"><Link2 size={10}/> BUSCALIBRE</div>
+                                                                </td>
+                                                                <td className="px-2 py-2.5 text-center">
+                                                                    <div className="text-[9px] font-black uppercase px-2 py-1.5 rounded-lg border bg-muted/5 border-border/30 text-muted-2">MANUAL</div>
+                                                                </td>
                                                                 </>) : (<>
                                                                 <td className="px-2 py-2.5 text-center">
                                                                     <select

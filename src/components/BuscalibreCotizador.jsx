@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import { Link2, Loader2, Download, BookOpen, AlertCircle, Trash2, Clock } from 'lucide-react';
+import { fetchHtml, parseBook, precioBs } from '../utils/buscalibre';
 
 // Cotizador Buscalibre: pegás uno o varios links de buscalibre.com.ar, trae los datos
 // (vía /api/scrape), calcula el precio en Bs y genera imágenes para WhatsApp.
@@ -28,85 +29,7 @@ export default function BuscalibreCotizador() {
         try { localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed)); } catch { /* noop */ }
     };
 
-    // Trae el HTML (o imagen) vía nuestra función serverless; fallback a proxies públicos.
-    const fetchHtml = async (u) => {
-        try {
-            const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`);
-            if (res.ok) {
-                const txt = await res.text();
-                if (txt && txt.length > 2000 && !txt.trimStart().startsWith('{')) return txt;
-            }
-        } catch { /* probar proxies */ }
-        const proxies = [
-            (x) => `https://api.allorigins.win/raw?url=${encodeURIComponent(x)}`,
-            (x) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(x)}`,
-        ];
-        for (const p of proxies) {
-            try {
-                const res = await fetch(p(u));
-                if (res.ok) { const txt = await res.text(); if (txt && txt.length > 2000) return txt; }
-            } catch { /* siguiente */ }
-        }
-        throw new Error('No se pudo traer la página.');
-    };
-
-    const parseBook = (html, srcUrl) => {
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const meta = (prop) => doc.querySelector(`meta[property="${prop}"]`)?.getAttribute('content') || '';
-
-        let titulo = (doc.querySelector('h1')?.textContent || meta('og:title') || '').trim();
-        titulo = titulo.replace(/\s*-\s*Buscalibre.*$/i, '').trim();
-        const cover = meta('og:image') || '';
-
-        const fields = {};
-        doc.querySelectorAll('.row').forEach((row) => {
-            const l = row.querySelector('.col-xs-5');
-            const v = row.querySelector('.col-xs-7');
-            if (l && v) {
-                const key = l.textContent.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-                const val = v.textContent.trim();
-                if (key && val) fields[key] = val;
-            }
-        });
-        const get = (...names) => {
-            for (const k of Object.keys(fields)) if (names.some((n) => k.includes(n))) return fields[k];
-            return '';
-        };
-
-        // Precio ARS = el precio VISIBLE que se paga (junto al botón "agregar al carro").
-        let precioArs = 0;
-        let pm = html.match(/<strong class="precio">\s*\$?\s*([\d.]+)\s*<\/strong>\s*<form[^>]*carro\/agregar/i);
-        if (!pm) pm = html.match(/<strong class="precio">\s*\$?\s*([\d.]+)\s*<\/strong>/i);
-        if (pm) precioArs = parseInt(pm[1].replace(/\./g, ''), 10) || 0;
-        if (!precioArs) {
-            const h = html.match(/name="precio_producto"\s+value="?([\d.]+)"?/i);
-            if (h) precioArs = Math.round(parseFloat(h[1])) || 0;
-        }
-        if (!precioArs) {
-            const j = html.match(/"price":\s*"?([\d.]+)"?/);
-            if (j) precioArs = Math.round(parseFloat(j[1])) || 0;
-        }
-
-        const isbnM = srcUrl.match(/(\d{13})/);
-        return {
-            titulo,
-            autor: get('autor'),
-            editorial: get('editorial'),
-            coleccion: get('coleccion', 'colecc'),
-            anio: get('ano', 'año'),
-            idioma: get('idioma'),
-            paginas: get('paginas', 'pagina'),
-            encuadernacion: get('encuaderna'),
-            dimensiones: get('dimension'),
-            formato: get('formato'),
-            pais: get('editado en', 'pais'),
-            isbn: isbnM ? isbnM[1] : get('isbn'),
-            cover,
-            precioArs,
-        };
-    };
-
-    const precioBsDe = (precioArs) => Math.round((precioArs * Number(tc) + 35) * 1.3);
+    const precioBsDe = (precioArs) => precioBs(precioArs, tc);
 
     const cotizar = async () => {
         setError('');
