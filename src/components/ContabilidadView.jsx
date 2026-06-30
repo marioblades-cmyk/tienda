@@ -78,7 +78,8 @@ function TransferenciaModal({ onClose, onDone }) {
             const label = concepto || `Transferencia ${desde} → ${hacia}`;
             const { error } = await supabase.from('caja_movimientos').insert([
                 {
-                    turno_id: desde !== 'Efectivo Personal' ? turnoId : null,
+                    // Solo se ata al turno si mueve el EFECTIVO del cajón; entre cuentas digitales/personal va suelto.
+                    turno_id: desde === 'Efectivo' ? turnoId : null,
                     tipo: 'EGRESO',
                     categoria: 'Transferencia Interna',
                     concepto: `[SALIDA] ${label}`,
@@ -87,7 +88,7 @@ function TransferenciaModal({ onClose, onDone }) {
                     origen: 'Transferencia',
                 },
                 {
-                    turno_id: hacia !== 'Efectivo Personal' ? turnoId : null,
+                    turno_id: hacia === 'Efectivo' ? turnoId : null,
                     tipo: 'INGRESO',
                     categoria: 'Transferencia Interna',
                     concepto: `[ENTRADA] ${label}`,
