@@ -797,7 +797,7 @@ export default function AdminMasterView() {
 
     return (
         <div className="space-y-8 max-w-5xl mx-auto">
-            <VerificadorConfirmaciones file={confFile} />
+            <VerificadorConfirmaciones file={confFile} semanaId={selectedSemana} />
             {/* Cabecera */}
             <div className="bg-white p-6 rounded-2xl border border-border/40 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
