@@ -17,11 +17,14 @@ const getDto = (editorial) => {
     return m ? m.dto : null;
 };
 
-export default function VerificadorConfirmaciones() {
+export default function VerificadorConfirmaciones({ file }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [res, setRes] = useState(null);
     const [open, setOpen] = useState(false);
+
+    // Cuando llega un Excel ya cargado (el que soltaste para el Master), abrir el panel para verificarlo sin re-subir.
+    React.useEffect(() => { if (file) setOpen(true); }, [file]);
 
     const verificar = async (file) => {
         if (!file) return;
@@ -109,11 +112,18 @@ export default function VerificadorConfirmaciones() {
             </button>
             {open && (
                 <div className="p-5 space-y-4">
-                    <p className="text-xs text-slate-500">Subí el Excel de confirmaciones del distribuidor. Revisa, ítem por ítem (contra nuestro catálogo): editorial correcta, descuento correcto y precio.</p>
-                    <label className="flex items-center gap-2 w-fit cursor-pointer bg-navy hover:bg-navy/90 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all">
-                        {loading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} Subir Excel de confirmaciones
-                        <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => verificar(e.target.files?.[0])} disabled={loading} />
-                    </label>
+                    <p className="text-xs text-slate-500">Revisa, ítem por ítem (contra nuestro catálogo): editorial correcta, descuento correcto y precio.</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {file && (
+                            <button onClick={() => verificar(file)} disabled={loading} className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all">
+                                {loading ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />} Verificar el Excel cargado ({file.name?.slice(0, 28)})
+                            </button>
+                        )}
+                        <label className="flex items-center gap-2 w-fit cursor-pointer bg-navy hover:bg-navy/90 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all">
+                            {loading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} {file ? 'Subir otro' : 'Subir Excel de confirmaciones'}
+                            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => verificar(e.target.files?.[0])} disabled={loading} />
+                        </label>
+                    </div>
                     {error && <div className="flex items-center gap-2 text-red-500 text-xs font-bold"><AlertTriangle size={14} /> {error}</div>}
 
                     {res && (

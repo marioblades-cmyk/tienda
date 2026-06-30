@@ -19,6 +19,7 @@ export default function AdminMasterView() {
 
     // Preview Data
     const [previewData, setPreviewData] = useState(null);
+    const [confFile, setConfFile] = useState(null); // Excel de confirmaciones cargado (para el verificador, sin re-subir)
     const [existingMaster, setExistingMaster] = useState(null);
 
     // Repricing
@@ -280,6 +281,7 @@ export default function AdminMasterView() {
     };
 
     const onDrop = useCallback(acceptedFiles => {
+        if (acceptedFiles?.length > 0) setConfFile(acceptedFiles[0]); // guardar para el verificador (sin re-subir)
         if (!selectedSemana) return setError("Selecciona una semana primero.");
         if (existingMaster) return setError("Esta semana ya tiene un Master. Elimínalo primero para sobreescribir.");
         if (acceptedFiles?.length > 0) {
@@ -795,7 +797,7 @@ export default function AdminMasterView() {
 
     return (
         <div className="space-y-8 max-w-5xl mx-auto">
-            <VerificadorConfirmaciones />
+            <VerificadorConfirmaciones file={confFile} />
             {/* Cabecera */}
             <div className="bg-white p-6 rounded-2xl border border-border/40 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
