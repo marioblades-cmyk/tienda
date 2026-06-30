@@ -67,6 +67,10 @@ export default function ClientOrdersView() {
     const [blMemoria, setBlMemoria] = useState([]);  // ítems buscalibre ya pedidos (memoria)
     const [blSugs, setBlSugs] = useState([]);
     const [blSearch, setBlSearch] = useState('');
+    const [blModo, setBlModo] = useState('auto');    // 'auto' = Buscalibre (cotiza) | 'manual' = otra web (título + precio a mano)
+    const [blmTitulo, setBlmTitulo] = useState('');
+    const [blmEditorial, setBlmEditorial] = useState('');
+    const [blmLink, setBlmLink] = useState('');
     
     // Asignación Dinámica
     const [stockAnalysis, setStockAnalysis] = useState(null); // { fisico: int, flotantes: [{semana_id, nombre, qty, fechaArribo}] }
@@ -139,6 +143,7 @@ export default function ClientOrdersView() {
             setStockAnalysis(null);
             setSelectedStockSource('');
             setBlData(null); setBlPrecio(''); setBlLink(''); setBlError(''); setBlSearch(''); setBlSugs([]);
+            setBlModo('auto'); setBlmTitulo(''); setBlmEditorial(''); setBlmLink('');
             setBatchDiscount('');
             setBatchAbono('');
             setOrderMethod('Yasta (QR)');
@@ -679,8 +684,9 @@ export default function ClientOrdersView() {
 
     // Elegir un ítem ya guardado en la memoria (sin recotizar)
     const elegirMemoriaBL = (m) => {
-        setBlLink(m.link || '');
-        aplicarBL({ titulo: m.titulo, autor: m.autor, editorial: m.editorial, isbn: m.isbn, cover: m.cover, precioArs: m.precio_ars, link: m.link, tc: m.tc }, m.precio_bs);
+        setBlModo('auto'); // mostrar la ficha del ítem elegido
+        setBlLink((m.link || '').startsWith('manual:') ? '' : (m.link || ''));
+        aplicarBL({ titulo: m.titulo, autor: m.autor, editorial: m.editorial, isbn: m.isbn, cover: m.cover, precioArs: m.precio_ars, link: (m.link || '').startsWith('manual:') ? '' : m.link, tc: m.tc }, m.precio_bs);
         setBlSearch(''); setBlSugs([]);
     };
 
@@ -828,26 +834,35 @@ export default function ClientOrdersView() {
         setLoading(true);
         try {
             if (addForm.mode === 'buscalibre') {
-                if (!blData?.titulo) { alert("Cotizá o elegí un libro de Buscalibre primero."); return; }
+                let titulo, nota, bl, source;
                 const precio = Number(blPrecio) || 0;
                 if (precio <= 0) { alert("El precio en Bs debe ser mayor a 0."); return; }
-                const notaBL = `Buscalibre${blData.link ? ': ' + blData.link : ''}${blData.isbn ? ' · ISBN ' + blData.isbn : ''}${blData.precioArs ? ` · ARS ${blData.precioArs} @ ${blData.tc || blTc}` : ''}`;
+
+                if (blModo === 'manual') {
+                    titulo = (blmTitulo || '').trim();
+                    if (!titulo) { alert("Poné el título del libro."); return; }
+                    const link = (blmLink || '').trim();
+                    const memKey = link || `manual:${titulo.toLowerCase()}`;   // clave para la memoria (dedupe por link o por título)
+                    nota = `A pedido (web)${link ? ': ' + link : ''}`;
+                    bl = { link: memKey, isbn: null, titulo, autor: null, editorial: (blmEditorial || '').trim() || null, cover: null, precioArs: null, tc: null };
+                    source = 'importado';
+                } else {
+                    if (!blData?.titulo) { alert("Cotizá o elegí un libro de Buscalibre primero."); return; }
+                    titulo = blData.titulo;
+                    nota = `Buscalibre${blData.link ? ': ' + blData.link : ''}${blData.isbn ? ' · ISBN ' + blData.isbn : ''}${blData.precioArs ? ` · ARS ${blData.precioArs} @ ${blData.tc || blTc}` : ''}`;
+                    bl = { link: blData.link, isbn: blData.isbn, titulo: blData.titulo, autor: blData.autor, editorial: blData.editorial, cover: blData.cover, precioArs: blData.precioArs, tc: blData.tc || Number(blTc) || null };
+                    source = 'buscalibre';
+                }
+
                 setCart([...cart, {
-                    titulo: blData.titulo,
-                    catalog_id: null,
-                    product_id: null,
-                    precio_original: precio,
-                    descuento: 0,
-                    precio_venta: precio,
-                    monto_pagado: 0,
-                    pagoIndividual: 0,
-                    nota: notaBL,
-                    source: 'buscalibre',
-                    bl: { link: blData.link, isbn: blData.isbn, titulo: blData.titulo, autor: blData.autor, editorial: blData.editorial, cover: blData.cover, precioArs: blData.precioArs, tc: blData.tc || Number(blTc) || null },
-                    stockOptions: null,
+                    titulo, catalog_id: null, product_id: null,
+                    precio_original: precio, descuento: 0, precio_venta: precio,
+                    monto_pagado: 0, pagoIndividual: 0,
+                    nota, source, bl, stockOptions: null,
                 }]);
                 // Limpiar para el siguiente
                 setBlData(null); setBlPrecio(''); setBlLink(''); setBlError(''); setBlSearch(''); setBlSugs([]);
+                setBlmTitulo(''); setBlmEditorial(''); setBlmLink('');
                 return;
             }
             if (addForm.mode === 'individual') {
@@ -1089,9 +1104,9 @@ export default function ClientOrdersView() {
                 let targetSemanaId = null;
                 let estadoTarget = 'PEDIDO';
 
-                if (cItem.source === 'buscalibre') {
-                    // Pedido importado de Buscalibre — sin semana, los estados se manejan manual
-                    estadoTarget = 'PEDIDO BUSCALIBRE';
+                if (cItem.source === 'buscalibre' || cItem.source === 'importado') {
+                    // Pedido a pedido (Buscalibre u otra web) — sin semana, los estados se manejan manual
+                    estadoTarget = cItem.source === 'importado' ? 'PEDIDO IMPORTADO' : 'PEDIDO BUSCALIBRE';
                     targetSemanaId = null;
                 } else if (modoHistorico) {
                     // Modo histórico: usar estado y semana definidos manualmente
@@ -1155,7 +1170,7 @@ export default function ClientOrdersView() {
 
             // Guardar/actualizar memoria de ítems Buscalibre (para reusar la próxima vez)
             for (const cItem of cart) {
-                if (cItem.source === 'buscalibre' && cItem.bl?.link) {
+                if ((cItem.source === 'buscalibre' || cItem.source === 'importado') && cItem.bl?.link) {
                     const b = cItem.bl;
                     await supabase.from('buscalibre_items').upsert({
                         link: b.link, isbn: b.isbn || null, titulo: b.titulo || cItem.titulo,
@@ -3826,43 +3841,74 @@ export default function ClientOrdersView() {
                                                 </div>
                                             </div>
 
-                                            {/* Cotizar nuevo */}
-                                            <div className="space-y-2">
-                                                <label className="block text-[10px] font-black uppercase text-muted/80 pl-1">Cotizar nuevo (pegá el link)</label>
-                                                <input type="text" value={blLink} onChange={e=>setBlLink(e.target.value)} placeholder="https://www.buscalibre.com.ar/..." className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs font-mono text-text outline-none focus:border-orange-400"/>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="flex items-center gap-2 border border-border rounded-xl px-3 py-2 flex-1">
-                                                        <span className="text-[10px] font-black text-muted uppercase whitespace-nowrap">T. Cambio</span>
-                                                        <input type="number" value={blTc} onChange={e=>setBlTc(e.target.value)} placeholder="ej. 0.0066" className="w-full outline-none text-xs font-mono bg-transparent"/>
-                                                    </div>
-                                                    <button onClick={cotizarBL} disabled={blLoading} className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-black px-4 py-2.5 rounded-xl shrink-0">
-                                                        {blLoading ? <Loader2 size={14} className="animate-spin"/> : <Link2 size={14}/>} Cotizar
-                                                    </button>
-                                                </div>
-                                                <p className="text-[10px] text-muted-2 pl-1">Fórmula: (ARS × T.Cambio + 35) × 1.3</p>
+                                            {/* Buscalibre (cotiza) vs Manual (otra web) */}
+                                            <div className="flex bg-background p-1 rounded-xl border border-border">
+                                                <button onClick={()=>setBlModo('auto')} className={`flex-1 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${blModo==='auto'?'bg-surface text-orange-500 shadow-md':'text-muted-2'}`}>🔗 Buscalibre</button>
+                                                <button onClick={()=>setBlModo('manual')} className={`flex-1 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${blModo==='manual'?'bg-surface text-orange-500 shadow-md':'text-muted-2'}`}>✏️ Manual / Otra web</button>
                                             </div>
 
-                                            {blError && <div className="flex items-center gap-2 text-error text-xs font-bold"><AlertCircle size={14}/> {blError}</div>}
+                                            {blModo === 'auto' ? (<>
+                                                {/* Cotizar nuevo */}
+                                                <div className="space-y-2">
+                                                    <label className="block text-[10px] font-black uppercase text-muted/80 pl-1">Cotizar nuevo (pegá el link)</label>
+                                                    <input type="text" value={blLink} onChange={e=>setBlLink(e.target.value)} placeholder="https://www.buscalibre.com.ar/..." className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs font-mono text-text outline-none focus:border-orange-400"/>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 border border-border rounded-xl px-3 py-2 flex-1">
+                                                            <span className="text-[10px] font-black text-muted uppercase whitespace-nowrap">T. Cambio</span>
+                                                            <input type="number" value={blTc} onChange={e=>setBlTc(e.target.value)} placeholder="ej. 0.0066" className="w-full outline-none text-xs font-mono bg-transparent"/>
+                                                        </div>
+                                                        <button onClick={cotizarBL} disabled={blLoading} className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-black px-4 py-2.5 rounded-xl shrink-0">
+                                                            {blLoading ? <Loader2 size={14} className="animate-spin"/> : <Link2 size={14}/>} Cotizar
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-2 pl-1">Fórmula: (ARS × T.Cambio + 35) × 1.3</p>
+                                                </div>
 
-                                            {/* Resultado de la cotización */}
-                                            {blData && (
-                                                <div className="bg-background border border-orange-400/30 rounded-xl p-3 flex gap-3">
-                                                    {blData.cover && <img src={`/api/scrape?url=${encodeURIComponent(blData.cover)}`} onError={e=>{e.currentTarget.style.display='none';}} alt="" className="w-14 h-20 object-contain rounded bg-surface shrink-0"/>}
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-xs font-black text-text leading-tight">{blData.titulo}</div>
-                                                        {blData.autor && <div className="text-[10px] text-orange-500 font-bold">{blData.autor}</div>}
-                                                        <div className="text-[9px] text-muted-2 uppercase truncate">{blData.editorial}{blData.isbn ? ' · ' + blData.isbn : ''}</div>
-                                                        {blData.precioArs ? <div className="text-[10px] text-muted mt-0.5">ARS {Number(blData.precioArs).toLocaleString('es-AR')}</div> : null}
-                                                        <div className="flex items-center gap-2 mt-2">
-                                                            <span className="text-[10px] font-black uppercase text-primary">Precio Bs</span>
-                                                            <input type="number" value={blPrecio} onChange={e=>setBlPrecio(e.target.value)} className="w-24 bg-primary/5 border border-primary/20 px-2 py-1.5 rounded-lg text-xs text-primary font-black outline-none font-mono text-center"/>
-                                                            {blData.link && <button onClick={cotizarBL} title="Recotizar" className="text-orange-500 hover:text-orange-600"><RefreshCw size={13}/></button>}
+                                                {blError && <div className="flex items-center gap-2 text-error text-xs font-bold"><AlertCircle size={14}/> {blError}</div>}
+
+                                                {/* Resultado de la cotización */}
+                                                {blData && (
+                                                    <div className="bg-background border border-orange-400/30 rounded-xl p-3 flex gap-3">
+                                                        {blData.cover && <img src={`/api/scrape?url=${encodeURIComponent(blData.cover)}`} onError={e=>{e.currentTarget.style.display='none';}} alt="" className="w-14 h-20 object-contain rounded bg-surface shrink-0"/>}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-xs font-black text-text leading-tight">{blData.titulo}</div>
+                                                            {blData.autor && <div className="text-[10px] text-orange-500 font-bold">{blData.autor}</div>}
+                                                            <div className="text-[9px] text-muted-2 uppercase truncate">{blData.editorial}{blData.isbn ? ' · ' + blData.isbn : ''}</div>
+                                                            {blData.precioArs ? <div className="text-[10px] text-muted mt-0.5">ARS {Number(blData.precioArs).toLocaleString('es-AR')}</div> : null}
+                                                            <div className="flex items-center gap-2 mt-2">
+                                                                <span className="text-[10px] font-black uppercase text-primary">Precio Bs</span>
+                                                                <input type="number" value={blPrecio} onChange={e=>setBlPrecio(e.target.value)} className="w-24 bg-primary/5 border border-primary/20 px-2 py-1.5 rounded-lg text-xs text-primary font-black outline-none font-mono text-center"/>
+                                                                {blData.link && <button onClick={cotizarBL} title="Recotizar" className="text-orange-500 hover:text-orange-600"><RefreshCw size={13}/></button>}
+                                                            </div>
                                                         </div>
                                                     </div>
+                                                )}
+                                            </>) : (<>
+                                                {/* Manual: copiás el título y ponés el precio a mano (capitanbarato u otra web) */}
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <label className="block text-[10px] font-black uppercase text-muted/80 pl-1 mb-1">Título *</label>
+                                                        <input type="text" value={blmTitulo} onChange={e=>setBlmTitulo(e.target.value)} placeholder="Copiá el nombre del cómic/libro..." className="w-full bg-background border-2 border-border/50 px-3 py-2.5 rounded-xl text-sm font-bold text-text outline-none focus:border-orange-400"/>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <label className="block text-[10px] font-black uppercase text-muted/80 pl-1 mb-1">Editorial (opc.)</label>
+                                                            <input type="text" value={blmEditorial} onChange={e=>setBlmEditorial(e.target.value)} className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs text-text outline-none focus:border-orange-400"/>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[10px] font-black uppercase text-primary pl-1 mb-1">Precio Bs *</label>
+                                                            <input type="number" value={blPrecio} onChange={e=>setBlPrecio(e.target.value)} placeholder="0" className="w-full bg-primary/5 border border-primary/20 px-3 py-2.5 rounded-xl text-xs text-primary font-black outline-none font-mono text-center"/>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-black uppercase text-muted/80 pl-1 mb-1">Link (opc.)</label>
+                                                        <input type="text" value={blmLink} onChange={e=>setBlmLink(e.target.value)} placeholder="https://www.capitanbarato.com/..." className="w-full bg-background border border-border px-3 py-2.5 rounded-xl text-xs font-mono text-text outline-none focus:border-orange-400"/>
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-2 pl-1">Vos calculás el precio y lo ponés a mano. Se guarda en "Ya pedidos antes" para reusarlo.</p>
                                                 </div>
-                                            )}
+                                            </>)}
 
-                                            <button onClick={()=>addToCart()} disabled={!blData?.titulo || loading} className="w-full py-4 bg-orange-500 text-white font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg disabled:opacity-50">
+                                            <button onClick={()=>addToCart()} disabled={loading || (blModo==='auto' ? !blData?.titulo : !blmTitulo.trim())} className="w-full py-4 bg-orange-500 text-white font-black text-xs uppercase tracking-widest rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg disabled:opacity-50">
                                                 Añadir al Pedido
                                             </button>
                                         </div>
@@ -4075,9 +4121,9 @@ export default function ClientOrdersView() {
                                                                             <option value="ENTREGADO">ENTREGADO</option>
                                                                         </select>
                                                                     </td>
-                                                                </>) : c.source === 'buscalibre' ? (<>
+                                                                </>) : (c.source === 'buscalibre' || c.source === 'importado') ? (<>
                                                                 <td className="px-2 py-2.5 text-center">
-                                                                    <div className="text-[9px] font-black uppercase px-2 py-1.5 rounded-lg border bg-orange-500/5 border-orange-400/30 text-orange-500 flex items-center justify-center gap-1"><Link2 size={10}/> BUSCALIBRE</div>
+                                                                    <div className="text-[9px] font-black uppercase px-2 py-1.5 rounded-lg border bg-orange-500/5 border-orange-400/30 text-orange-500 flex items-center justify-center gap-1"><Link2 size={10}/> {c.source === 'importado' ? 'A PEDIDO' : 'BUSCALIBRE'}</div>
                                                                 </td>
                                                                 <td className="px-2 py-2.5 text-center">
                                                                     <div className="text-[9px] font-black uppercase px-2 py-1.5 rounded-lg border bg-muted/5 border-border/30 text-muted-2">MANUAL</div>
