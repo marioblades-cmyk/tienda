@@ -574,8 +574,9 @@ export default function ClientOrdersView() {
         return (
             <div className={`flex flex-col ${compact ? 'items-start' : 'items-center'} gap-0.5`}>
                 <div className="flex items-center gap-1">
+                    {it.socio_comic && <span title="Cómic — del socio" className="text-[11px] leading-none">🦸</span>}
                     <span
-                        onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
+                        onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id, socio_comic: it.socio_comic || false })}
                         className={`px-2 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-bold tracking-wide cursor-pointer border transition-colors whitespace-nowrap ${
                             it.estado === 'POR CONFIRMAR' ? 'bg-orange-500/20 border-orange-500 text-orange-400 animate-pulse font-black' :
                             it.estado === 'RECOTIZAR' ? 'bg-amber-100 border-amber-400 text-amber-700 animate-pulse font-black' :
@@ -878,6 +879,7 @@ export default function ClientOrdersView() {
                     monto_pagado: Number(addForm.monto_pagado) || 0,
                     pagoIndividual: 0, // Nuevo campo para control de pago inicial por ítem
                     nota: addForm.nota_item,
+                    socio_comic: !!addForm.socio_comic,
                     source: modoHistorico ? 'historico' : selectedStockSource,
                     hist_semana_id: modoHistorico ? (addForm.hist_semana_id || null) : undefined,
                     hist_estado: modoHistorico ? (addForm.hist_estado || 'PEDIDO') : undefined,
@@ -885,7 +887,7 @@ export default function ClientOrdersView() {
                 }]);
 
                 // Reset item fields
-                setAddForm({ ...addForm, titulo: '', catalog_id: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '' });
+                setAddForm({ ...addForm, titulo: '', catalog_id: '', product_id: '', precio_venta: '', descuento: '', precio_final: '', monto_pagado: '', nota_item: '', socio_comic: false });
                 setStockAnalysis(null);
                 setSelectedStockSource('');
                 setCatalogSuggestions([]);
@@ -1158,6 +1160,7 @@ export default function ClientOrdersView() {
                     monto_pagado: cItem.monto_pagado,
                     estado: estadoTarget,
                     nota: cItem.nota,
+                    socio_comic: !!cItem.socio_comic,
                     vendedor_id: user?.id
                 });
             }
@@ -1614,6 +1617,7 @@ export default function ClientOrdersView() {
                 estado: estadoFinal,
                 semana_id: editItem.semana_id || null,
                 nota: finalNota,
+                socio_comic: !!editItem.socio_comic,
             }).eq('id', editItem.id);
             audit.done(opId, 'EDITAR_ITEM', { resultado: 'completado', estado_final: estadoFinal });
             setEditItem(null);
@@ -2739,7 +2743,7 @@ export default function ClientOrdersView() {
                                                                 {!isCompact && <td className="py-3 px-3 text-[11px] text-muted max-w-[120px] truncate" title={it.nota}>{it.nota || '–'}</td>}
                                                                 <td className={`${isCompact ? 'py-1 px-1' : 'py-2 px-2'} text-right`}>
                                                                     <div className="flex items-center justify-end gap-0.5">
-                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
+                                                                    <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id, socio_comic: it.socio_comic || false })}
                                                                         className="text-muted hover:text-primary p-1 transition-colors opacity-0 group-hover:opacity-100">
                                                                         <Edit2 size={isCompact ? 12 : 14}/>
                                                                     </button>
@@ -3184,7 +3188,7 @@ export default function ClientOrdersView() {
                                                 <td className="px-6 py-4 text-center">
                                                     <div className="flex items-center justify-center gap-2">
                                                         <button 
-                                                            onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id })}
+                                                            onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', vendedor_id: it.vendedor_id, socio_comic: it.socio_comic || false })}
                                                             className="p-2 bg-primary/10 text-primary rounded-xl hover:bg-primary hover:text-white transition-all shadow-sm border border-primary/20"
                                                             title="Editar ítem"
                                                         >
@@ -3362,7 +3366,7 @@ export default function ClientOrdersView() {
                                     </td>
                                     <td className="p-4 text-right">
                                         <div className="flex items-center justify-end gap-1">
-                                        <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '' })}
+                                        <button onClick={() => setEditItem({ id: it.id, titulo: it.titulo, precio_venta: it.precio_venta, estado: /BUSCALIBRE|IMPORTADO/i.test(it.estado || '') ? it.estado : (it.estado || '').split(' ')[0], semana_id: it.semana_id || '', nota: it.nota || '', socio_comic: it.socio_comic || false })}
                                             className="text-muted hover:text-primary p-1 transition-colors">
                                             <Edit2 size={14}/>
                                         </button>
@@ -3543,6 +3547,11 @@ export default function ClientOrdersView() {
                                 <input type="text" value={editItem.nota} onChange={e => setEditItem({...editItem, nota: e.target.value})}
                                     className="w-full bg-background border border-border px-3 py-2 rounded-xl text-sm outline-none focus:border-primary" placeholder="Opcional..."/>
                             </div>
+                            <label className="flex items-center gap-2 cursor-pointer select-none bg-purple-500/5 border border-purple-500/20 rounded-xl px-3 py-2.5">
+                                <input type="checkbox" checked={!!editItem.socio_comic} onChange={e => setEditItem({...editItem, socio_comic: e.target.checked})} className="w-4 h-4 accent-purple-500"/>
+                                <span className="text-xs font-black text-purple-600">🦸 Cómic — del socio</span>
+                                <span className="text-[10px] text-muted ml-auto">este dinero es del socio</span>
+                            </label>
                         </div>
                         <div className="flex gap-2 pt-1">
                             <button onClick={() => setEditItem(null)} className="flex-1 py-2 rounded-xl text-sm font-bold text-muted bg-background border border-border hover:border-primary/40">Cancelar</button>
@@ -3809,6 +3818,11 @@ export default function ClientOrdersView() {
                                                 )}
                                             </div>
                                             )}
+
+                                            <label className="flex items-center gap-2 cursor-pointer select-none bg-purple-500/5 border border-purple-500/20 rounded-xl px-3 py-2">
+                                                <input type="checkbox" checked={!!addForm.socio_comic} onChange={e=>setAddForm({...addForm, socio_comic: e.target.checked})} className="w-4 h-4 accent-purple-500"/>
+                                                <span className="text-[11px] font-black text-purple-600">🦸 Cómic — del socio</span>
+                                            </label>
 
                                             <button onClick={()=>{
                                                 if(!modoHistorico && !selectedStockSource) return alert("Selecciona origen de stock");
