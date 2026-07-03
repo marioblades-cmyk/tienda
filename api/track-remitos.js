@@ -52,11 +52,13 @@ export default async function handler(req, res) {
         // Activos: de la fecha en adelante y aún no entregados
         const activos = remitos.filter(r => r.nro && String(r.fecha || '') >= DESDE_FECHA && !segMap[r.nro]?.entregado);
 
-        let cambios = 0, revisados = 0, avisados = 0;
+        let cambios = 0, revisados = 0, avisados = 0, guardados = 0, dbError = null;
+        const estados = [];
         for (const r of activos) {
             const estado = await estadoFlecha(r.nro);
             revisados++;
-            if (!estado) continue;
+            if (!estado) { estados.push({ nro: r.nro, estado: 'sin datos' }); continue; }
+            estados.push({ nro: r.nro, estado });
             const prev = segMap[r.nro]?.estado ?? null;
             const entregado = /entregad/i.test(estado);
             const primeraVez = !(r.nro in segMap);
@@ -69,7 +71,7 @@ export default async function handler(req, res) {
                 avisados++;
             }
 
-            await supabase.from('remito_seguimiento').upsert({
+            const { error: upErr } = await supabase.from('remito_seguimiento').upsert({
                 nro: r.nro,
                 pedido: r.pedido || null,
                 precio_remito: r.precio_remito ? String(r.precio_remito) : null,
@@ -78,9 +80,10 @@ export default async function handler(req, res) {
                 last_check: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             }, { onConflict: 'nro' });
+            if (upErr) dbError = upErr.message; else guardados++;
         }
 
-        res.status(200).json({ ok: true, activos: activos.length, revisados, cambios, avisados });
+        res.status(200).json({ ok: true, activos: activos.length, revisados, cambios, avisados, guardados, dbError, estados });
     } catch (e) {
         res.status(500).json({ error: e?.message || 'error' });
     }
