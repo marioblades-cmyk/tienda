@@ -9,7 +9,8 @@ const TELEGRAM_TOKEN = '8853375009:AAFB8TvpVxgwA5E3g11ifoJ5qGNR-5zVCSA';
 const TELEGRAM_CHAT = '6025198555';
 const FLECHA_TOKEN = 'DB1347515B35A29E391339D7F41AD05DB5E27CD0'; // token público del tracking de FlechaCarga
 const CRON_SECRET = 'mcb-remitos-2026';   // debe coincidir con el ?key= que pongas en cron-job.org
-const DESDE_FECHA = '2026-06-24';         // solo remitos de esta fecha en adelante (3737-10258)
+const VENTANA = 12;                       // mira solo los N remitos más recientes (para no revisar el historial viejo).
+                                          // De esos, sigue los que NO estén "Entregado"; al entregarse, deja de seguirlos.
 
 async function telegram(text) {
     try {
@@ -49,8 +50,16 @@ export default async function handler(req, res) {
         const segMap = {};
         (seg || []).forEach(s => { segMap[s.nro] = s; });
 
-        // Activos: de la fecha en adelante y aún no entregados
-        const activos = remitos.filter(r => r.nro && String(r.fecha || '') >= DESDE_FECHA && !segMap[r.nro]?.entregado);
+        // Activos: los VENTANA remitos más recientes que aún NO estén entregados
+        const recientes = remitos
+            .filter(r => r.nro)
+            .sort((a, b) => {
+                const fa = String(a.fecha || ''), fb = String(b.fecha || '');
+                if (fa !== fb) return fb.localeCompare(fa);      // fecha desc (más nuevo primero)
+                return (Number(b.id) || 0) - (Number(a.id) || 0); // desempate por id desc
+            })
+            .slice(0, VENTANA);
+        const activos = recientes.filter(r => !segMap[r.nro]?.entregado);
 
         let cambios = 0, revisados = 0, avisados = 0, guardados = 0, dbError = null;
         const estados = [];
