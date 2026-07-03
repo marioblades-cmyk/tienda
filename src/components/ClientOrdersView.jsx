@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, ChevronUp, Trash2, Edit2, Check, X, Box, RefreshCw, Info, Layers, Hash, Calendar, ArrowRight, Wallet, Lock, RotateCcw, AlertCircle, ShoppingCart, TrendingUp, Loader2, Link2 } from 'lucide-react';
 import { cotizarLink } from '../utils/buscalibre';
+import LiquidacionSocio from './LiquidacionSocio';
 import { useAuth } from '../hooks/useAuth';
 import { ffecha, fhora, ffechaLarga, fstamp } from '../utils/dateUtils';
 import { audit, newOpId } from '../services/auditLog';
@@ -2285,6 +2286,7 @@ export default function ClientOrdersView() {
                     <button onClick={()=>setView('hoja')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='hoja'?'bg-surface text-secondary shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>📋 Hoja de Pedido</button>
                     <button onClick={()=>setView('especiales')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='especiales'?'bg-purple-500/10 text-purple-600 shadow-sm ring-1 ring-purple-500/50':'text-muted hover:text-text'}`}>🇪🇸 España</button>
                     <button onClick={()=>setView('lista')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='lista'?'bg-surface text-muted shadow-sm ring-1 ring-border/50':'text-muted hover:text-text'}`}>Lista de Clientes</button>
+                    <button onClick={()=>setView('socio')} className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${view==='socio'?'bg-purple-500/10 text-purple-600 shadow-sm ring-1 ring-purple-500/50':'text-muted hover:text-text'}`}>🦸 Socio Cómics</button>
                 </div>
                 <div className="text-[10px] font-black text-muted uppercase tracking-widest hidden md:block">Gestión de Cartera de Clientes</div>
             </div>
@@ -2702,6 +2704,7 @@ export default function ClientOrdersView() {
                                                                         <div className="flex items-center gap-1.5">
                                                                             <Box size={isCompact ? 11 : 13} className="text-primary opacity-40 shrink-0" />
                                                                             <span className={isCompact ? 'text-xs' : ''}>{it.titulo}</span>
+                                                                            {it.socio_comic && <span title="Cómic — este dinero es del socio" className="shrink-0 text-[9px] font-black text-purple-600 bg-purple-500/10 border border-purple-500/25 rounded px-1.5 py-0.5 uppercase tracking-tight">🦸 Socio</span>}
                                                                         </div>
                                                                         {it.estado === 'ENTREGADO' && it.nota?.includes('✔ Entregado por') && (
                                                                             <div className="flex flex-wrap items-center gap-1 text-[10px] font-black text-primary bg-primary/5 px-2 py-0.5 rounded-md mt-1 w-fit border border-primary/10">
@@ -3211,6 +3214,8 @@ export default function ClientOrdersView() {
                         </table>
                     </div>
                 </div>
+            ) : view === 'socio' ? (
+                <LiquidacionSocio />
             ) : view === 'lista' ? (() => {
                 // Filtrar clientes según vendedor activo
                 const listaVendedorId = !isAdmin ? user?.id :
