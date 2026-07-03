@@ -1443,12 +1443,39 @@ export default function ClientOrdersView() {
         }
     };
 
+    // Ubica el turno donde se hizo un movimiento de caja (por su turno_id, o por la fecha si es QR sin turno)
+    const turnoDelMovimiento = async (cajaMovId) => {
+        if (!cajaMovId) return null;
+        const { data: mov } = await supabase.from('caja_movimientos').select('turno_id, created_at').eq('id', cajaMovId).maybeSingle();
+        if (!mov) return null;
+        if (mov.turno_id) {
+            const { data: t } = await supabase.from('turnos_caja').select('id, estado, abierto_at, cerrado_at').eq('id', mov.turno_id).maybeSingle();
+            return t || null;
+        }
+        // Pago sin turno (QR): ubicar el turno cuyo rango contiene la fecha del movimiento
+        const { data: ts } = await supabase.from('turnos_caja')
+            .select('id, estado, abierto_at, cerrado_at')
+            .lte('abierto_at', mov.created_at)
+            .order('abierto_at', { ascending: false }).limit(8);
+        return (ts || []).find(t => !t.cerrado_at || new Date(mov.created_at) <= new Date(t.cerrado_at)) || null;
+    };
+    const afectaEfectivo = (m) => /efectivo/i.test(m || '');
+
     const handleDeletePago = async (pago) => {
         const esAsignado = pago.concepto?.startsWith('Asignado a:');
 
         // Si es una sub-entrada "Asignado a:", usar la lógica de revertir asignación
         if (esAsignado) {
             return handleRevertirDistribucion(pago);
+        }
+
+        // Protección: no borrar un pago en EFECTIVO cuyo turno YA cerró (descuadraría el turno)
+        if (pago.caja_mov_id && afectaEfectivo(pago.metodo_pago)) {
+            const turno = await turnoDelMovimiento(pago.caja_mov_id);
+            if (turno && turno.estado === 'CERRADO') {
+                const dia = turno.abierto_at ? new Date(turno.abierto_at).toLocaleDateString('es-BO') : '';
+                return alert(`🚫 Este pago en EFECTIVO está en un turno YA CERRADO${dia ? ' (' + dia + ')' : ''}.\n\nNo se puede borrar — descuadraría un turno cerrado. Las correcciones a turnos cerrados se hacen con la herramienta de corrección.`);
+            }
         }
 
         if (!confirm(
@@ -1560,6 +1587,21 @@ export default function ClientOrdersView() {
         if (!editPago) return;
         const amt = round2(editPago.monto);
         if (!amt || amt <= 0) return alert('Monto inválido.');
+
+        // --- Protección de turnos cerrados ---
+        // Solo importa si el cambio afecta el EFECTIVO de un turno (monto o método efectivo).
+        const cambiaMonto = round2(editPago._origMonto || 0) !== amt;
+        const cambiaMetodo = (editPago.metodo_pago || '') !== (editPago._origMetodo || '');
+        const tocaEfectivo = afectaEfectivo(editPago._origMetodo) || afectaEfectivo(editPago.metodo_pago);
+        let turnoMov = null;
+        if ((cambiaMonto || cambiaMetodo) && tocaEfectivo && editPago.caja_mov_id) {
+            turnoMov = await turnoDelMovimiento(editPago.caja_mov_id);
+            if (turnoMov && turnoMov.estado === 'CERRADO') {
+                const dia = turnoMov.abierto_at ? new Date(turnoMov.abierto_at).toLocaleDateString('es-BO') : '';
+                return alert(`🚫 Ese pago está en un turno YA CERRADO${dia ? ' (' + dia + ')' : ''}.\n\nNo se puede cambiar el monto ni el método — descuadraría un turno cerrado y las aperturas siguientes.\n\nLas correcciones a turnos cerrados se hacen con la herramienta de corrección. (Podés editar solo la nota.)`);
+            }
+        }
+
         const opId = newOpId();
         audit.start(opId, { accion: 'EDITAR_PAGO', vendedor_id: user?.id, vendedor_nombre: vendNombre(), detalle: { pago_id: editPago.id, monto_nuevo: amt, caja_mov_id: editPago.caja_mov_id || null } });
         try {
@@ -1572,12 +1614,17 @@ export default function ClientOrdersView() {
             audit.step(opId, 'EDITAR_PAGO', 'update_cliente_pago', { pago_id: editPago.id, monto: amt });
             // Sincronizar con caja_movimientos si existe el vínculo
             if (editPago.caja_mov_id) {
-                await supabase.from('caja_movimientos').update({
+                const upd = {
                     monto: amt,
                     concepto: editPago.concepto,
                     metodo_pago: editPago.metodo_pago,
-                }).eq('id', editPago.caja_mov_id);
-                audit.step(opId, 'EDITAR_PAGO', 'update_caja_movimiento', { caja_mov_id: editPago.caja_mov_id, monto: amt });
+                };
+                // Si cambió el método: Efectivo entra al turno (abierto) del movimiento; QR/otro sale del turno
+                if (cambiaMetodo) {
+                    upd.turno_id = afectaEfectivo(editPago.metodo_pago) ? (turnoMov?.id || null) : null;
+                }
+                await supabase.from('caja_movimientos').update(upd).eq('id', editPago.caja_mov_id);
+                audit.step(opId, 'EDITAR_PAGO', 'update_caja_movimiento', { caja_mov_id: editPago.caja_mov_id, monto: amt, turno_id: upd.turno_id });
             }
             audit.done(opId, 'EDITAR_PAGO', { resultado: 'completado' });
             setEditPago(null);
@@ -2937,7 +2984,7 @@ export default function ClientOrdersView() {
                                                                                     {isExpanded ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
                                                                                 </button>
                                                                             )}
-                                                                            <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id })}
+                                                                            <button onClick={() => setEditPago({ id: p.id, concepto: p.concepto || '', monto: p.monto, metodo_pago: p.metodo_pago || 'Yasta (QR)', caja_mov_id: p.caja_mov_id, _origMonto: p.monto, _origMetodo: p.metodo_pago || 'Yasta (QR)' })}
                                                                                 title="Editar pago"
                                                                                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 text-muted hover:text-primary transition-all">
                                                                                 <Edit2 size={11} />
