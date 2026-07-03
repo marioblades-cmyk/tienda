@@ -29,6 +29,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [isExportingWithFormat, setIsExportingWithFormat] = useState(false);
     const [exportVerification, setExportVerification] = useState(null); // { success, msg, details: { systemQty, excelQty, systemTotal, excelTotal, titlesMatched, diff } }
     const [mayoreoDestino, setMayoreoDestino] = useState('');
+    const [mayoreoPausa, setMayoreoPausa] = useState([]);
 
 
     const EDITORIAL_DTOS = {
@@ -60,43 +61,61 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
 
     const semanaActualNombre = () => semanas.find(s => s.id === selectedSemana)?.nombre || 'esta semana';
 
-    // "No pedir esta semana": manda los PEDIDOS DE CLIENTES de la semana a la cola "Próximo Pedido".
+    // Mayoreo "en pausa" = pedidos mayoristas sin semana (no figuran en ninguna semana).
+    const fetchMayoreoPausa = async () => {
+        const { data } = await supabase.from('pedidos')
+            .select('id, vendedor_nombre, vendedor_id, created_at')
+            .eq('tipo', 'mayorista')
+            .is('semana_id', null)
+            .order('created_at', { ascending: false });
+        setMayoreoPausa(data || []);
+    };
+    useEffect(() => { fetchMayoreoPausa(); }, []);
+
+    // "No pedir esta semana": clientes → cola "Próximo Pedido"; mayoreo → pausa (sin semana, no figura).
     const noPedirEstaSemana = async () => {
         if (!selectedSemana) return;
         const nombre = semanaActualNombre();
-        if (!window.confirm(`¿NO pedir en "${nombre}"?\n\nTodos los PEDIDOS DE CLIENTES de esta semana pasarán a "Próximo Pedido" (cola) y entrarán en el siguiente pedido que armes.\n\n⚠️ El MAYOREO no se mueve (lo reubicás con el otro botón). Después podés cerrar la semana.`)) return;
+        if (!window.confirm(`¿NO pedir en "${nombre}"?\n\n• Los PEDIDOS DE CLIENTES pasan a "Próximo Pedido" (cola) y entran en el siguiente pedido.\n• El MAYOREO queda EN PAUSA (sin semana, no figura como pendiente). Lo reactivás cuando abras la próxima semana.\n\nDespués podés cerrar la semana.`)) return;
         setLoading(true);
         try {
-            const { data, error } = await supabase.from('cliente_items')
+            const { data: cli, error: e1 } = await supabase.from('cliente_items')
                 .update({ estado: 'PEDIDO (Siguiente)', semana_id: null })
                 .eq('semana_id', selectedSemana)
                 .like('estado', 'PEDIDO%')
                 .select('id');
-            if (error) throw error;
-            alert(`✅ Listo. ${data?.length || 0} pedido(s) de clientes movidos a "Próximo Pedido".\n\nAhora podés cerrar la semana. El mayoreo (si hay) reubicalo con el otro botón.`);
+            if (e1) throw e1;
+            const { data: may, error: e2 } = await supabase.from('pedidos')
+                .update({ semana_id: null })
+                .eq('semana_id', selectedSemana)
+                .eq('tipo', 'mayorista')
+                .select('id');
+            if (e2) throw e2;
+            alert(`✅ Listo.\n• ${cli?.length || 0} pedido(s) de clientes → Próximo Pedido.\n• ${may?.length || 0} pedido(s) de mayoreo → EN PAUSA.\n\nAhora podés cerrar la semana. El mayoreo lo reactivás cuando abras la próxima.`);
+            fetchMayoreoPausa();
             fetchConsolidado();
         } catch (e) { alert('Error: ' + (e.message || e)); }
         finally { setLoading(false); }
     };
 
-    // Mueve TODO el mayoreo de la semana actual a una semana destino (mantiene precios congelados).
-    const moverMayoreo = async () => {
-        if (!selectedSemana || !mayoreoDestino) { alert('Elegí la semana destino del mayoreo.'); return; }
-        if (mayoreoDestino === selectedSemana) { alert('El destino no puede ser la misma semana.'); return; }
+    // Reactiva TODO el mayoreo en pausa asignándolo a una semana (mantiene precios congelados).
+    const reactivarMayoreo = async () => {
+        if (!mayoreoDestino) { alert('Elegí la semana para reactivar el mayoreo.'); return; }
         const destNombre = semanas.find(s => s.id === mayoreoDestino)?.nombre || '';
-        if (!window.confirm(`¿Mover TODO el mayoreo de "${semanaActualNombre()}" → "${destNombre}"?\n\nSe mantienen los precios congelados.`)) return;
+        if (!window.confirm(`¿Reactivar ${mayoreoPausa.length} pedido(s) de mayoreo en pausa → "${destNombre}"?\n\nSe mantienen los precios congelados.`)) return;
         setLoading(true);
         try {
             const { data, error } = await supabase.from('pedidos')
                 .update({ semana_id: mayoreoDestino })
-                .eq('semana_id', selectedSemana)
+                .is('semana_id', null)
                 .eq('tipo', 'mayorista')
                 .select('id');
             if (error) throw error;
-            alert(`✅ Mayoreo movido a "${destNombre}" (${data?.length || 0} pedido[s]).`);
+            alert(`✅ Mayoreo reactivado en "${destNombre}" (${data?.length || 0} pedido[s]).`);
             setMayoreoDestino('');
+            fetchMayoreoPausa();
             fetchConsolidado();
-        } catch (e) { alert('Error al mover mayoreo: ' + (e.message || e)); }
+        } catch (e) { alert('Error al reactivar: ' + (e.message || e)); }
         finally { setLoading(false); }
     };
 
@@ -1274,18 +1293,30 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                         disabled={loading}
                                         className="w-full flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white p-2.5 rounded-xl text-[11px] font-black disabled:opacity-50 transition-all active:scale-95"
                                     >
-                                        🚫 No pedir → clientes a Próximo Pedido
+                                        🚫 No pedir esta semana
                                     </button>
+                                    <p className="text-[9px] text-muted leading-tight">Clientes → cola "Próximo Pedido". Mayoreo → EN PAUSA (no figura). Después cerrás la semana.</p>
+                                </div>
+                            )}
+
+                            {!sellerIdFilter && mayoreoPausa.length > 0 && (
+                                <div className="border-t border-purple-500/30 pt-3 space-y-2 bg-purple-500/5 -mx-1 px-2 pb-2 rounded-xl">
+                                    <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest">⏸️ Mayoreo en pausa ({mayoreoPausa.length})</p>
+                                    <div className="space-y-1 max-h-28 overflow-y-auto">
+                                        {mayoreoPausa.map(m => (
+                                            <div key={m.id} className="text-[10px] font-semibold text-text bg-background rounded-lg px-2 py-1 truncate">{m.vendedor_nombre || 'Mayorista'}</div>
+                                        ))}
+                                    </div>
                                     <div className="flex gap-1.5">
                                         <select value={mayoreoDestino} onChange={e => setMayoreoDestino(e.target.value)}
                                             className="flex-1 bg-background border border-border/60 p-2 rounded-xl text-[10px] font-semibold outline-none focus:border-primary">
-                                            <option value="">Mover mayoreo a…</option>
-                                            {semanas.filter(s => s.id !== selectedSemana).map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                            <option value="">Reactivar en semana…</option>
+                                            {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                                         </select>
-                                        <button onClick={moverMayoreo} disabled={loading || !mayoreoDestino}
-                                            className="bg-navy hover:bg-navy/90 text-white px-3 rounded-xl text-[10px] font-black disabled:opacity-50 transition-all">Mover</button>
+                                        <button onClick={reactivarMayoreo} disabled={loading || !mayoreoDestino}
+                                            className="bg-purple-600 hover:bg-purple-700 text-white px-3 rounded-xl text-[10px] font-black disabled:opacity-50 transition-all">Reactivar</button>
                                     </div>
-                                    <p className="text-[9px] text-muted leading-tight">Clientes → cola (entran al próximo pedido). Mayoreo → lo reubicás vos (mantiene precios). Después cerrás la semana.</p>
+                                    <p className="text-[9px] text-muted leading-tight">Cuando abras la próxima semana, elegíla acá y reactivá el mayoreo (mantiene precios).</p>
                                 </div>
                             )}
                             
