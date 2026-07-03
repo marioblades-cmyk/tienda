@@ -66,8 +66,8 @@ export default async function handler(req, res) {
         for (const r of activos) {
             const estado = await estadoFlecha(r.nro);
             revisados++;
-            if (!estado) { estados.push({ nro: r.nro, estado: 'sin datos' }); continue; }
-            estados.push({ nro: r.nro, estado });
+            if (!estado) { estados.push({ nro: r.nro, estado: 'sin datos', pedido: r.pedido || null, precio: r.precio_remito || null }); continue; }
+            estados.push({ nro: r.nro, estado, pedido: r.pedido || null, precio: r.precio_remito || null });
             const prev = segMap[r.nro]?.estado ?? null;
             const entregado = /entregad/i.test(estado);
             const primeraVez = !(r.nro in segMap);
