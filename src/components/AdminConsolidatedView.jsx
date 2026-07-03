@@ -28,6 +28,7 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
     const [isExportingWithFormat, setIsExportingWithFormat] = useState(false);
     const [exportVerification, setExportVerification] = useState(null); // { success, msg, details: { systemQty, excelQty, systemTotal, excelTotal, titlesMatched, diff } }
+    const [mayoreoDestino, setMayoreoDestino] = useState('');
 
 
     const EDITORIAL_DTOS = {
@@ -56,6 +57,48 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
     useEffect(() => {
         if (selectedSemana) fetchConsolidado();
     }, [selectedSemana]);
+
+    const semanaActualNombre = () => semanas.find(s => s.id === selectedSemana)?.nombre || 'esta semana';
+
+    // "No pedir esta semana": manda los PEDIDOS DE CLIENTES de la semana a la cola "Próximo Pedido".
+    const noPedirEstaSemana = async () => {
+        if (!selectedSemana) return;
+        const nombre = semanaActualNombre();
+        if (!window.confirm(`¿NO pedir en "${nombre}"?\n\nTodos los PEDIDOS DE CLIENTES de esta semana pasarán a "Próximo Pedido" (cola) y entrarán en el siguiente pedido que armes.\n\n⚠️ El MAYOREO no se mueve (lo reubicás con el otro botón). Después podés cerrar la semana.`)) return;
+        setLoading(true);
+        try {
+            const { data, error } = await supabase.from('cliente_items')
+                .update({ estado: 'PEDIDO (Siguiente)', semana_id: null })
+                .eq('semana_id', selectedSemana)
+                .like('estado', 'PEDIDO%')
+                .select('id');
+            if (error) throw error;
+            alert(`✅ Listo. ${data?.length || 0} pedido(s) de clientes movidos a "Próximo Pedido".\n\nAhora podés cerrar la semana. El mayoreo (si hay) reubicalo con el otro botón.`);
+            fetchConsolidado();
+        } catch (e) { alert('Error: ' + (e.message || e)); }
+        finally { setLoading(false); }
+    };
+
+    // Mueve TODO el mayoreo de la semana actual a una semana destino (mantiene precios congelados).
+    const moverMayoreo = async () => {
+        if (!selectedSemana || !mayoreoDestino) { alert('Elegí la semana destino del mayoreo.'); return; }
+        if (mayoreoDestino === selectedSemana) { alert('El destino no puede ser la misma semana.'); return; }
+        const destNombre = semanas.find(s => s.id === mayoreoDestino)?.nombre || '';
+        if (!window.confirm(`¿Mover TODO el mayoreo de "${semanaActualNombre()}" → "${destNombre}"?\n\nSe mantienen los precios congelados.`)) return;
+        setLoading(true);
+        try {
+            const { data, error } = await supabase.from('pedidos')
+                .update({ semana_id: mayoreoDestino })
+                .eq('semana_id', selectedSemana)
+                .eq('tipo', 'mayorista')
+                .select('id');
+            if (error) throw error;
+            alert(`✅ Mayoreo movido a "${destNombre}" (${data?.length || 0} pedido[s]).`);
+            setMayoreoDestino('');
+            fetchConsolidado();
+        } catch (e) { alert('Error al mover mayoreo: ' + (e.message || e)); }
+        finally { setLoading(false); }
+    };
 
     const fetchSemanas = async () => {
         const { data: raw } = await supabase.from('semanas').select('id, nombre, archivo_url, archivo_nombre').order('created_at', { ascending: false });
@@ -1221,6 +1264,29 @@ export default function AdminConsolidatedView({ sellerIdFilter = null }) {
                                 >
                                     <Download size={16} className="text-primary" /> EXPORTAR CONSOLIDADO
                                 </button>
+                            )}
+
+                            {!sellerIdFilter && selectedSemana && (
+                                <div className="border-t border-border/30 pt-3 space-y-2">
+                                    <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Semana sin pedido</p>
+                                    <button
+                                        onClick={noPedirEstaSemana}
+                                        disabled={loading}
+                                        className="w-full flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white p-2.5 rounded-xl text-[11px] font-black disabled:opacity-50 transition-all active:scale-95"
+                                    >
+                                        🚫 No pedir → clientes a Próximo Pedido
+                                    </button>
+                                    <div className="flex gap-1.5">
+                                        <select value={mayoreoDestino} onChange={e => setMayoreoDestino(e.target.value)}
+                                            className="flex-1 bg-background border border-border/60 p-2 rounded-xl text-[10px] font-semibold outline-none focus:border-primary">
+                                            <option value="">Mover mayoreo a…</option>
+                                            {semanas.filter(s => s.id !== selectedSemana).map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                                        </select>
+                                        <button onClick={moverMayoreo} disabled={loading || !mayoreoDestino}
+                                            className="bg-navy hover:bg-navy/90 text-white px-3 rounded-xl text-[10px] font-black disabled:opacity-50 transition-all">Mover</button>
+                                    </div>
+                                    <p className="text-[9px] text-muted leading-tight">Clientes → cola (entran al próximo pedido). Mayoreo → lo reubicás vos (mantiene precios). Después cerrás la semana.</p>
+                                </div>
                             )}
                             
                             {!sellerIdFilter && semanas.find(s => s.id === selectedSemana)?.archivo_url && (
