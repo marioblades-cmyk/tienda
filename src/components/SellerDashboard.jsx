@@ -325,6 +325,9 @@ export default function SellerDashboard({ isAdmin }) {
 
                         // Escaneo de propiedades de la celda:
                         
+                        // Entelequia marca "AGOTADO/CANCELADO" con la LETRA en rojo (no con el fondo).
+                        // Por eso se detecta SOLO por color de fuente; el relleno/fondo NO cuenta.
+
                         // A. Color de fuente directo
                         if (cell.font?.color && checkColor(cell.font.color)) return true;
 
@@ -332,10 +335,6 @@ export default function SellerDashboard({ isAdmin }) {
                         if (cell.value && cell.value.richText) {
                             if (cell.value.richText.some(rt => rt.font?.color && checkColor(rt.font.color))) return true;
                         }
-
-                        // C. Color de fondo (Fill)
-                        if (cell.fill?.fgColor && checkColor(cell.fill.fgColor)) return true;
-                        if (cell.fill?.bgColor && checkColor(cell.fill.bgColor)) return true;
 
                         return false;
                     };
