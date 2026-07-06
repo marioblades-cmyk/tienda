@@ -4937,8 +4937,12 @@ export default function ClientOrdersView() {
                                         if (!newSem) return;
                                         try {
                                             setLoading(true);
+                                            // "SIGUIENTE" = mandar a la cola "Próximo Pedido" (sin semana); si no, reprogramar a la semana elegida.
+                                            const updateObj = newSem === 'SIGUIENTE'
+                                                ? { semana_id: null, estado: 'PEDIDO (Siguiente)' }
+                                                : { semana_id: newSem, estado: 'PEDIDO (RE-PROG)' };
                                             const { error } = await supabase.from('cliente_items')
-                                                .update({ semana_id: newSem, estado: 'PEDIDO (RE-PROG)' })
+                                                .update(updateObj)
                                                 .eq('id', reprogrammingItem.id);
                                             if (error) throw error;
                                             setReprogrammingItem(null);
@@ -4950,7 +4954,8 @@ export default function ClientOrdersView() {
                                         }
                                     }}
                                 >
-                                    <option value="">-- Seleccionar Próxima Semana --</option>
+                                    <option value="">-- Seleccionar destino --</option>
+                                    <option value="SIGUIENTE">🚀 Próximo Pedido (cola, sin semana)</option>
                                     {semanas.map(s => (
                                         <option key={s.id} value={s.id}>{s.nombre}</option>
                                     ))}
