@@ -92,6 +92,7 @@ export default function ClientOrdersView() {
     const [showAllPayMethods, setShowAllPayMethods] = useState(false);
     const [showHistorial, setShowHistorial] = useState(false);
     const [reprogrammingItem, setReprogrammingItem] = useState(null);
+    const [reprogStock, setReprogStock] = useState(null); // análisis de stock/flotante del título a reprogramar
     const [recotizarItem, setRecotizarItem] = useState(null); // { item, precioNuevo } para modal de recotización
     const [recotizarPrecio, setRecotizarPrecio] = useState('');
     const [recotizarLoading, setRecotizarLoading] = useState(false);
@@ -1634,6 +1635,56 @@ export default function ClientOrdersView() {
             console.error(e);
             audit.error(opId, 'EDITAR_PAGO', 'EXCEPCION', e);
             alert('Error al editar el abono: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Al abrir el modal de reprogramar, analizar de dónde puede salir ese título (stock / flotantes)
+    useEffect(() => {
+        if (reprogrammingItem) {
+            setReprogStock(null);
+            analyzeStockForItem(reprogrammingItem.titulo).then(setReprogStock).catch(() => setReprogStock({ fisico: 0, flotantes: [] }));
+        }
+    }, [reprogrammingItem]);
+
+    // Aplica la reprogramación de un recorte según el origen elegido (stock físico / flotante / cola / semana abierta)
+    const aplicarReprograma = async (source) => {
+        if (!source || !reprogrammingItem) return;
+        const opId = newOpId();
+        audit.start(opId, { accion: 'REPROGRAMAR_ITEM', vendedor_id: user?.id, detalle: { item: reprogrammingItem.titulo, source } });
+        try {
+            setLoading(true);
+            let updateObj = {};
+            if (source === 'SIGUIENTE') {
+                updateObj = { semana_id: null, estado: 'PEDIDO (Siguiente)' };
+            } else if (source === 'fisico') {
+                // Adjudicar de stock físico: descontar 1 y marcar EN TIENDA
+                const { data: prod } = await supabase.from('catalogo_productos')
+                    .select('id, stock_fisico, titulo').ilike('titulo', reprogrammingItem.titulo).maybeSingle();
+                if (!prod || (prod.stock_fisico || 0) <= 0) { alert('Ya no hay stock físico de este título.'); setLoading(false); return; }
+                await supabase.from('catalogo_productos').update({ stock_fisico: prod.stock_fisico - 1, updated_at: new Date().toISOString() }).eq('id', prod.id);
+                await catalogService.logStockMovement({ productoId: prod.id, titulo: prod.titulo, delta: -1, stockDespues: prod.stock_fisico - 1, motivo: 'CAMBIO/REPOSICIÓN', detalle: `Reprograma recorte (${clientes.find(c => c.id === reprogrammingItem.cliente_id)?.nombre || 'cliente'})` }).catch(() => {});
+                updateObj = { semana_id: null, estado: 'EN TIENDA' };
+            } else if (source.startsWith('flotante_conf_')) {
+                const sid = source.replace('flotante_conf_', '');
+                const wName = semanas.find(s => s.id === sid)?.nombre || '';
+                updateObj = { semana_id: sid, estado: `CONFIRMADO ${wName}`.trim() };
+            } else if (source.startsWith('flotante_noc_') || source.startsWith('pedido_')) {
+                const sid = source.replace('flotante_noc_', '').replace('pedido_', '');
+                const wName = semanas.find(s => s.id === sid)?.nombre || '';
+                updateObj = { semana_id: sid, estado: `PEDIDO ${wName}`.trim() };
+            }
+            const { error } = await supabase.from('cliente_items').update(updateObj).eq('id', reprogrammingItem.id);
+            if (error) throw error;
+            audit.done(opId, 'REPROGRAMAR_ITEM', { estado: updateObj.estado });
+            if (typeof catalogService !== 'undefined') catalogService.clearCache();
+            setReprogrammingItem(null);
+            setReprogStock(null);
+            await fetchData();
+        } catch (err) {
+            audit.error(opId, 'REPROGRAMAR_ITEM', 'EXCEPCION', err);
+            alert('Error al reprogramar: ' + err.message);
         } finally {
             setLoading(false);
         }
@@ -4929,37 +4980,31 @@ export default function ClientOrdersView() {
                         
                         <div className="space-y-4">
                             <div>
-                                <label className="text-[10px] font-black text-muted uppercase block mb-1">Nueva Semana de Despacho</label>
-                                <select 
-                                    className="w-full bg-background border border-border p-3 rounded-xl text-sm font-bold text-text"
-                                    onChange={async (e) => {
-                                        const newSem = e.target.value;
-                                        if (!newSem) return;
-                                        try {
-                                            setLoading(true);
-                                            // "SIGUIENTE" = mandar a la cola "Próximo Pedido" (sin semana); si no, reprogramar a la semana elegida.
-                                            const updateObj = newSem === 'SIGUIENTE'
-                                                ? { semana_id: null, estado: 'PEDIDO (Siguiente)' }
-                                                : { semana_id: newSem, estado: 'PEDIDO (RE-PROG)' };
-                                            const { error } = await supabase.from('cliente_items')
-                                                .update(updateObj)
-                                                .eq('id', reprogrammingItem.id);
-                                            if (error) throw error;
-                                            setReprogrammingItem(null);
-                                            await fetchData();
-                                        } catch (err) {
-                                            alert("Error al reprogramar: " + err.message);
-                                        } finally {
-                                            setLoading(false);
-                                        }
-                                    }}
-                                >
-                                    <option value="">-- Seleccionar destino --</option>
-                                    <option value="SIGUIENTE">🚀 Próximo Pedido (cola, sin semana)</option>
-                                    {semanas.map(s => (
-                                        <option key={s.id} value={s.id}>{s.nombre}</option>
-                                    ))}
-                                </select>
+                                <label className="text-[10px] font-black text-muted uppercase block mb-1">¿De dónde sale la unidad?</label>
+                                {!reprogStock ? (
+                                    <div className="flex items-center gap-2 text-xs text-muted p-3"><RefreshCw size={14} className="animate-spin" /> Buscando stock y unidades en camino…</div>
+                                ) : (
+                                    <select
+                                        className="w-full bg-background border border-border p-3 rounded-xl text-sm font-bold text-text"
+                                        defaultValue=""
+                                        onChange={(e) => aplicarReprograma(e.target.value)}
+                                    >
+                                        <option value="">-- Elegí el origen --</option>
+                                        {reprogStock.fisico > 0 && (
+                                            <option value="fisico">✨ Stock físico ({reprogStock.fisico}) — entrega ya</option>
+                                        )}
+                                        {(reprogStock.flotantes || []).map(f => (
+                                            <option key={f.id} value={f.isConfirmed ? `flotante_conf_${f.id}` : `flotante_noc_${f.id}`}>
+                                                🛳️ {f.isConfirmed ? '✅' : '⏳'} {f.nombre} ({f.qty} u. en camino)
+                                            </option>
+                                        ))}
+                                        <option value="SIGUIENTE">🚀 Próximo Pedido (cola)</option>
+                                        {semanas.filter(s => s.abierta).map(s => (
+                                            <option key={s.id} value={`pedido_${s.id}`}>📂 Pedir para {s.nombre} (abierta)</option>
+                                        ))}
+                                    </select>
+                                )}
+                                <p className="text-[10px] text-muted mt-2 leading-tight">✨ stock = ya · 🛳️ en camino = flotante · 🚀 cola = próximo pedido · 📂 abiertas = pedir fresco.</p>
                             </div>
                         </div>
                         
