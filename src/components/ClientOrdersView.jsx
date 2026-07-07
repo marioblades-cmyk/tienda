@@ -379,49 +379,54 @@ export default function ClientOrdersView() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            // Define base queries
-            let itemsQuery = supabase.from('cliente_items').select('*, clientes(*)');
-            let pagosQuery = supabase.from('cliente_pagos').select('*');
-            let othersQuery = null;
-
-            if (!isAdmin && user?.id) {
-                // Si el filtro es 'todos', permitimos ver ítems de otros socios
-                if (filterVendedor === 'todos') {
-                    // No filtramos por vendedor_id en itemsQuery para que la búsqueda sea global
-                } else {
-                    itemsQuery = itemsQuery.or(`vendedor_id.eq.${user.id},vendedor_id.is.null,estado.eq.POR CONFIRMAR`);
+            // Supabase corta en 1000 filas por request. Las tablas grandes (items, pagos,
+            // clientes) se traen paginando para que los saldos NO salgan cortados.
+            const fetchAll = async (makeQuery) => {
+                const PAGE = 1000;
+                let from = 0, all = [];
+                for (;;) {
+                    const { data, error } = await makeQuery()
+                        .order('created_at', { ascending: false })
+                        .range(from, from + PAGE - 1);
+                    if (error) throw error;
+                    all = all.concat(data || []);
+                    if (!data || data.length < PAGE) break;
+                    from += PAGE;
                 }
+                return all;
+            };
 
-                
-                // IMPORTANTE: Pagos siempre deben ser globales para el cliente para calcular deuda real,
-                // pero por seguridad limitamos a los clientes que el vendedor puede ver.
-                // Sin embargo, para simplificar y asegurar consistencia, cargaremos pagos sin filtrar por vendedor_id.
-                // pagosQuery = siempre carga todos los abonos para que el saldo sea veraz.
-                
-                // Búsqueda de otros socios (para coordinación de envíos/entregas cuando no estamos en 'todos')
-                if (filterVendedor !== 'todos') {
-                    othersQuery = supabase.from('cliente_items')
-                        .select('id, cliente_id, vendedor_id, titulo, precio_venta, monto_pagado, estado, semana_id')
-                        .neq('vendedor_id', user.id)
-                        .neq('estado', 'ENTREGADO');
+            const restringidoPorVendedor = !isAdmin && user?.id && filterVendedor !== 'todos';
+
+            const makeItemsQuery = () => {
+                let q = supabase.from('cliente_items').select('*, clientes(*)');
+                if (restringidoPorVendedor) {
+                    q = q.or(`vendedor_id.eq.${user.id},vendedor_id.is.null,estado.eq.POR CONFIRMAR`);
                 }
-            }
+                return q;
+            };
+            // Pagos SIEMPRE globales por cliente (para calcular deuda/crédito real, sin cortar)
+            const makePagosQuery = () => supabase.from('cliente_pagos').select('*');
+            const makeOthersQuery = restringidoPorVendedor
+                ? () => supabase.from('cliente_items')
+                    .select('id, cliente_id, vendedor_id, titulo, precio_venta, monto_pagado, estado, semana_id')
+                    .neq('vendedor_id', user.id)
+                    .neq('estado', 'ENTREGADO')
+                : null;
 
-            const [clientesRes, semanasRes, itemsRes, pagosRes, othersRes, vendedoresRes] = await Promise.all([
-                supabase.from('clientes').select('*').order('created_at', { ascending: false }),
+            const [clientesData, semanasRes, itemsData, pagosData, othersData, vendedoresRes] = await Promise.all([
+                fetchAll(() => supabase.from('clientes').select('*')),
                 supabase.from('semanas').select('*').order('created_at', { ascending: false }),
-                itemsQuery.order('created_at', { ascending: false }),
-                pagosQuery.order('created_at', { ascending: false }),
-                othersQuery ? othersQuery : Promise.resolve({ data: [] }),
+                fetchAll(makeItemsQuery),
+                fetchAll(makePagosQuery),
+                makeOthersQuery ? fetchAll(makeOthersQuery) : Promise.resolve([]),
                 supabase.from('vendedores').select('id, nombre, email').order('nombre')
             ]);
 
-            if (clientesRes.error) throw clientesRes.error;
-
-            setClientes(clientesRes.data || []);
-            setItems(itemsRes.data || []);
-            setOtherSellersItems(othersRes.data || []);
-            setPagos(pagosRes.data || []);
+            setClientes(clientesData || []);
+            setItems(itemsData || []);
+            setOtherSellersItems(othersData || []);
+            setPagos(pagosData || []);
             // Excluir las "ventas desde stock" (son ventas a mayoristas, no semanas de pedido de clientes)
             setSemanas((semanasRes.data || []).filter(s => {
                 const u = (s.nombre || '').toUpperCase();
