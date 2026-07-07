@@ -104,6 +104,16 @@ export default function ClientOrdersView() {
     
     // Helper para obtener abonos reales (excluyendo distribuciones/asignaciones)
     const getPagosRaiz = (list, cid) => (list || []).filter(p => p.cliente_id === cid && !p.concepto?.startsWith('Asignado a:'));
+    // Sub-entradas "Asignado a:" de un cliente (dinero de un abono ya imputado a un tomo)
+    const getAsignaciones = (list, cid) => (list || []).filter(p => p.cliente_id === cid && p.concepto?.startsWith('Asignado a:'));
+    // Crédito general a cuenta = dinero que entró por abono y todavía NO se imputó a ningún ítem.
+    // Se compara abonos vs asignaciones (NO vs monto_pagado) para no contaminar con pagos históricos
+    // que viven solo en cliente_items.monto_pagado y nunca tuvieron un abono raíz.
+    const creditoGeneral = (list, cid) => {
+        const abonos = getPagosRaiz(list, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
+        const asignado = getAsignaciones(list, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
+        return Math.max(0, abonos - asignado);
+    };
     const [editPago, setEditPago] = useState(null); // { id, concepto, monto, metodo_pago, caja_mov_id }
     const [modoHistorico, setModoHistorico] = useState(false);
     const [histSemana, setHistSemana] = useState(''); // semana_id para modo histórico
@@ -1264,8 +1274,9 @@ export default function ClientOrdersView() {
                 // 5.2 Lógica según Modo de Pago
                 if (orderPayMode === 'items') {
                     // Crear registro RAÍZ en cliente_pagos por el total pagado ahora
+                    let rootPagoId = null;
                     if (totalAbonoCalculado > 0) {
-                        await supabase.from('cliente_pagos').insert([{
+                        const { data: rootPago } = await supabase.from('cliente_pagos').insert([{
                             cliente_id: clienteId,
                             monto: totalAbonoCalculado,
                             concepto: modoHistorico
@@ -1275,10 +1286,12 @@ export default function ClientOrdersView() {
                             metodo_pago: orderMethod,
                             referencia: null,
                             caja_mov_id: cajaMovId,
-                        }]);
+                        }]).select('id').single();
+                        rootPagoId = rootPago?.id || null;
                     }
 
-                    // Distribución: crear sub-entries vinculadas al nuevo root via caja_mov_id
+                    // Distribución: crear sub-entries vinculadas al nuevo root.
+                    // referencia = rootPagoId engancha la asignación al abono incluso si caja_mov_id es null.
                     for (let idx = 0; idx < cart.length; idx++) {
                         const cItemInput = cart[idx];
                         const dbItem = (insertedItems || [])[idx];
@@ -1290,7 +1303,7 @@ export default function ClientOrdersView() {
                                 .update({ monto_pagado: round2((Number(dbItem.monto_pagado) || 0) + amt) })
                                 .eq('id', dbItem.id);
 
-                            // Crear sub-entry vinculada al nuevo root (mismo caja_mov_id)
+                            // Crear sub-entry vinculada al nuevo root (por referencia + caja_mov_id)
                             await supabase.from('cliente_pagos').insert([{
                                 cliente_id: clienteId,
                                 monto: amt,
@@ -1298,6 +1311,7 @@ export default function ClientOrdersView() {
                                 vendedor_id: user?.id,
                                 metodo_pago: orderMethod,
                                 caja_mov_id: cajaMovId,
+                                referencia: rootPagoId,
                             }]);
                         }
                     }
@@ -2044,8 +2058,7 @@ export default function ClientOrdersView() {
         });
         let valorTotal = 0, cobrado = 0, porCobrar = 0;
         Object.entries(porCliente).forEach(([cid, d]) => {
-            const abonos = getPagosRaiz(pagos, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
-            const saldoAFavor = Math.max(0, abonos - d.pagItemsAll); // abonos no aplicados a ningún ítem
+            const saldoAFavor = creditoGeneral(pagos, cid); // abono a cuenta aún no imputado a ningún ítem
             const pagadoActivo = d.pagItemsAct + saldoAFavor;        // lo abonado aplicable a lo pendiente
             valorTotal += d.ventasAct;
             cobrado    += Math.min(d.ventasAct, pagadoActivo);       // adelantos sobre lo pendiente
@@ -2209,7 +2222,6 @@ export default function ClientOrdersView() {
 
     const sendWhatsApp = (client, type, manualItems = null) => {
         const cliItems = items.filter(i => i.cliente_id === client.id);
-        const cliPagos = getPagosRaiz(pagos, client.id).reduce((s,p) => s + Number(p.monto), 0);
 
         // Helper de ordenamiento por serie + número de volumen
         const sortByTitle = (arr) => [...arr].sort((a, b) => {
@@ -2235,9 +2247,8 @@ export default function ClientOrdersView() {
         // pItmActivo es el abono aplicado a los ítems que vamos a mostrar
         const pItmAsignadoSet = activeItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
         
-        // El verdadero abono general es lo que se recibió en caja menos lo que ya se asignó a TODOS los ítems
-        const pItmTotalGlobal = cliItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
-        const saldoGralSinAsignar = Math.max(0, cliPagos - pItmTotalGlobal);
+        // Crédito a cuenta = abonos − asignaciones (no contra monto_pagado, para no borrar pagos históricos)
+        const saldoGralSinAsignar = creditoGeneral(pagos, client.id);
 
         // Cálculos de deuda según el tipo de mensaje
         let deuda;
@@ -2554,8 +2565,9 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        // balanceDisponible usa allPagadoItems (todos los ítems) para no inflarse artificialmente
-                        const balanceDisponible = Math.max(0, group.pagos - (group.allPagadoItems ?? cPagItems));
+                        // Crédito a cuenta = abonos − asignaciones (no se compara contra monto_pagado
+                        // para no borrar pagos históricos que solo viven en los ítems).
+                        const balanceDisponible = creditoGeneral(pagos, group.client.id);
                         const totalPagado = cPagItems + balanceDisponible;
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
@@ -2986,6 +2998,11 @@ export default function ClientOrdersView() {
                                                 return disp === 0 && subs.length > 0 && subs.every(s => entregadoConceptos.has(s.concepto));
                                             });
                                             const raicesVisibles = showAll ? raices : raices.filter(p => !raicesOcultas.includes(p));
+                                            // El "disponible" mostrado por abono nunca puede superar el crédito real del
+                                            // cliente. Repartimos el crédito del más nuevo al más viejo. Así, aunque haya
+                                            // asignaciones históricas sin enganchar, un cliente sobre-asignado muestra
+                                            // "asignado total" (correcto) en vez de un disponible falso.
+                                            let creditoRestante = creditoGeneral(pagos, group.client.id);
                                             return (
                                                 <div className="mt-3 pt-3 border-t border-border/40">
                                                     <div className="text-[9px] font-black uppercase text-muted tracking-widest mb-2 flex items-center gap-2">
@@ -2996,7 +3013,10 @@ export default function ClientOrdersView() {
                                                         {raicesVisibles.map(p => {
                                                             const subs = subEntradas.filter(s => s.referencia === p.id || (s.caja_mov_id && s.caja_mov_id === p.caja_mov_id));
                                                             const totalAsignado = subs.reduce((s, sub) => s + Number(sub.monto || 0), 0);
-                                                            const disponible = Math.max(0, Number(p.monto) - totalAsignado);
+                                                            const rawDisponible = Math.max(0, Number(p.monto) - totalAsignado);
+                                                            // Capar al crédito real del cliente (evita disponible falso por asignaciones históricas sin enganchar)
+                                                            const disponible = Math.min(rawDisponible, creditoRestante);
+                                                            creditoRestante = Math.max(0, creditoRestante - disponible);
                                                             const isExpanded = expandedRoots.has(p.id);
                                                             return (
                                                                 <div key={p.id} className="rounded-xl border border-border/30 overflow-hidden">
@@ -3018,14 +3038,12 @@ export default function ClientOrdersView() {
                                                                         <div className="flex items-center gap-1 ml-2 shrink-0">
                                                                             <div className="text-right">
                                                                                 <div className="text-success font-black text-xs font-mono">+BS {formatS(p.monto)}</div>
-                                                                                {disponible > 0 && (subs.length > 0 || balanceDisponible > 0) && (
-                                                                                    <div className="text-[8px] font-bold text-orange-500">Disp: BS {formatS(disponible)}</div>
-                                                                                )}
-                                                                                {disponible > 0 && subs.length === 0 && balanceDisponible === 0 && (
-                                                                                    <div className="text-[8px] text-muted">✓ Aplicado</div>
+                                                                                {/* Estado del pago = SOLO según lo asignado de ESTE abono (no el balance global) */}
+                                                                                {disponible > 0 && (
+                                                                                    <div className="text-[8px] font-bold text-orange-500">Disponible: BS {formatS(disponible)}</div>
                                                                                 )}
                                                                                 {disponible === 0 && subs.length > 0 && (
-                                                                                    <div className="text-[8px] text-muted">Asignado total</div>
+                                                                                    <div className="text-[8px] text-muted">✓ Asignado total</div>
                                                                                 )}
                                                                             </div>
                                                                             {subs.length > 0 && (
