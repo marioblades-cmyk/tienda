@@ -104,15 +104,13 @@ export default function ClientOrdersView() {
     
     // Helper para obtener abonos reales (excluyendo distribuciones/asignaciones)
     const getPagosRaiz = (list, cid) => (list || []).filter(p => p.cliente_id === cid && !p.concepto?.startsWith('Asignado a:'));
-    // Sub-entradas "Asignado a:" de un cliente (dinero de un abono ya imputado a un tomo)
-    const getAsignaciones = (list, cid) => (list || []).filter(p => p.cliente_id === cid && p.concepto?.startsWith('Asignado a:'));
-    // Crédito general a cuenta = dinero que entró por abono y todavía NO se imputó a ningún ítem.
-    // Se compara abonos vs asignaciones (NO vs monto_pagado) para no contaminar con pagos históricos
-    // que viven solo en cliente_items.monto_pagado y nunca tuvieron un abono raíz.
-    const creditoGeneral = (list, cid) => {
-        const abonos = getPagosRaiz(list, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
-        const asignado = getAsignaciones(list, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
-        return Math.max(0, abonos - asignado);
+    // Crédito a cuenta = dinero recibido (abonos) que todavía NO está imputado a ningún ítem.
+    // = abonos − monto_pagado(todos los ítems del cliente). Con los datos COMPLETOS (paginados)
+    // esto vale tanto para plata salida de abonos como para pagos históricos directos al ítem.
+    const creditoGeneral = (cid) => {
+        const abonos = getPagosRaiz(pagos, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
+        const pagItems = (items || []).filter(i => i.cliente_id === cid).reduce((s, i) => s + Number(i.monto_pagado || 0), 0);
+        return Math.max(0, abonos - pagItems);
     };
     const [editPago, setEditPago] = useState(null); // { id, concepto, monto, metodo_pago, caja_mov_id }
     const [modoHistorico, setModoHistorico] = useState(false);
@@ -2063,7 +2061,8 @@ export default function ClientOrdersView() {
         });
         let valorTotal = 0, cobrado = 0, porCobrar = 0;
         Object.entries(porCliente).forEach(([cid, d]) => {
-            const saldoAFavor = creditoGeneral(pagos, cid); // abono a cuenta aún no imputado a ningún ítem
+            const abonos = getPagosRaiz(pagos, cid).reduce((s, p) => s + Number(p.monto || 0), 0);
+            const saldoAFavor = Math.max(0, abonos - d.pagItemsAll); // abono recibido aún no imputado a ítems
             const pagadoActivo = d.pagItemsAct + saldoAFavor;        // lo abonado aplicable a lo pendiente
             valorTotal += d.ventasAct;
             cobrado    += Math.min(d.ventasAct, pagadoActivo);       // adelantos sobre lo pendiente
@@ -2252,8 +2251,8 @@ export default function ClientOrdersView() {
         // pItmActivo es el abono aplicado a los ítems que vamos a mostrar
         const pItmAsignadoSet = activeItems.reduce((s,i) => s + Number(i.monto_pagado), 0);
         
-        // Crédito a cuenta = abonos − asignaciones (no contra monto_pagado, para no borrar pagos históricos)
-        const saldoGralSinAsignar = creditoGeneral(pagos, client.id);
+        // Crédito a cuenta = abonos − monto_pagado(todos los ítems). Con datos completos es correcto.
+        const saldoGralSinAsignar = creditoGeneral(client.id);
 
         // Cálculos de deuda según el tipo de mensaje
         let deuda;
@@ -2570,9 +2569,8 @@ export default function ClientOrdersView() {
                         }, {});
                         const cVentas = group.totalVentas;
                         const cPagItems = group.totalPagadoItems;
-                        // Crédito a cuenta = abonos − asignaciones (no se compara contra monto_pagado
-                        // para no borrar pagos históricos que solo viven en los ítems).
-                        const balanceDisponible = creditoGeneral(pagos, group.client.id);
+                        // Crédito a cuenta = abonos − monto_pagado(todos los ítems). Con datos completos es correcto.
+                        const balanceDisponible = creditoGeneral(group.client.id);
                         const totalPagado = cPagItems + balanceDisponible;
                         const cDeuda = Math.max(0, cVentas - totalPagado);
 
@@ -3007,7 +3005,7 @@ export default function ClientOrdersView() {
                                             // cliente. Repartimos el crédito del más nuevo al más viejo. Así, aunque haya
                                             // asignaciones históricas sin enganchar, un cliente sobre-asignado muestra
                                             // "asignado total" (correcto) en vez de un disponible falso.
-                                            let creditoRestante = creditoGeneral(pagos, group.client.id);
+                                            let creditoRestante = creditoGeneral(group.client.id);
                                             return (
                                                 <div className="mt-3 pt-3 border-t border-border/40">
                                                     <div className="text-[9px] font-black uppercase text-muted tracking-widest mb-2 flex items-center gap-2">
