@@ -1087,27 +1087,28 @@ export default function ClientOrdersView() {
             // 1. Check or Create Client
             let clienteId = null;
             let cliMatch = clientes.find(c => c.celular === addForm.celular);
+            const up = (v) => (v || '').trim().toUpperCase();
             if (cliMatch) {
                 clienteId = cliMatch.id;
                 // Update client data if something new was provided (optional but good)
                 await supabase.from('clientes').update({
-                    nombre: addForm.nombre || cliMatch.nombre,
-                    ci: addForm.ci || cliMatch.ci,
-                    ciudad: addForm.ciudad || cliMatch.ciudad,
-                    sucursal: addForm.sucursal || cliMatch.sucursal,
-                    direccion: addForm.direccion || cliMatch.direccion,
+                    nombre: addForm.nombre ? up(addForm.nombre) : cliMatch.nombre,
+                    ci: addForm.ci ? up(addForm.ci) : cliMatch.ci,
+                    ciudad: addForm.ciudad ? up(addForm.ciudad) : cliMatch.ciudad,
+                    sucursal: addForm.sucursal ? up(addForm.sucursal) : cliMatch.sucursal,
+                    direccion: addForm.direccion ? up(addForm.direccion) : cliMatch.direccion,
                     notas: addForm.notas_cliente || cliMatch.notas
                 }).eq('id', clienteId);
             } else {
-                // If no name provided, use "Cliente [Celular]"
-                const finalNombre = addForm.nombre || `Cliente ${addForm.celular}`;
+                // If no name provided, use "Cliente [Celular]" (placeholder, no se toca)
+                const finalNombre = addForm.nombre ? up(addForm.nombre) : `Cliente ${addForm.celular}`;
                 const { data: newCli, error: cliErr } = await supabase.from('clientes').insert([{
                     nombre: finalNombre,
                     celular: addForm.celular,
-                    ci: addForm.ci,
-                    ciudad: addForm.ciudad,
-                    sucursal: addForm.sucursal,
-                    direccion: addForm.direccion,
+                    ci: up(addForm.ci),
+                    ciudad: up(addForm.ciudad),
+                    sucursal: up(addForm.sucursal),
+                    direccion: up(addForm.direccion),
                     notas: addForm.notas_cliente
                 }]).select().single();
                 if (cliErr) throw cliErr;
@@ -1564,13 +1565,17 @@ export default function ClientOrdersView() {
         audit.start(opId, { accion: 'EDITAR_CLIENTE', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: editCliente.id, cliente_nombre: editCliente.nombre, detalle: { celular: editCliente.celular, ci: editCliente.ci, ciudad: editCliente.ciudad } });
         try {
             setLoading(true);
+            // Guardar en MAYÚSCULAS (menos "Cliente 12345", que es un placeholder del sistema)
+            const up = (v) => (v || '').trim().toUpperCase();
+            const nombreTrim = (editCliente.nombre || '').trim();
+            const nombreFinal = /^Cliente\s/i.test(nombreTrim) ? nombreTrim : up(nombreTrim);
             const { error } = await supabase.from('clientes').update({
-                nombre: editCliente.nombre.trim(),
+                nombre: nombreFinal,
                 celular: editCliente.celular?.trim() || '',
-                ci: editCliente.ci?.trim() || '',
-                ciudad: editCliente.ciudad?.trim() || '',
-                sucursal: editCliente.sucursal?.trim() || '',
-                direccion: editCliente.direccion?.trim() || '',
+                ci: up(editCliente.ci),
+                ciudad: up(editCliente.ciudad),
+                sucursal: up(editCliente.sucursal),
+                direccion: up(editCliente.direccion),
             }).eq('id', editCliente.id);
             if (error) { audit.error(opId, 'EDITAR_CLIENTE', 'update', error); throw error; }
             audit.done(opId, 'EDITAR_CLIENTE', { resultado: 'completado' });
@@ -3558,7 +3563,7 @@ export default function ClientOrdersView() {
                             <div className="col-span-2">
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Nombre *</label>
                                 <input value={editCliente.nombre} onChange={e => setEditCliente({...editCliente, nombre: e.target.value})}
-                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary" autoFocus/>
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary uppercase" autoFocus/>
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Celular</label>
@@ -3568,22 +3573,22 @@ export default function ClientOrdersView() {
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">CI</label>
                                 <input value={editCliente.ci} onChange={e => setEditCliente({...editCliente, ci: e.target.value})}
-                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary font-mono"/>
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary font-mono uppercase"/>
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Ciudad</label>
                                 <input value={editCliente.ciudad} onChange={e => setEditCliente({...editCliente, ciudad: e.target.value})}
-                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary uppercase"/>
                             </div>
                             <div>
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Sucursal</label>
                                 <input value={editCliente.sucursal} onChange={e => setEditCliente({...editCliente, sucursal: e.target.value})}
-                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary uppercase"/>
                             </div>
                             <div className="col-span-2">
                                 <label className="block text-[10px] font-black uppercase text-muted mb-1">Dirección</label>
                                 <input value={editCliente.direccion} onChange={e => setEditCliente({...editCliente, direccion: e.target.value})}
-                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary"/>
+                                    className="w-full bg-background border border-border px-3 py-2 rounded-lg text-sm outline-none focus:border-primary uppercase"/>
                             </div>
                         </div>
                         <div className="flex justify-end gap-3 pt-1">
