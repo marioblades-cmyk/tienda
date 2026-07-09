@@ -1556,7 +1556,7 @@ export default function MayoristaUpload() {
                                             <div className="bg-slate-50 p-4 rounded-2xl text-navy border border-slate-100 shadow-inner"><Package size={24} /></div>
                                             <div>
                                                 <h4 className="font-black text-navy uppercase text-sm tracking-tight">{pedido.semana?.nombre}</h4>
-                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{new Date(pedido.created_at).toLocaleDateString()} • {pedido.items.length} Títulos</p>
+                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{new Date(pedido.created_at).toLocaleDateString()} • {pedido.items.length} Títulos • {pedido.items.filter(it => !(it.estado?.includes('RECORTADO') || it.estado === 'CANCELADO')).reduce((s, it) => s + (it.cantidad || 0), 0)} libros a enviar</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-8 px-8 border-x border-slate-100">
