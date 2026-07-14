@@ -21,12 +21,35 @@ async function telegram(text) {
     } catch { /* si Telegram falla, no cortamos el resto */ }
 }
 
-// Consulta el estado de un remito en FlechaCarga. Devuelve el texto del estado (o null).
+// Consulta el estado de un envío en FlechaCarga. Devuelve el texto del estado (o null).
+// Soporta 2 formatos:
+//   • Códigos nuevos "FLC..." → API de guías (NroGuia), estado en resultado.bultosEstadoTracking[].operacion
+//   • Códigos viejos "R-..."  → API empresar-sys (numero=R-), estado en template.titulo
 async function estadoFlecha(nro) {
-    const numero = 'R-' + nro;
+    const codigo = String(nro || '').trim();
+    const headers = { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.flechacarga.com/' };
+
+    // ── Formato nuevo: código de guía "FLC..." ──
+    if (/^FLC/i.test(codigo)) {
+        const url = `https://api.flechacarga.com/FlcInterface/api/Guia/ObtenerSegunGuia?NroGuia=${encodeURIComponent(codigo)}&Token=${FLECHA_TOKEN}`;
+        try {
+            const r = await fetch(url, { headers });
+            const j = await r.json();
+            const eventos = j?.resultado?.bultosEstadoTracking;
+            if (Array.isArray(eventos) && eventos.length) {
+                // El evento más reciente (por fecha) marca el estado actual
+                const ultimo = eventos.reduce((a, b) => (new Date(b.fecha) > new Date(a.fecha) ? b : a));
+                return ultimo.operacion || null;
+            }
+        } catch { /* sin estado */ }
+        return null;
+    }
+
+    // ── Formato viejo: remito "R-..." (compatibilidad) ──
+    const numero = 'R-' + codigo;
     const url = `https://rest.empresar-sys.com.ar:1433/convenios/estadoDelivery/template?numero=${encodeURIComponent(numero)}&token=${FLECHA_TOKEN}`;
     try {
-        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.flechacarga.com/' } });
+        const r = await fetch(url, { headers });
         const j = await r.json();
         if (j?.estado === 1 && j?.template?.titulo) {
             // "Encomiendas - Buspack -En Agencia Destino" → último tramo = "En Agencia Destino"
