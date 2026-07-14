@@ -94,12 +94,17 @@ export default async function handler(req, res) {
             const prev = segMap[r.nro]?.estado ?? null;
             const entregado = /entregad/i.test(estado);
             const primeraVez = !(r.nro in segMap);
+            const label = /^FLC/i.test(String(r.nro || '')) ? r.nro : 'R-' + r.nro;
+            const precio = r.precio_remito ? ` · $${Number(r.precio_remito).toLocaleString('es-AR')}` : '';
 
-            // Avisar solo cuando CAMBIA (no en el primer registro, para no floodear al arranque)
-            if (!primeraVez && estado !== prev) {
+            if (primeraVez) {
+                // Primera vez que se detecta este envío → avisar su estado inicial (una sola vez)
+                await telegram(`🆕 <b>${r.pedido || 'Pedido'}</b>\nGuía <b>${label}</b>${precio}\n📍 Estado inicial: <b>${estado}</b>${entregado ? '\n🎉 ¡ENTREGADO!' : ''}`);
+                avisados++;
+            } else if (estado !== prev) {
+                // Cambio de estado → avisar
                 cambios++;
-                const precio = r.precio_remito ? ` · $${Number(r.precio_remito).toLocaleString('es-AR')}` : '';
-                await telegram(`📦 <b>${r.pedido || 'Pedido'}</b>\nRemito <b>R-${r.nro}</b>${precio}\n🔄 Estado: <b>${estado}</b>${entregado ? '\n🎉 ¡ENTREGADO!' : ''}`);
+                await telegram(`📦 <b>${r.pedido || 'Pedido'}</b>\nGuía <b>${label}</b>${precio}\n🔄 Estado: <b>${estado}</b>${entregado ? '\n🎉 ¡ENTREGADO!' : ''}`);
                 avisados++;
             }
 
