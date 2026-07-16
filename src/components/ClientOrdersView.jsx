@@ -5,7 +5,7 @@ import { Search, Plus, ShoppingBag, CheckSquare, MessageCircle, ChevronDown, Che
 import { cotizarLink } from '../utils/buscalibre';
 import LiquidacionSocio from './LiquidacionSocio';
 import { useAuth } from '../hooks/useAuth';
-import { ffecha, fhora, ffechaLarga, fstamp } from '../utils/dateUtils';
+import { ffecha, fhora, ffechaLarga, ffechaHora, fstamp } from '../utils/dateUtils';
 import { audit, newOpId } from '../services/auditLog';
 
 export default function ClientOrdersView() {
@@ -3047,7 +3047,7 @@ export default function ClientOrdersView() {
                                                                                 <div className="text-[9px] text-muted flex items-center gap-1">
                                                                                     <span>{p.metodo_pago || 'Efectivo'}</span>
                                                                                     <span>·</span>
-                                                                                    <span>{ffecha(p.fecha || p.created_at)}</span>
+                                                                                    <span>{ffechaHora(p.created_at)}</span>
                                                                                     <span>·</span>
                                                                                     <span className="font-black text-primary uppercase">{vendedores.find(v => v.id === p.vendedor_id)?.nombre?.split(' ')[0] || 'Socio'}</span>
                                                                                 </div>
@@ -3091,7 +3091,7 @@ export default function ClientOrdersView() {
                                                                                         <span className="text-muted text-xs pl-2">↳</span>
                                                                                         <div className="min-w-0">
                                                                                             <div className="text-[9px] font-bold text-muted truncate">{s.concepto.replace('Asignado a: ', '')}</div>
-                                                                                            <div className="text-[8px] text-muted/70">{ffecha(s.fecha || s.created_at)}</div>
+                                                                                            <div className="text-[8px] text-muted/70">{ffechaHora(s.created_at)}</div>
                                                                                         </div>
                                                                                     </div>
                                                                                     <div className="flex items-center gap-1.5 shrink-0">
