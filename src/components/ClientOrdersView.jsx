@@ -587,7 +587,7 @@ export default function ClientOrdersView() {
         if (!compact) {
             if (isFloating && week) {
                 const d = week.fecha_estimada_llegada ? new Date(week.fecha_estimada_llegada) : new Date(new Date(week.created_at).getTime() + (22*24*60*60*1000));
-                dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
+                dateStr = d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short', timeZone: 'UTC' });
             } else if (it.estado === 'PEDIDO (Siguiente)') {
                 const now = new Date();
                 const diff = (6 - now.getDay() + 7) % 7 || 7;
@@ -2299,7 +2299,7 @@ export default function ClientOrdersView() {
             const d = week.fecha_estimada_llegada
                 ? new Date(week.fecha_estimada_llegada)
                 : new Date(new Date(week.created_at).getTime() + 22 * 24 * 60 * 60 * 1000);
-            return d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
+            return d.toLocaleDateString('es-BO', { day: 'numeric', month: 'short', timeZone: 'UTC' });
         };
 
         const getStatLabel = (it) => {
@@ -4360,7 +4360,7 @@ export default function ClientOrdersView() {
                                                                             }
                                                                             
                                                                             if (!date) return "---";
-                                                                            return new Date(date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
+                                                                            return new Date(date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', timeZone: 'UTC' }).toUpperCase();
                                                                         })()}
                                                                     </div>
                                                                 </td>
@@ -5105,7 +5105,7 @@ export default function ClientOrdersView() {
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="text-[10px] font-black uppercase text-navy leading-none mb-1">{f.nombre}</div>
-                                                        <div className="text-[9px] text-muted font-bold italic">Arribo estimado: {f.fechaArribo.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' })}</div>
+                                                        <div className="text-[9px] text-muted font-bold italic">Arribo estimado: {f.fechaArribo.toLocaleDateString('es-BO', { day: 'numeric', month: 'short', timeZone: 'UTC' })}</div>
                                                     </div>
                                                 </div>
                                             ))}
