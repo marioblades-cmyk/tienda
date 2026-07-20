@@ -265,7 +265,7 @@ export default function ClientOrdersView() {
         }
     };
 
-    const handleResolveDamage = async (method) => {
+    const handleResolveDamage = async (method, targetWeek = null) => {
         if (!damageTarget || !user) return;
         const opId = newOpId();
         audit.start(opId, { accion: 'RESOLVER_DANO', vendedor_id: user?.id, vendedor_nombre: vendNombre(), cliente_id: damageTarget.client?.id, cliente_nombre: damageTarget.client?.nombre, detalle: { item: damageTarget.item?.titulo, metodo: method } });
@@ -334,9 +334,10 @@ export default function ClientOrdersView() {
                 });
 
             } else {
-                // método === 'PEDIDO'
-                const openWeek = semanas.find(s => s.abierta);
-                if (!openWeek) throw new Error("No hay ninguna semana abierta para realizar el pedido de reposición.");
+                // método === 'PEDIDO' → semana específica elegida (targetWeek, ej. un "próximo arribo")
+                // o, si no se eligió ninguna, la semana abierta por defecto.
+                const week = targetWeek || semanas.find(s => s.abierta);
+                if (!week) throw new Error("No hay ninguna semana disponible para la reposición. Elegí un próximo arribo o abrí una semana.");
 
                 // 2. Crear reposición como PEDIDO con el saldo transferido
                 const { error: err2 } = await supabase
@@ -349,8 +350,8 @@ export default function ClientOrdersView() {
                         product_id: item.product_id,
                         precio_venta: item.precio_venta,
                         monto_pagado: originalMonto,
-                        estado: `PEDIDO ${openWeek.nombre}`,
-                        semana_id: openWeek.id,
+                        estado: `PEDIDO ${week.nombre}`,
+                        semana_id: week.id,
                         nota: `Reposición de ítem #${originalId.slice(0,5)} (Saldo de original)`
                     }]);
                 if (err2) throw err2;
@@ -5093,10 +5094,14 @@ export default function ClientOrdersView() {
 
                                 {damageStockAnalysis?.flotantes.length > 0 && (
                                     <div className="mt-4 pt-4 border-t border-border space-y-2">
-                                        <span className="text-[9px] font-bold text-muted uppercase tracking-tighter block mb-1">Próximos Arribos:</span>
+                                        <span className="text-[9px] font-bold text-muted uppercase tracking-tighter block mb-1">Próximos Arribos <span className="text-navy/60">— tocá uno para asignar la reposición a esa semana</span>:</span>
                                         <div className="grid grid-cols-1 gap-2">
                                             {damageStockAnalysis.flotantes.map((f, i) => (
-                                                <div key={i} className="bg-white border border-border p-3 rounded-2xl flex items-center gap-4 shadow-sm hover:border-navy/20 transition-colors">
+                                                <button key={i}
+                                                    onClick={() => !resolvingDamage && handleResolveDamage('PEDIDO', { id: f.id, nombre: f.nombre })}
+                                                    disabled={resolvingDamage}
+                                                    title={`Asignar la reposición a ${f.nombre}`}
+                                                    className="w-full text-left bg-white border border-border p-3 rounded-2xl flex items-center gap-3 shadow-sm hover:border-navy hover:bg-navy/5 transition-colors disabled:opacity-50">
                                                     <div className="text-center shrink-0">
                                                         <div className={`text-xs font-black px-2 py-1 rounded-lg ${f.isConfirmed ? 'bg-orange-500 text-white shadow-sm shadow-orange-200' : 'bg-muted/20 text-muted'}`}>
                                                             +{f.qty}
@@ -5107,7 +5112,8 @@ export default function ClientOrdersView() {
                                                         <div className="text-[10px] font-black uppercase text-navy leading-none mb-1">{f.nombre}</div>
                                                         <div className="text-[9px] text-muted font-bold italic">Arribo estimado: {f.fechaArribo.toLocaleDateString('es-BO', { day: 'numeric', month: 'short', timeZone: 'UTC' })}</div>
                                                     </div>
-                                                </div>
+                                                    <span className="text-[9px] font-black text-navy uppercase shrink-0 whitespace-nowrap">Asignar →</span>
+                                                </button>
                                             ))}
                                         </div>
                                     </div>
