@@ -221,14 +221,22 @@ function MovimientosTab({ turnoActivo }) {
     const fetchMovimientos = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('caja_movimientos')
-                .select('*')
-                .gte('created_at', dateFrom + 'T00:00:00-04:00')
-                .lte('created_at', dateTo + 'T23:59:59-04:00')
-                .order('created_at', { ascending: false });
-            if (error) throw error;
-            setMovimientos(data || []);
+            // Paginar: sin esto Supabase corta en 1000 filas y los totales/balance salen incompletos.
+            const PAGE = 1000; let from = 0; let all = [];
+            while (true) {
+                const { data, error } = await supabase
+                    .from('caja_movimientos')
+                    .select('*')
+                    .gte('created_at', dateFrom + 'T00:00:00-04:00')
+                    .lte('created_at', dateTo + 'T23:59:59-04:00')
+                    .order('created_at', { ascending: false })
+                    .range(from, from + PAGE - 1);
+                if (error) throw error;
+                all = all.concat(data || []);
+                if (!data || data.length < PAGE) break;
+                from += PAGE;
+            }
+            setMovimientos(all);
         } catch (e) { console.error(e); }
         finally { setLoading(false); }
     };
@@ -655,11 +663,27 @@ function ConciliacionTab() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [movsRes, configRes, histRes, turnosRes] = await Promise.all([
-                supabase.from('caja_movimientos')
-                    .select('tipo, monto, metodo_pago')
-                    .gte('created_at', dateFrom + 'T00:00:00-04:00')
-                    .lte('created_at', dateTo + 'T23:59:59-04:00'),
+            // Paginar caja_movimientos: Supabase corta en 1000 filas → las sumas quedan
+            // incompletas (era el bug de los números "paralizados"/cortados de la conciliación).
+            // Traemos TODAS las páginas para que los saldos calculados sean reales.
+            const fetchAllMovs = async () => {
+                const PAGE = 1000; let from = 0; let all = [];
+                while (true) {
+                    const { data, error } = await supabase.from('caja_movimientos')
+                        .select('tipo, monto, metodo_pago')
+                        .gte('created_at', dateFrom + 'T00:00:00-04:00')
+                        .lte('created_at', dateTo + 'T23:59:59-04:00')
+                        .order('created_at', { ascending: true })
+                        .range(from, from + PAGE - 1);
+                    if (error) throw error;
+                    all = all.concat(data || []);
+                    if (!data || data.length < PAGE) break;
+                    from += PAGE;
+                }
+                return all;
+            };
+            const [movs, configRes, histRes, turnosRes] = await Promise.all([
+                fetchAllMovs(),
                 supabase.from('conciliacion_config').select('*'),
                 supabase.from('conciliacion_historial')
                     .select('*')
@@ -673,7 +697,7 @@ function ConciliacionTab() {
                     .order('abierto_at', { ascending: false })
                     .limit(1),
             ]);
-            setMovimientos(movsRes.data || []);
+            setMovimientos(movs);
             // Mapear config a { metodo: saldo_inicial }
             const cfg = {};
             (configRes.data || []).forEach(r => { cfg[r.metodo] = r.saldo_inicial; });
