@@ -25,8 +25,9 @@ function calcCostoUnidad(r, confMap, rows) {
     if (totalBS <= 0) return null;                    // remito aún sin cargar
 
     // Si varias filas comparten el mismo nro de remito (pedidos despachados juntos),
-    // se suman las unidades y el envío de TODAS las confirmaciones involucradas,
-    // no solo la de esta fila, para no inflar el costo/unidad de un despacho combinado.
+    // se suman las UNIDADES de todas las confirmaciones involucradas (cada pedido trae
+    // sus propios libros), pero el ENVÍO se cuenta una sola vez: es un cargo por
+    // despacho, no por pedido, así que sumarlo por cada fila lo duplicaría.
     const nro = (r.nro || '').trim();
     const filasCompartidas = nro && rows ? rows.filter(x => (x.nro || '').trim() === nro) : [r];
 
@@ -37,7 +38,7 @@ function calcCostoUnidad(r, confMap, rows) {
         const conf = confMap[mm[1].trim()];
         if (conf && conf.unidades) {
             unidades += conf.unidades;
-            envioArs += num(conf.envio);
+            envioArs = Math.max(envioArs, num(conf.envio));
             huboConf = true;
         }
     });
