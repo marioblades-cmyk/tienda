@@ -112,6 +112,21 @@ export default function AdminWeeklyView() {
         else fetchSemanas();
     };
 
+    const toggleCancelSemana = async (semana) => {
+        const cancelando = semana.estado_recepcion !== 'cancelado';
+        if (cancelando && !confirm(`¿Cancelar "${semana.nombre}"? El pedido nunca se realizó, así que desaparecerá de Información de Confirmaciones (pero no se borra nada).`)) return;
+        const { error } = await supabase
+            .from('semanas')
+            .update({
+                estado_recepcion: cancelando ? 'cancelado' : 'pendiente',
+                ...(cancelando ? { abierta: false } : {}),
+            })
+            .eq('id', semana.id);
+
+        if (error) alert(error.message);
+        else fetchSemanas();
+    };
+
     const handleDateUpdate = async (id) => {
         if (!tempDate) return;
         const { error } = await supabase
@@ -427,6 +442,11 @@ export default function AdminWeeklyView() {
                                     <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${s.abierta ? 'bg-success/10 text-success border border-success/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
                                         {s.abierta ? 'ABIERTA' : 'CERRADA'}
                                     </span>
+                                    {s.estado_recepcion === 'cancelado' && (
+                                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-danger/20 text-danger border border-danger/30">
+                                            CANCELADO
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-4 text-[11px] font-mono font-medium text-muted-2">
                                     {editingDateId === s.id ? (
@@ -491,6 +511,16 @@ export default function AdminWeeklyView() {
                                 >
                                     {s.abierta ? <Lock size={14} /> : <Unlock size={14} />}
                                     {s.abierta ? 'CERRAR' : 'ABRIR'}
+                                </button>
+
+                                <button
+                                    onClick={() => toggleCancelSemana(s)}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded text-xs font-bold transition-colors ${s.estado_recepcion === 'cancelado' ? 'bg-success/10 text-success hover:bg-success/20' : 'bg-danger/10 text-danger hover:bg-danger/20'
+                                        }`}
+                                    title={s.estado_recepcion === 'cancelado' ? 'Reactivar este pedido/semana' : 'El pedido nunca se realizó: marcarlo como cancelado'}
+                                >
+                                    <XCircle size={14} />
+                                    {s.estado_recepcion === 'cancelado' ? 'REACTIVAR' : 'CANCELAR'}
                                 </button>
 
                                 {s.abierta && pendingOrders > 0 && (

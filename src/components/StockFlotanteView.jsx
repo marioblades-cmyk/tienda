@@ -104,9 +104,12 @@ export default function ConfirmationInfoView() {
                 return total;
             })();
             // Excluir las "ventas desde stock" (son ventas a mayoristas, no arribos/confirmaciones del distribuidor)
+            // y las semanas/pedidos cancelados (el pedido nunca se llegó a realizar).
             const weeks = (weeksRes.data || []).filter(w => {
                 const u = (w.nombre || '').toUpperCase();
-                return !(u.includes('VENTA') && u.includes('STOCK'));
+                if (u.includes('VENTA') && u.includes('STOCK')) return false;
+                if (w.estado_recepcion === 'cancelado') return false;
+                return true;
             });
             const masters = mastersRes.data || [];
 
