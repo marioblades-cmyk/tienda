@@ -245,11 +245,34 @@ function MovimientosTab({ turnoActivo }) {
 
     const handleDeleteMov = async (mov) => {
         const label = mov.concepto || mov.categoria || 'Movimiento';
-        if (!confirm(`¿Eliminar este movimiento?\n${label} — BS ${formatS(mov.monto)}${mov.categoria === 'Cobro Pedido' ? '\n\nTambién se eliminará el abono en Pedidos Clientes.' : ''}`)) return;
+        let avisoExtra = '';
+        if (mov.categoria === 'Cobro Pedido') avisoExtra = '\n\nTambién se eliminará el abono en Pedidos Clientes.';
+        else if (mov.categoria === 'Préstamo Otorgado') avisoExtra = '\n\nEste movimiento es el origen de un préstamo: se eliminará TAMBIÉN el préstamo completo y todos sus pagos registrados.';
+        else if (mov.categoria === 'Cobro Préstamo') avisoExtra = '\n\nTambién se eliminará el pago registrado en Préstamos (y el préstamo volverá a ACTIVO si estaba cerrado).';
+        if (!confirm(`¿Eliminar este movimiento?\n${label} — BS ${formatS(mov.monto)}${avisoExtra}`)) return;
         try {
             // Si es Cobro Pedido, eliminar también en cliente_pagos (por caja_mov_id)
             if (mov.categoria === 'Cobro Pedido') {
                 await supabase.from('cliente_pagos').delete().eq('caja_mov_id', mov.id);
+            } else if (mov.categoria === 'Préstamo Otorgado') {
+                // Este movimiento ES el préstamo: eliminar el préstamo, sus pagos y los movimientos de esos pagos
+                const { data: prestamo } = await supabase.from('prestamos').select('id').eq('caja_mov_id', mov.id).maybeSingle();
+                if (prestamo) {
+                    const { data: pagos } = await supabase.from('prestamos_pagos').select('caja_mov_id').eq('prestamo_id', prestamo.id);
+                    const movIds = (pagos || []).map(p => p.caja_mov_id).filter(Boolean);
+                    if (movIds.length > 0) await supabase.from('caja_movimientos').delete().in('id', movIds);
+                    await supabase.from('prestamos').delete().eq('id', prestamo.id);
+                }
+            } else if (mov.categoria === 'Cobro Préstamo') {
+                // Eliminar solo ese pago y reabrir el préstamo si correspondía
+                const { data: pago } = await supabase.from('prestamos_pagos').select('id, prestamo_id').eq('caja_mov_id', mov.id).maybeSingle();
+                if (pago) {
+                    await supabase.from('prestamos_pagos').delete().eq('id', pago.id);
+                    const { data: prestamo } = await supabase.from('prestamos').select('estado').eq('id', pago.prestamo_id).maybeSingle();
+                    if (prestamo?.estado === 'CERRADO') {
+                        await supabase.from('prestamos').update({ estado: 'ACTIVO' }).eq('id', pago.prestamo_id);
+                    }
+                }
             }
             await supabase.from('caja_movimientos').delete().eq('id', mov.id);
             fetchMovimientos();
@@ -278,6 +301,30 @@ function MovimientosTab({ turnoActivo }) {
                     concepto: editMov.concepto,
                     metodo_pago: editMov.metodo_pago,
                 }).eq('caja_mov_id', editMov.id);
+            } else if (editMov.categoria === 'Préstamo Otorgado') {
+                // Sincronizar con el préstamo (monto prestado y método de origen)
+                await supabase.from('prestamos').update({
+                    monto_original: amt,
+                    metodo_origen: editMov.metodo_pago,
+                }).eq('caja_mov_id', editMov.id);
+            } else if (editMov.categoria === 'Cobro Préstamo') {
+                // Sincronizar con el pago del préstamo y recalcular su estado
+                const { data: pago } = await supabase.from('prestamos_pagos')
+                    .update({ monto: amt, metodo_pago: editMov.metodo_pago })
+                    .eq('caja_mov_id', editMov.id)
+                    .select('prestamo_id')
+                    .maybeSingle();
+                if (pago?.prestamo_id) {
+                    const { data: prestamo } = await supabase.from('prestamos')
+                        .select('monto_original, estado').eq('id', pago.prestamo_id).single();
+                    const { data: pagosPrestamo } = await supabase.from('prestamos_pagos')
+                        .select('monto').eq('prestamo_id', pago.prestamo_id);
+                    const totalPagado = (pagosPrestamo || []).reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+                    const nuevoEstado = totalPagado >= (prestamo?.monto_original || 0) - 0.01 ? 'CERRADO' : 'ACTIVO';
+                    if (prestamo && nuevoEstado !== prestamo.estado) {
+                        await supabase.from('prestamos').update({ estado: nuevoEstado }).eq('id', pago.prestamo_id);
+                    }
+                }
             }
             setEditMov(null);
             fetchMovimientos();
@@ -1469,8 +1516,20 @@ function EgresosTab({ turnoActivo }) {
     };
 
     const handleDeleteEgreso = async (egreso) => {
-        if (!window.confirm(`¿Eliminar este egreso?\n${egreso.concepto || egreso.categoria} — BS ${formatS(egreso.monto)}`)) return;
+        const avisoExtra = egreso.categoria === 'Préstamo Otorgado'
+            ? '\n\nEste movimiento es el origen de un préstamo: se eliminará TAMBIÉN el préstamo completo y todos sus pagos registrados.'
+            : '';
+        if (!window.confirm(`¿Eliminar este egreso?\n${egreso.concepto || egreso.categoria} — BS ${formatS(egreso.monto)}${avisoExtra}`)) return;
         try {
+            if (egreso.categoria === 'Préstamo Otorgado') {
+                const { data: prestamo } = await supabase.from('prestamos').select('id').eq('caja_mov_id', egreso.id).maybeSingle();
+                if (prestamo) {
+                    const { data: pagos } = await supabase.from('prestamos_pagos').select('caja_mov_id').eq('prestamo_id', prestamo.id);
+                    const movIds = (pagos || []).map(p => p.caja_mov_id).filter(Boolean);
+                    if (movIds.length > 0) await supabase.from('caja_movimientos').delete().in('id', movIds);
+                    await supabase.from('prestamos').delete().eq('id', prestamo.id);
+                }
+            }
             const { error } = await supabase.from('caja_movimientos').delete().eq('id', egreso.id);
             if (error) throw error;
             // Si es Pago Distribuidor, sincronizar eliminando el pago del historial del distribuidor
@@ -1512,6 +1571,12 @@ function EgresosTab({ turnoActivo }) {
                 metodo_pago: editEgreso.metodo_pago,
             }).eq('id', editEgreso.id);
             if (error) throw error;
+            if (editEgreso.categoria === 'Préstamo Otorgado') {
+                await supabase.from('prestamos').update({
+                    monto_original: amt,
+                    metodo_origen: editEgreso.metodo_pago,
+                }).eq('caja_mov_id', editEgreso.id);
+            }
             setEditEgreso(null);
             showMsg('Egreso actualizado.');
             fetchRecientes();
