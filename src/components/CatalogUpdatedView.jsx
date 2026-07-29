@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy, Star, Download } from 'lucide-react';
+import { Database, Search, Filter, RefreshCw, CheckCircle2, AlertCircle, Info, RotateCcw, ShoppingCart, Image as ImageIcon, X, Truck, Clock, Trash2, Zap, Plus, Copy, Star, Download, MessageCircle } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { useAuth } from '../hooks/useAuth';
@@ -65,6 +65,18 @@ const CatalogUpdatedView = () => {
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isLoadingFloating, setIsLoadingFloating] = useState(false);
     const [priceLevels, setPriceLevels] = useState([5, 10, 15]);
+
+    // Envío de disponibilidad/precio al cliente por WhatsApp (selección múltiple)
+    const [isSendAvailabilityOpen, setIsSendAvailabilityOpen] = useState(false);
+    const [waIncludeStock, setWaIncludeStock] = useState(true);
+    const [waIncludePedido, setWaIncludePedido] = useState(true);
+    const [waPriceLevel, setWaPriceLevel] = useState('retail'); // retail | n1 | n2 | n3 | mayoreo
+    const [waPedidoACotizar, setWaPedidoACotizar] = useState(true); // los "a pedido" muestran "a cotizar" en vez de precio fijo (el dólar varía)
+    const [waClienteQuery, setWaClienteQuery] = useState('');
+    const [waClienteResults, setWaClienteResults] = useState([]);
+    const [waSearching, setWaSearching] = useState(false);
+    const [waSelectedCliente, setWaSelectedCliente] = useState(null);
+    const [waManualPhone, setWaManualPhone] = useState('');
 
     // RESET GLOBAL DE STOCK (Admin Only)
     const handleGlobalStockReset = async () => {
@@ -421,6 +433,133 @@ const CatalogUpdatedView = () => {
             else next.add(productId);
             return next;
         });
+    };
+
+    // ── Consulta de precio/disponibilidad para clientes (WhatsApp, selección múltiple) ──
+    const openSendAvailability = () => {
+        if (selectedForQuote.size === 0) return;
+        setIsSendAvailabilityOpen(true);
+        setWaIncludeStock(true);
+        setWaIncludePedido(true);
+        setWaPriceLevel('retail');
+        setWaPedidoACotizar(true);
+        setWaClienteQuery('');
+        setWaClienteResults([]);
+        setWaSelectedCliente(null);
+        setWaManualPhone('');
+    };
+
+    const searchWaClientes = async (query) => {
+        setWaClienteQuery(query);
+        setWaSelectedCliente(null);
+        if (!query || query.trim().length < 2) {
+            setWaClienteResults([]);
+            return;
+        }
+        setWaSearching(true);
+        try {
+            const { data, error } = await supabase
+                .from('clientes')
+                .select('id, nombre, celular')
+                .or(`nombre.ilike.%${query.trim()}%,celular.ilike.%${query.trim()}%`)
+                .limit(10);
+            if (error) throw error;
+            setWaClienteResults(data || []);
+        } catch (err) {
+            console.error('Error buscando clientes:', err);
+        } finally {
+            setWaSearching(false);
+        }
+    };
+
+    // 'stock' = hay unidades físicas en tienda | 'pedido' = sin stock pero no agotado en distribuidor | 'agotado' = sin stock y agotado en distribuidor
+    const getAvailabilityType = (item) => {
+        if ((item.stock_fisico || 0) > 0) return 'stock';
+        if (!item.agotado_distribuidor) return 'pedido';
+        return 'agotado';
+    };
+
+    const getPriceForLevel = (item, level) => {
+        const base = Number(item.precio_venta_bs || 0);
+        if (!base) return null;
+        switch (level) {
+            case 'n1': return base * (1 - (priceLevels[0] ?? 5) / 100);
+            case 'n2': return item.precio_n2_bs || base * (1 - (priceLevels[1] ?? 10) / 100);
+            case 'n3': return item.precio_n3_bs || base * (1 - (priceLevels[2] ?? 15) / 100);
+            case 'mayoreo': return item.precio_mayoreo_bs || null;
+            case 'retail':
+            default: return base;
+        }
+    };
+
+    const selectedItemsFull = useMemo(
+        () => catalogData.filter(i => selectedForQuote.has(i.product_id)),
+        [catalogData, selectedForQuote]
+    );
+
+    const eligibleItemsForSend = useMemo(() => {
+        return selectedItemsFull.filter(item => {
+            const type = getAvailabilityType(item);
+            if (type === 'stock') return waIncludeStock;
+            if (type === 'pedido') return waIncludePedido;
+            return false; // los agotados en tienda Y distribuidor nunca se envían
+        });
+    }, [selectedItemsFull, waIncludeStock, waIncludePedido]);
+
+    // Separa "TAILOR OF THE WITCH HAT 03" en base="TAILOR OF THE WITCH HAT" + tomo="03"
+    const parseTitleVolume = (titulo) => {
+        const m = (titulo || '').match(/^(.*?)[\s#]+(\d{1,3})$/);
+        if (m) return { base: m[1].trim(), vol: m[2] };
+        return { base: (titulo || '').trim(), vol: null };
+    };
+
+    const buildAvailabilityMessage = () => {
+        // Agrupa por (título base + disponibilidad + precio) para no repetir línea por cada tomo
+        const groups = new Map();
+        eligibleItemsForSend.forEach(item => {
+            const type = getAvailabilityType(item);
+            const precio = getPriceForLevel(item, waPriceLevel);
+            const precioKey = precio ? Number(precio).toFixed(2) : 'na';
+            const { base, vol } = parseTitleVolume(item.titulo);
+            const key = `${base}__${type}__${precioKey}`;
+            if (!groups.has(key)) groups.set(key, { base, type, precio, vols: [], singles: [] });
+            const g = groups.get(key);
+            if (vol) g.vols.push(vol); else g.singles.push(item.titulo);
+        });
+
+        let msg = `¡Hola! 👋 Te compartimos la disponibilidad y precio de los títulos consultados:\n\n`;
+        groups.forEach(g => {
+            const precioStr = (g.type === 'pedido' && waPedidoACotizar)
+                ? 'a cotizar'
+                : (g.precio ? `BS ${Number(g.precio).toFixed(2)}` : 'a consultar');
+            const dispoLabel = g.type === 'stock' ? 'disponible en stock' : 'disponible a pedido';
+            if (g.vols.length > 0) {
+                const volsSorted = [...g.vols].sort((a, b) => parseInt(a) - parseInt(b));
+                msg += `📖 *${g.base} ${volsSorted.join(',')}* — ${dispoLabel} | Precio: ${precioStr}\n\n`;
+            }
+            g.singles.forEach(t => {
+                msg += `📖 *${t}* — ${dispoLabel} | Precio: ${precioStr}\n\n`;
+            });
+        });
+        msg += `¿Te gustaría reservar alguno? 😊`;
+        return msg;
+    };
+
+    const sendAvailabilityWhatsApp = () => {
+        if (eligibleItemsForSend.length === 0) {
+            alert('No hay productos que coincidan con los filtros elegidos (stock / a pedido).');
+            return;
+        }
+        const phoneRaw = waSelectedCliente?.celular || waManualPhone;
+        const digits = (phoneRaw || '').replace(/\D/g, '');
+        if (!digits) {
+            alert('Ingresá o seleccioná un número de celular válido.');
+            return;
+        }
+        const withCountry = digits.startsWith('591') ? digits : `591${digits}`;
+        const msg = buildAvailabilityMessage();
+        window.open(`https://wa.me/${withCountry}?text=${encodeURIComponent(msg)}`, '_blank');
+        setIsSendAvailabilityOpen(false);
     };
 
     const handleImagePersist = async (item, urlOrFile) => {
@@ -1801,61 +1940,26 @@ const CatalogUpdatedView = () => {
 
             {/* Floating Quote Bar */}
             {selectedForQuote.size > 0 && (
-                <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: '#1a2d42', color: 'white', borderRadius: '999px', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', zIndex: 9999, border: '2px solid #f07d2a' }}>
-                    <ShoppingCart size={18} style={{ color: '#f07d2a' }} />
-                    <span style={{ fontWeight: 700, fontSize: '14px' }}>{selectedForQuote.size} producto(s) seleccionado(s)</span>
-                    
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {/* Stock Físico masivo */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <input
-                                type="number" min="0" placeholder="Stock"
-                                value={bulkStockValue}
-                                onChange={e => setBulkStockValue(e.target.value)}
-                                style={{ width: '64px', padding: '4px 8px', borderRadius: '8px', border: '1.5px solid #f07d2a', background: 'rgba(240,125,42,0.15)', color: 'white', fontWeight: 800, fontSize: '13px', textAlign: 'center', outline: 'none' }}
-                            />
-                            <button
-                                onClick={() => handleBulkUpdateStock('stock_fisico')}
-                                disabled={bulkStockValue === '' || bulkStockSaving}
-                                style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '5px 14px', fontWeight: 800, fontSize: '12px', border: 'none', cursor: bulkStockValue === '' ? 'not-allowed' : 'pointer', opacity: bulkStockValue === '' ? 0.5 : 1 }}
-                            >
-                                Stock
-                            </button>
-                        </div>
-                        {/* Stock Mínimo masivo */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <input
-                                type="number" min="0" placeholder="Mín"
-                                value={bulkMinValue}
-                                onChange={e => setBulkMinValue(e.target.value)}
-                                style={{ width: '54px', padding: '4px 8px', borderRadius: '8px', border: '1.5px solid #94a3b8', background: 'rgba(148,163,184,0.15)', color: 'white', fontWeight: 800, fontSize: '13px', textAlign: 'center', outline: 'none' }}
-                            />
-                            <button
-                                onClick={() => handleBulkUpdateStock('stock_minimo')}
-                                disabled={bulkMinValue === '' || bulkStockSaving}
-                                style={{ background: '#64748b', color: 'white', borderRadius: '999px', padding: '5px 14px', fontWeight: 800, fontSize: '12px', border: 'none', cursor: bulkMinValue === '' ? 'not-allowed' : 'pointer', opacity: bulkMinValue === '' ? 0.5 : 1 }}
-                            >
-                                Mín
-                            </button>
-                        </div>
-                        <button
-                            onClick={handleOpenBulkEdit}
-                            style={{ background: 'rgba(245, 168, 0, 0.2)', color: '#f5a800', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: '1.5px solid #f5a800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                        >
-                            <ImageIcon size={14} /> Subir Imágenes
-                        </button>
+                <div style={{ position: 'fixed', bottom: '16px', left: '50%', transform: 'translateX(-50%)', background: '#1a2d42', color: 'white', borderRadius: '999px', padding: '6px 10px 6px 14px', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', zIndex: 9999, border: '2px solid #f07d2a', whiteSpace: 'nowrap', maxWidth: '95vw', overflowX: 'auto' }}>
+                    <span style={{ fontWeight: 700, fontSize: '12px', flexShrink: 0 }}>{selectedForQuote.size} sel.</span>
 
-                        <button
-                            onClick={() => handleAddToQuote(catalogData.filter(i => selectedForQuote.has(i.product_id)))}
-                            style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '6px 18px', fontWeight: 800, fontSize: '13px', border: 'none', cursor: 'pointer' }}
-                        >
-                            Agregar a Cotización ➡
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => handleAddToQuote(catalogData.filter(i => selectedForQuote.has(i.product_id)))}
+                        style={{ background: '#f07d2a', color: 'white', borderRadius: '999px', padding: '5px 12px', fontWeight: 800, fontSize: '11px', border: 'none', cursor: 'pointer', flexShrink: 0 }}
+                    >
+                        + Cotización
+                    </button>
+
+                    <button
+                        onClick={openSendAvailability}
+                        style={{ background: '#25D366', color: 'white', borderRadius: '999px', padding: '5px 12px', fontWeight: 800, fontSize: '11px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+                    >
+                        <MessageCircle size={12} /> Enviar a Cliente
+                    </button>
 
                     <button
                         onClick={() => setSelectedForQuote(new Set())}
-                        style={{ opacity: 0.5, cursor: 'pointer', background: 'none', border: 'none', color: 'white', fontSize: '16px' }}
+                        style={{ opacity: 0.5, cursor: 'pointer', background: 'none', border: 'none', color: 'white', fontSize: '14px', flexShrink: 0 }}
                         title="Deseleccionar todo"
                     >✕</button>
                 </div>
@@ -1971,6 +2075,132 @@ const CatalogUpdatedView = () => {
                         >
                             <RefreshCw size={18} /> {previewItem.imagen_url ? 'Cambiar Imagen' : 'Agregar Imagen'}
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Enviar Disponibilidad a Cliente (selección múltiple) */}
+            {isSendAvailabilityOpen && (
+                <div
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+                    onClick={() => setIsSendAvailabilityOpen(false)}
+                >
+                    <div
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="bg-[#1b3a57] p-4 text-[#f5a800] flex justify-between items-center flex-shrink-0">
+                            <h3 className="font-black uppercase text-sm flex items-center gap-2">
+                                <MessageCircle size={18} /> Enviar Disponibilidad a Cliente
+                            </h3>
+                            <button onClick={() => setIsSendAvailabilityOpen(false)} className="text-white/50 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-4 overflow-y-auto">
+                            <p className="text-xs text-slate-500 font-semibold">{selectedItemsFull.length} producto(s) seleccionado(s)</p>
+
+                            {/* Filtros de qué incluir */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase text-slate-500 block">¿Qué productos incluir?</label>
+                                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
+                                    <input type="checkbox" checked={waIncludeStock} onChange={e => setWaIncludeStock(e.target.checked)} className="accent-[#16a34a]" />
+                                    ✅ Con stock en tienda
+                                </label>
+                                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
+                                    <input type="checkbox" checked={waIncludePedido} onChange={e => setWaIncludePedido(e.target.checked)} className="accent-[#f07d2a]" />
+                                    ⚠️ Disponibles a pedido (no agotados con el distribuidor)
+                                </label>
+                                <p className="text-[10px] text-slate-400">Los agotados en tienda y en distribuidor nunca se incluyen.</p>
+                            </div>
+
+                            {/* Selector de precio */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase text-slate-500 block">¿Qué precio mandar?</label>
+                                <select
+                                    value={waPriceLevel}
+                                    onChange={e => setWaPriceLevel(e.target.value)}
+                                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:ring-2 focus:ring-[#f5a800] outline-none font-semibold"
+                                >
+                                    <option value="retail">Precio Venta (PV)</option>
+                                    <option value="n1">N1 -{priceLevels[0] ?? 5}%</option>
+                                    <option value="n2">N2 -{priceLevels[1] ?? 10}%</option>
+                                    <option value="n3">N3 -{priceLevels[2] ?? 15}%</option>
+                                    <option value="mayoreo">Mayoreo</option>
+                                </select>
+                            </div>
+
+                            {waIncludePedido && (
+                                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 cursor-pointer">
+                                    <input type="checkbox" checked={waPedidoACotizar} onChange={e => setWaPedidoACotizar(e.target.checked)} className="accent-[#f5a800]" />
+                                    💵 Para los "a pedido", mostrar <strong>"Precio a cotizar"</strong> en vez del precio fijo (por variación del dólar)
+                                </label>
+                            )}
+
+                            {/* Vista previa */}
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vista previa ({eligibleItemsForSend.length} título(s))</label>
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 whitespace-pre-line max-h-40 overflow-y-auto">
+                                    {eligibleItemsForSend.length > 0 ? buildAvailabilityMessage() : 'Ningún producto coincide con los filtros elegidos.'}
+                                </div>
+                            </div>
+
+                            {/* Cliente */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase text-slate-500 block">Buscar cliente registrado</label>
+                                <div className="relative">
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                                    <input
+                                        type="text"
+                                        placeholder="Nombre o celular..."
+                                        value={waClienteQuery}
+                                        onChange={(e) => searchWaClientes(e.target.value)}
+                                        className="w-full text-xs border border-slate-200 rounded-lg pl-8 pr-3 py-2 bg-slate-50 focus:ring-2 focus:ring-[#f5a800] outline-none"
+                                    />
+                                </div>
+                                {waSearching && <p className="text-[10px] text-slate-400">Buscando...</p>}
+                                {waClienteResults.length > 0 && (
+                                    <div className="border border-slate-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                                        {waClienteResults.map(c => (
+                                            <div
+                                                key={c.id}
+                                                onClick={() => { setWaSelectedCliente(c); setWaClienteQuery(c.nombre); setWaClienteResults([]); }}
+                                                className={`px-3 py-2 text-xs cursor-pointer hover:bg-slate-100 flex justify-between ${waSelectedCliente?.id === c.id ? 'bg-[#fff7ed]' : ''}`}
+                                            >
+                                                <span className="font-bold text-slate-700">{c.nombre}</span>
+                                                <span className="text-slate-400 font-mono">{c.celular}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {waSelectedCliente && (
+                                    <p className="text-[11px] text-green-600 font-bold">✓ {waSelectedCliente.nombre} — {waSelectedCliente.celular}</p>
+                                )}
+                            </div>
+
+                            <div className="relative flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase">
+                                <div className="flex-1 h-px bg-slate-200" /> o número manual <div className="flex-1 h-px bg-slate-200" />
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Celular / WhatsApp (sin cliente registrado)</label>
+                                <input
+                                    type="tel"
+                                    placeholder="7XXXXXXX"
+                                    value={waManualPhone}
+                                    onChange={(e) => { setWaManualPhone(e.target.value); setWaSelectedCliente(null); }}
+                                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:ring-2 focus:ring-[#f5a800] outline-none"
+                                />
+                            </div>
+
+                            <button
+                                onClick={sendAvailabilityWhatsApp}
+                                className="w-full bg-[#25D366] hover:brightness-110 text-white font-black text-sm py-3 rounded-xl flex items-center justify-center gap-2 transition-all"
+                            >
+                                <MessageCircle size={16} /> Enviar por WhatsApp
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
