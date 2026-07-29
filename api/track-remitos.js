@@ -73,9 +73,30 @@ export default async function handler(req, res) {
         const segMap = {};
         (seg || []).forEach(s => { segMap[s.nro] = s; });
 
+        // Agrupar por nro de remito: cuando un mismo despacho cubre varios pedidos
+        // (ej. dos filas comparten el mismo nro), se sigue como UN solo envío y se
+        // manda un solo aviso combinando los nombres de los pedidos, no uno por fila.
+        const porNro = {};
+        remitos.filter(r => r.nro).forEach(r => {
+            const key = String(r.nro).trim();
+            if (!key) return;
+            if (!porNro[key]) porNro[key] = { nro: r.nro, fecha: r.fecha, id: r.id, pedidos: [], precio_remito: r.precio_remito };
+            const g = porNro[key];
+            if (r.pedido) g.pedidos.push(r.pedido);
+            if (String(r.fecha || '') > String(g.fecha || '')) g.fecha = r.fecha;
+            if ((Number(r.id) || 0) > (Number(g.id) || 0)) g.id = r.id;
+            if (!g.precio_remito && r.precio_remito) g.precio_remito = r.precio_remito;
+        });
+        const remitosAgrupados = Object.values(porNro).map(g => ({
+            nro: g.nro,
+            fecha: g.fecha,
+            id: g.id,
+            pedido: g.pedidos.join(' + ') || null,
+            precio_remito: g.precio_remito,
+        }));
+
         // Activos: los VENTANA remitos más recientes que aún NO estén entregados
-        const recientes = remitos
-            .filter(r => r.nro)
+        const recientes = remitosAgrupados
             .sort((a, b) => {
                 const fa = String(a.fecha || ''), fb = String(b.fecha || '');
                 if (fa !== fb) return fb.localeCompare(fa);      // fecha desc (más nuevo primero)

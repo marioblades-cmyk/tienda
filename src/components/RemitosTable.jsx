@@ -15,19 +15,37 @@ function num(v) {
 // Cruza el nombre de confirmación (texto entre paréntesis del campo "pedido")
 // con el mapa de confirmaciones para obtener envío y unidades.
 // Devuelve null si falta cualquier dato (no debe contar para el promedio).
-function calcCostoUnidad(r, confMap) {
+function calcCostoUnidad(r, confMap, rows) {
     if (!confMap) return null;
     const m = (r.pedido || '').match(/\(([^)]+)\)/); // texto entre paréntesis
     if (!m) return null;                              // sin nombre de confirmación
-    const conf = confMap[m[1].trim()];
-    if (!conf || !conf.unidades) return null;         // sin confirmación o sin unidades
     const costoBS = num(r.compre) * num(r.cambio);
     const fleteBS = num(r.cg) * FG + num(r.cm) * FM + num(r.cp) * FP;
     const totalBS = costoBS + fleteBS;
     if (totalBS <= 0) return null;                    // remito aún sin cargar
-    const envioBs = num(conf.envio) * num(r.tc_dist);
+
+    // Si varias filas comparten el mismo nro de remito (pedidos despachados juntos),
+    // se suman las unidades y el envío de TODAS las confirmaciones involucradas,
+    // no solo la de esta fila, para no inflar el costo/unidad de un despacho combinado.
+    const nro = (r.nro || '').trim();
+    const filasCompartidas = nro && rows ? rows.filter(x => (x.nro || '').trim() === nro) : [r];
+
+    let unidades = 0, envioArs = 0, huboConf = false;
+    filasCompartidas.forEach(x => {
+        const mm = (x.pedido || '').match(/\(([^)]+)\)/);
+        if (!mm) return;
+        const conf = confMap[mm[1].trim()];
+        if (conf && conf.unidades) {
+            unidades += conf.unidades;
+            envioArs += num(conf.envio);
+            huboConf = true;
+        }
+    });
+    if (!huboConf || unidades <= 0) return null;      // sin confirmación o sin unidades
+
+    const envioBs = envioArs * num(r.tc_dist);
     const costoLog = totalBS + envioBs;
-    return { costoUnidad: costoLog / conf.unidades, costoLog, totalBS, envioBs, unidades: conf.unidades };
+    return { costoUnidad: costoLog / unidades, costoLog, totalBS, envioBs, unidades };
 }
 // Formateadores de moneda (ARS y BS)
 function fBS(v) { return v ? 'BS ' + v.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'; }
@@ -915,7 +933,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
         count++;
 
         // Costo logístico por unidad (solo filas con datos completos)
-        const cu = calcCostoUnidad(r, confMap);
+        const cu = calcCostoUnidad(r, confMap, rows);
         if (cu) { sumCostoLog += cu.costoLog; sumUnidadesLog += cu.unidades; nPedidosLog++; }
 
         let compre = num(r.compre);
@@ -2117,7 +2135,7 @@ export default function RemitosTable({ activeTab = 'remitos', isSocio = false })
                                     {rows.map(r => {
                                         // Calculamos directamente ejecutando calcRow con la referencia exacta
                                         const calcs = calcRow(r.id, rows) || { costoBS: 0, fleteBS: 0, totalBS: 0 };
-                                        const cu = calcCostoUnidad(r, confMap); // costo logístico por unidad (o null)
+                                        const cu = calcCostoUnidad(r, confMap, rows); // costo logístico por unidad (o null)
 
                                         const inputStyle = {
                                             width: '100%',
