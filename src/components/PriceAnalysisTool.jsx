@@ -104,6 +104,11 @@ export default function PriceAnalysisTool() {
   const [saveAsProximo, setSaveAsProximo] = useState(false); // true = guarda en _prox, no pisa precios activos
   const [toast, setToast] = useState(null); // { msg, type: 'success'|'error' }
 
+  // Modo simulación: los cambios en pantalla NO se guardan en ningún lado.
+  // Solo sirve para generar un catálogo mayorista con valores hipotéticos (ej. otro TC).
+  const [simMode, setSimMode] = useState(false);
+  const [generatingWholesale, setGeneratingWholesale] = useState(false);
+
   // Mostrar toast y auto-ocultar a los 3 segundos
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
@@ -448,6 +453,44 @@ export default function PriceAnalysisTool() {
     }
   };
 
+  // ── Modo simulación ───────────────────────────────────────────────────────
+  const toggleSimMode = async () => {
+    if (simMode) {
+      // Salir: descartar cualquier cambio hecho en simulación y recargar valores reales
+      await fetchSyncData();
+      setSimMode(false);
+      showToast('Modo simulación desactivado — valores reales restaurados');
+    } else {
+      setSimMode(true);
+      showToast('Modo simulación activado — nada se guarda hasta que salgas', 'success');
+    }
+  };
+
+  const handleGenerateSimulatedWholesale = async () => {
+    if (!semanaInfo) return;
+    setGeneratingWholesale(true);
+    try {
+      const pricingConfig = {
+        global: { flete: params.flet, tcf: params.tcf, tca: params.tca },
+        editoriales: {}
+      };
+      Object.keys(editoriales).forEach(ed => {
+        pricingConfig.editoriales[ed] = {
+          descuento_proveedor: dtosPorEd[ed] ?? 35,
+          margen_venta: margPorEd[ed] ?? 0.40,
+          margen_mayoreo: margenMayoreoPorEd[ed] ?? 0.30
+        };
+      });
+      await catalogService.generateWholesaleWorkbook(semanaInfo, pricingConfig, PVC, { filenameSuffix: '_SIMULACION' });
+      showToast('✓ Catálogo mayorista (simulación) generado — no se guardó ningún dato');
+    } catch (err) {
+      console.error('Error al generar catálogo simulado:', err);
+      showToast('Error al generar catálogo: ' + err.message, 'error');
+    } finally {
+      setGeneratingWholesale(false);
+    }
+  };
+
   // ── Cálculos por fila ────────────────────────────────────────────────────
   const rows = useMemo(() => {
     if (!curEd || !editoriales[curEd]) return [];
@@ -665,10 +708,59 @@ export default function PriceAnalysisTool() {
               </div>
             ))}
           </div>
+
+          {/* Modo Simulación */}
+          <div className="mcb-sidebar-group" style={{ borderLeft: simMode ? '3px solid #8b5cf6' : undefined }}>
+            <div className="mcb-sidebar-group-title">🧪 Simulación</div>
+            <button
+              onClick={toggleSimMode}
+              style={{
+                width: '100%',
+                background: simMode ? '#8b5cf6' : 'white',
+                color: simMode ? 'white' : 'var(--mcb-muted)',
+                border: '1px solid ' + (simMode ? '#8b5cf6' : 'var(--mcb-border)'),
+                borderRadius: 8,
+                padding: '0.5rem 0.75rem',
+                fontWeight: 700,
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+              }}
+            >
+              {simMode ? '✓ Simulación activa — salir' : 'Activar modo simulación'}
+            </button>
+            <p style={{ fontSize: '0.62rem', color: 'var(--mcb-muted)', marginTop: '0.4rem' }}>
+              {simMode
+                ? 'Los valores de esta pantalla NO se guardan. Al salir se restauran los reales.'
+                : 'Probá valores (TC, márgenes, PV) sin tocar el catálogo real.'}
+            </p>
+          </div>
         </aside>
 
         {/* ════  TABLA PRINCIPAL  ════ */}
         <section>
+          {simMode && (
+            <div style={{
+              marginBottom: '1rem', padding: '0.65rem 1rem', borderRadius: 8,
+              background: 'hsla(262, 83%, 58%, 0.1)', border: '1px solid hsla(262, 83%, 58%, 0.35)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem'
+            }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#7c3aed' }}>
+                🧪 Modo simulación — nada de lo que cambies acá se guarda ni afecta el catálogo real.
+              </span>
+              <button
+                onClick={handleGenerateSimulatedWholesale}
+                disabled={generatingWholesale || !semanaInfo}
+                style={{
+                  background: '#7c3aed', color: 'white', border: 'none', borderRadius: 8,
+                  padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap'
+                }}
+              >
+                {generatingWholesale ? <RefreshCw size={14} className="spin" /> : '📦'}
+                {generatingWholesale ? 'Generando...' : 'Generar catálogo mayorista (simulación)'}
+              </button>
+            </div>
+          )}
           <div style={{ 
             display: 'flex', 
             justifyContent: 'space-between', 
@@ -687,20 +779,22 @@ export default function PriceAnalysisTool() {
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button 
-                className="btn-mcb-primary" 
-                style={{ 
-                  fontSize: '0.82rem', 
-                  padding: '0.6rem 1.4rem', 
+              <button
+                className="btn-mcb-primary"
+                style={{
+                  fontSize: '0.82rem',
+                  padding: '0.6rem 1.4rem',
                   borderRadius: '10px',
                   fontWeight: 700,
                   boxShadow: '0 10px 15px -3px rgba(240, 125, 42, 0.3)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.6rem'
+                  gap: '0.6rem',
+                  ...(simMode ? { opacity: 0.5, cursor: 'not-allowed' } : {})
                 }}
                 onClick={handleSaveAndApply}
-                disabled={saving}
+                disabled={saving || simMode}
+                title={simMode ? 'Salí del modo simulación para poder guardar' : undefined}
               >
                 {saving ? <RefreshCw size={14} className="spin" /> : (saveAsProximo ? '📅' : '🚀')}
                 {saving ? 'Aplicando...' : (saveAsProximo ? 'Guardar como Precio Próximo' : 'Guardar y Aplicar al Catálogo')}
