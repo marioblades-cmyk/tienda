@@ -66,9 +66,10 @@ export function processIvrea(sheetData) {
 
         const eanRaw = row[1] != null ? row[1] : null;
         let precio = null;
+        let precioExacto = null;
         if (row[2] != null) {
             const p = parseFloat(String(row[2]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[3] != null) {
@@ -82,6 +83,7 @@ export function processIvrea(sheetData) {
             eanRaw,
             eanRawStr: String(eanRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: currentSection,
             agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
@@ -189,6 +191,7 @@ export function processIvrea(sheetData) {
             ean_final: eanOficial || eanInterno,
             ean_razon: eanRazon,
             precio_tapa: item.precio,
+            precio_tapa_exacto: item.precioExacto ?? item.precio,
             cantidad: item.cantidad,
             agotado_distribuidor: item.agotado_distribuidor || false,
             _raw_ean: item.eanRawStr,
@@ -257,9 +260,10 @@ export function processOvnipress(rows) {
 
         const isbnRaw = row[2] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[3] != null) {
             const p = parseFloat(String(row[3]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[4] != null) {
@@ -273,6 +277,7 @@ export function processOvnipress(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: currentSection,
             agotado_distribuidor: row.__isRed === true
@@ -345,9 +350,10 @@ export function processPanini(rows) {
         const codigo = row[0] ? String(row[0]).trim() : null;
         const isbnRaw = row[2] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[3] != null) {
             const p = parseFloat(String(row[3]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[4] != null) {
@@ -362,6 +368,7 @@ export function processPanini(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: currentSection,
             agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
@@ -421,9 +428,10 @@ export function processPenguin(rows) {
         const autor = row[0] ? String(row[0]).trim() : null;
         const isbnRaw = row[2] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[3] != null) {
             const p = parseFloat(String(row[3]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[4] != null) {
@@ -438,6 +446,7 @@ export function processPenguin(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: currentSection,
             agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
@@ -499,9 +508,10 @@ export function processPlaneta(rows) {
 
         const isbnRaw = row[1] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[2] != null) {
             const p = parseFloat(String(row[2]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[3] != null) {
@@ -515,6 +525,7 @@ export function processPlaneta(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: currentSection,
             agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
@@ -569,9 +580,10 @@ export function processDeux(rows) {
 
         const isbnRaw = colD != null ? colD : null;
         let precio = null;
+        let precioExacto = null;
         if (row[4] != null) {
             const p = parseFloat(String(row[4]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[5] != null) {
@@ -586,6 +598,7 @@ export function processDeux(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: sello.toUpperCase(),
             sello,
@@ -623,9 +636,10 @@ export function processHotel(rows) {
         const autor = row[0] ? String(row[0]).trim() : null;
         const isbnRaw = row[2] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[3] != null) {
             const p = parseFloat(String(row[3]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[4] != null) {
@@ -645,6 +659,7 @@ export function processHotel(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: itemCat,
             agotado_distribuidor: (itemCat === 'REIMPRESIONES') ? false : (row.__isRed === true)
@@ -684,9 +699,10 @@ export function processVR(rows) {
         const autor = row[0] ? String(row[0]).trim() : null;
         const isbnRaw = row[2] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[3] != null) {
             const p = parseFloat(String(row[3]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[4] != null) {
@@ -701,6 +717,7 @@ export function processVR(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: 'V&R',
             agotado_distribuidor: row.__isRed === true
@@ -748,9 +765,10 @@ export function processOtras(rows) {
         const autor = row[0] ? String(row[0]).trim() : null;
         const isbnRaw = row[2] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[3] != null) {
             const p = parseFloat(String(row[3]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[4] != null) {
@@ -765,6 +783,7 @@ export function processOtras(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             categoria: currentSection,
             agotado_distribuidor: (currentSection === 'REIMPRESIONES') ? false : (row.__isRed === true)
@@ -802,9 +821,10 @@ export function processMerchandising(rows) {
 
         const isbnRaw = row[1] ?? null;
         let precio = null;
+        let precioExacto = null;
         if (row[2] != null) {
             const p = parseFloat(String(row[2]).replace(',', '.'));
-            if (!isNaN(p)) precio = Math.round(p);
+            if (!isNaN(p)) { precio = Math.round(p); precioExacto = p; }
         }
         let cantidad = null;
         if (row[3] != null) {
@@ -819,6 +839,7 @@ export function processMerchandising(rows) {
             isbnRaw,
             isbnRawStr: String(isbnRaw ?? ''),
             precio,
+            precioExacto,
             cantidad,
             descuento,
             categoria: 'MERCHANDISING',
@@ -909,6 +930,7 @@ export function buildResult(prefix, rawItems, eliminados) {
             ean_final: eanOficial || eanInterno,
             ean_razon: eanRazon,
             precio_tapa: item.precio,
+            precio_tapa_exacto: item.precioExacto ?? item.precio,
             cantidad: item.cantidad,
             agotado_distribuidor: item.agotado_distribuidor || false,
             _raw_ean: item.isbnRawStr,

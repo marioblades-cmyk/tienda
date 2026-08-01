@@ -47,6 +47,9 @@ export default function MayoristaUpload() {
     const [catalog, setCatalog] = useState({});
     const [existingOrder, setExistingOrder] = useState(null);
     const [stockSearch, setStockSearch] = useState('');
+    // Si el pedido viene de un catálogo mayorista generado con TC/valores simulados,
+    // usar el precio que trae ese mismo Excel en vez del precio_mayoreo_bs vivo del catálogo.
+    const [usarPreciosArchivo, setUsarPreciosArchivo] = useState(false);
 
     // --- 3. ESTADOS TAB 2: ESTADO DE CUENTA ---
     const [pagos, setPagos] = useState([]);
@@ -74,7 +77,7 @@ export default function MayoristaUpload() {
         if (acceptedFiles?.length > 0) {
             processExcel(acceptedFiles[0]);
         }
-    }, [selectedVendedor, selectedSemana, catalog]);
+    }, [selectedVendedor, selectedSemana, catalog, usarPreciosArchivo]);
 
     // useDropzone es un Hook, DEBE estar aquí al nivel superior
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -311,8 +314,12 @@ export default function MayoristaUpload() {
                                 cantidad: it.cantidad,
                                 precio: exactPrecio,
                                 precio_tapa: prod?.precio_tapa || exactPrecio,
-                                // Precio Bs CONGELADO al momento del pedido (no se mueve si cambia el catálogo)
-                                precio_bs: prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0,
+                                // Precio Bs CONGELADO al momento del pedido (no se mueve si cambia el catálogo).
+                                // Si el pedido viene de un catálogo mayorista simulado, usar el precio que
+                                // ya trae ese Excel (columna de precio, con centavos) en vez del vivo del catálogo.
+                                precio_bs: usarPreciosArchivo
+                                    ? (it.precio_tapa_exacto ?? it.precio_tapa ?? 0)
+                                    : (prod?.precio_mayoreo_bs || prod?.precio_venta_bs || 0),
                                 subtotal: exactPrecio * it.cantidad,
                                 editorial: sheetName,
                                 stock_fisico: prod?.stock_fisico || 0,
@@ -1255,6 +1262,18 @@ export default function MayoristaUpload() {
                                     <div className="text-center py-12 text-slate-400 text-xs font-bold uppercase tracking-widest">Buscá y agregá productos del stock arriba para armar el pedido.</div>
                                 ) : (
                                 <div className="space-y-4">
+                                    <label className="flex items-start gap-3 bg-violet-50 border-2 border-violet-100 rounded-2xl p-4 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={usarPreciosArchivo}
+                                            onChange={e => setUsarPreciosArchivo(e.target.checked)}
+                                            className="mt-0.5 w-4 h-4 accent-violet-600"
+                                        />
+                                        <span className="text-xs font-bold text-violet-900">
+                                            Este pedido viene de un catálogo mayorista con TC/valores simulados
+                                            <span className="block font-medium text-violet-700 mt-0.5">Usa el precio que ya trae este Excel en vez del precio mayorista actual del catálogo.</span>
+                                        </span>
+                                    </label>
                                     <div {...getRootProps()} className={`border-4 border-dashed rounded-[3.5rem] p-24 text-center transition-all cursor-pointer group bg-white/40 ${isDragActive ? 'border-navy bg-slate-50' : 'border-slate-100'}`}>
                                         <input {...getInputProps()} />
                                         <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-8 group-hover:scale-110 group-hover:bg-navy group-hover:text-white transition-all shadow-lg">
