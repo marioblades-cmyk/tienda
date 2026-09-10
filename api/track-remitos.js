@@ -12,6 +12,16 @@ const CRON_SECRET = 'mcb-remitos-2026';   // debe coincidir con el ?key= que pon
 const VENTANA = 12;                       // mira solo los N remitos más recientes (para no revisar el historial viejo).
                                           // De esos, sigue los que NO estén "Entregado"; al entregarse, deja de seguirlos.
 
+// Normaliza el número de guía para usarlo como clave estable: los remitos FLC a veces se
+// cargan con o sin guiones (mismo envío, formato distinto) y sin esto el tracker los trata
+// como remitos "nuevos" cada vez que cambia el formato, y vuelve a avisar por Telegram.
+// Los códigos viejos (3737-xxxx, 9940-xxxx) sí usan el guión como parte del número, así
+// que esos se dejan intactos.
+function normalizarNro(nro) {
+    const s = String(nro || '').trim();
+    return /^FLC/i.test(s) ? s.replace(/[-\s]/g, '').toUpperCase() : s;
+}
+
 async function telegram(text) {
     try {
         await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
@@ -71,16 +81,16 @@ export default async function handler(req, res) {
         // 2) Seguimiento previo
         const { data: seg } = await supabase.from('remito_seguimiento').select('*');
         const segMap = {};
-        (seg || []).forEach(s => { segMap[s.nro] = s; });
+        (seg || []).forEach(s => { segMap[normalizarNro(s.nro)] = s; });
 
         // Agrupar por nro de remito: cuando un mismo despacho cubre varios pedidos
         // (ej. dos filas comparten el mismo nro), se sigue como UN solo envío y se
         // manda un solo aviso combinando los nombres de los pedidos, no uno por fila.
         const porNro = {};
         remitos.filter(r => r.nro).forEach(r => {
-            const key = String(r.nro).trim();
+            const key = normalizarNro(r.nro);
             if (!key) return;
-            if (!porNro[key]) porNro[key] = { nro: r.nro, fecha: r.fecha, id: r.id, pedidos: [], precio_remito: r.precio_remito };
+            if (!porNro[key]) porNro[key] = { nro: key, fecha: r.fecha, id: r.id, pedidos: [], precio_remito: r.precio_remito };
             const g = porNro[key];
             if (r.pedido) g.pedidos.push(r.pedido);
             if (String(r.fecha || '') > String(g.fecha || '')) g.fecha = r.fecha;
