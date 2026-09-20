@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { catalogService } from '../services/catalogService';
 import { ffecha, fhora, ffechaLarga } from '../utils/dateUtils';
@@ -58,6 +58,8 @@ export default function FlujoCajaView({ user, profile }) {
     
     // UI state
     const [showOpenModal, setShowOpenModal] = useState(false);
+    const [abriendoCaja, setAbriendoCaja] = useState(false);
+    const isOpeningRef = useRef(false); // guarda sincrónica: bloquea un 2º clic antes de que React re-renderice
     const [showCloseModal, setShowCloseModal] = useState(false);
     const [showCalcModal, setShowCalcModal] = useState(false);
     const BILLETES = [200, 100, 50, 20, 10];
@@ -452,21 +454,58 @@ export default function FlujoCajaView({ user, profile }) {
     };
 
     const handleOpenCaja = async () => {
-        const responsable = profile?.nombre || user?.email || 'Desconocido';
-        if (!openForm.monto_inicial) return alert('Ingresa el monto inicial');
-        
-        const { data, error } = await supabase.from('turnos_caja').insert([{
-            responsable: responsable,
-            vendedor_id: user?.id,
-            turno: openForm.turno,
-            monto_inicial: parseFloat(openForm.monto_inicial) || 0,
-            estado: 'ABIERTO'
-        }]).select().single();
-        
-        if (error) return alert('Error al abrir caja: ' + error.message);
-        setTurnoActivo(data);
-        setMovimientos([]);
-        setShowOpenModal(false);
+        // Capa 1: bandera sincrónica (ref, no state) — corta un 2do clic/doble-submit
+        // antes de que llegue a tocar la red, aunque React todavía no haya re-renderizado.
+        if (isOpeningRef.current) return;
+        isOpeningRef.current = true;
+        setAbriendoCaja(true);
+
+        try {
+            const responsable = profile?.nombre || user?.email || 'Desconocido';
+            if (!openForm.monto_inicial) { alert('Ingresa el monto inicial'); return; }
+
+            // Capa 2: revalidar contra la base justo antes de insertar — cubre el caso
+            // de dos dispositivos/usuarios distintos abriendo casi al mismo tiempo.
+            const { data: existentes, error: checkError } = await supabase
+                .from('turnos_caja')
+                .select('*')
+                .eq('estado', 'ABIERTO')
+                .order('abierto_at', { ascending: false })
+                .limit(1);
+            if (checkError) return alert('Error al verificar turno: ' + checkError.message);
+            if (existentes && existentes.length > 0) {
+                setTurnoActivo(existentes[0]);
+                await fetchMovimientos(existentes[0].id);
+                setShowOpenModal(false);
+                return alert(`⚠️ Ya hay un turno abierto por ${existentes[0].responsable}. No se creó uno nuevo.`);
+            }
+
+            const { data, error } = await supabase.from('turnos_caja').insert([{
+                responsable: responsable,
+                vendedor_id: user?.id,
+                turno: openForm.turno,
+                monto_inicial: parseFloat(openForm.monto_inicial) || 0,
+                estado: 'ABIERTO'
+            }]).select().single();
+
+            if (error) {
+                // Capa 3: si el índice único de la base rechazó el insert (dos peticiones
+                // llegaron en el mismísimo instante), no lo tratamos como error fatal:
+                // recargamos y mostramos el turno que sí quedó abierto.
+                if (error.code === '23505') {
+                    await fetchTurnoStatus();
+                    setShowOpenModal(false);
+                    return alert('⚠️ Justo se abrió un turno desde otro dispositivo. Mostrando el turno activo.');
+                }
+                return alert('Error al abrir caja: ' + error.message);
+            }
+            setTurnoActivo(data);
+            setMovimientos([]);
+            setShowOpenModal(false);
+        } finally {
+            isOpeningRef.current = false;
+            setAbriendoCaja(false);
+        }
     };
 
     const handleAddMovement = async () => {
@@ -1860,11 +1899,12 @@ export default function FlujoCajaView({ user, profile }) {
                                     </div>
                                 )}
 
-                                <button 
+                                <button
                                     onClick={handleOpenCaja}
-                                    className="w-full bg-text text-white py-5 rounded-3xl text-sm font-black uppercase tracking-[0.3em] hover:bg-black transition-all shadow-2xl active:scale-95"
+                                    disabled={abriendoCaja}
+                                    className="w-full bg-text text-white py-5 rounded-3xl text-sm font-black uppercase tracking-[0.3em] hover:bg-black transition-all shadow-2xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                                 >
-                                    Abrir Turno Ahora
+                                    {abriendoCaja ? 'Abriendo...' : 'Abrir Turno Ahora'}
                                 </button>
                             </div>
                         </motion.div>
