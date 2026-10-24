@@ -186,7 +186,9 @@ export const catalogService = {
                     if (!c || typeof c !== 'string') return false;
                     const val = c.toUpperCase();
                     if (isDebug) console.log('   🎨 Color check:', val);
-                    return val.includes('FF0000') || val.includes('C00000') || val.endsWith('FF0000');
+                    // ARGB: solo los últimos 6 caracteres son el color (FF000000 = negro, no rojo)
+                    const rgb = val.slice(-6);
+                    return rgb === 'FF0000' || rgb === 'C00000';
                 };
                 
                 let foundRed = false;
