@@ -311,7 +311,8 @@ export default function SellerDashboard({ isAdmin }) {
                                 
                                 // Hardcoded fallbacks para rojos comunes
                                 const commonReds = ['FF0000', 'C00000', 'FF3333', 'FE0000', 'E00000'];
-                                if (commonReds.some(red => argb.includes(red))) return true;
+                                // Solo los últimos 6 caracteres son el color (FF000000 = negro, no rojo)
+                                if (commonReds.includes(argb.slice(-6))) return true;
                             }
                             
                             // 2. Check Theme (IDs 3 y 5 suelen ser acentos rojos en temas estándar)
