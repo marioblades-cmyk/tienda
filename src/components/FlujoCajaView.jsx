@@ -531,12 +531,13 @@ export default function FlujoCajaView({ user, profile }) {
         const monto = parseFloat(retiroForm.monto);
         if (!monto || monto <= 0 || !turnoActivo) return;
         setRetiroSaving(true);
+        const esPersonal = retiroForm.destino === 'Efectivo personal';
         try {
             // 1. Registrar EGRESO de efectivo (sale del cajón)
             const { data: egresoData, error: egresoError } = await supabase.from('caja_movimientos').insert([{
                 turno_id: turnoActivo.id,
                 tipo: 'EGRESO',
-                categoria: 'Retiro a Digital',
+                categoria: esPersonal ? 'Retiro Personal' : 'Retiro a Digital',
                 concepto: `Traspaso a ${retiroForm.destino}`,
                 monto,
                 vendedor_id: user?.id,
@@ -544,6 +545,16 @@ export default function FlujoCajaView({ user, profile }) {
                 origen: 'Transferencia',
             }]).select().single();
             if (egresoError) throw egresoError;
+
+            if (esPersonal) {
+                // El efectivo sale del cajón pero no entra a ninguna cuenta digital:
+                // solo se registra el egreso (excluido de los totales operativos por origen 'Transferencia').
+                setMovimientos(prev => [egresoData, ...prev]);
+                setShowRetiroModal(false);
+                setRetiroForm({ monto: '', destino: 'Yasta (QR)' });
+                showToast(`Retiro de Bs ${monto.toLocaleString()} → Efectivo personal registrado`, 'success');
+                return;
+            }
 
             // 2. Registrar INGRESO en la cuenta destino (entra al digital)
             const { data: ingresoData, error: ingresoError } = await supabase.from('caja_movimientos').insert([{
@@ -2001,7 +2012,7 @@ export default function FlujoCajaView({ user, profile }) {
                     const totals = calculateTotals();
                     const monto = parseFloat(retiroForm.monto) || 0;
                     const excede = monto > totals.efectivoEnCaja;
-                    const DESTINOS = ['Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Otro'];
+                    const DESTINOS = ['Yasta (QR)', 'Banco Unión (QR/Transf)', 'BNB', 'Efectivo personal', 'Otro'];
                     return (
                         <motion.div
                             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -2017,7 +2028,7 @@ export default function FlujoCajaView({ user, profile }) {
                                     <span className="text-2xl">💸</span>
                                     <div>
                                         <h3 className="font-black text-navy text-sm uppercase tracking-widest">Retirar Efectivo</h3>
-                                        <p className="text-xs text-muted">Traspaso del cajón a cuenta digital</p>
+                                        <p className="text-xs text-muted">Traspaso del cajón a cuenta digital o efectivo personal</p>
                                     </div>
                                 </div>
 
